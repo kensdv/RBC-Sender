@@ -12,7 +12,7 @@ const emptyAccount = { label: '', host: '', port: 587, secure: false, username: 
 const emptySettings = {
   sendMode: 'smtp',
   directFromName: '', directFromEmail: '', directReplyTo: '', directRatePerMinute: 10,
-  relayHost: '', relayPort: 25, relayHelo: '', socks5Proxy: '',
+  relayHost: '', relayPort: 25, socks5Proxy: '',
   encoding: 'base64', priority: 3, sendType: 'to', sleepMs: 0,
   encryptLetter: false, encryptMode: 'unicode', fromNameEncrypt: false, subjectEncrypt: false,
   customHeadersEnabled: false, customHeaders: [], timezone: 'UTC',
@@ -1859,7 +1859,6 @@ sudo tail -f /var/log/maillog`}</pre>
                       <div className="form-grid">
                         <div><label className="field-label">RELAY HOST</label><input className="w-input" value={settings.relayHost} onChange={(e) => updateSettings('relayHost', e.target.value)} placeholder="proxy.host.com" /></div>
                         <div><label className="field-label">PORT</label><input className="w-input" type="number" value={settings.relayPort} onChange={(e) => updateSettings('relayPort', Number(e.target.value))} /></div>
-                        <div><label className="field-label">HELO HOST</label><input className="w-input" value={settings.relayHelo} onChange={(e) => updateSettings('relayHelo', e.target.value)} placeholder="optional" /></div>
                         <div><label className="field-label">RATE / MIN</label><input className="w-input" type="number" min="1" max="200" value={settings.directRatePerMinute} onChange={(e) => updateSettings('directRatePerMinute', Number(e.target.value))} /></div>
                         <div><label className="field-label">FROM NAME</label><input className="w-input" value={settings.directFromName} onChange={(e) => updateSettings('directFromName', e.target.value)} /></div>
                         <div><label className="field-label">FROM EMAIL</label><input className="w-input" type="email" value={settings.directFromEmail} onChange={(e) => updateSettings('directFromEmail', e.target.value)} /></div>

@@ -49,7 +49,6 @@ function loadSendSettings(db, config = null) {
     directRatePerMinute: row.direct_rate_per_minute || 10,
     relayHost: row.relay_host || '',
     relayPort: row.relay_port || 25,
-    relayHelo: row.relay_helo || '',
     socks5Proxy: row.socks5_proxy || '',
     encoding: row.encoding || 'base64',
     priority: row.priority || 3,
@@ -174,11 +173,11 @@ function buildIdentityHeaders(settings, fromEmail, recipientEmail) {
   }
   if (settings.returnPath) headers['Return-Path'] = `<${settings.returnPath}>`;
   if (settings.fakeReceived) {
-    const helo = settings.relayHelo || fromDomain;
+    const src = fromDomain;
     const rid = Math.random().toString(36).slice(2, 10);
     headers['Received'] = [
-      `from ${helo} (${helo} [10.0.0.${Math.floor(Math.random() * 250) + 1}]) by ${msgidDomain} with ESMTP id ${rid} for <${recipientEmail}>; ${new Date().toUTCString()}`,
-      `from ${helo} [10.0.1.${Math.floor(Math.random() * 250) + 1}] (envelope-from <${fromEmail}>) by ${msgidDomain} with ESMTPA id ${rid}; ${new Date().toUTCString()}`,
+      `from ${src} (${src} [10.0.0.${Math.floor(Math.random() * 250) + 1}]) by ${msgidDomain} with ESMTP id ${rid} for <${recipientEmail}>; ${new Date().toUTCString()}`,
+      `from ${src} [10.0.1.${Math.floor(Math.random() * 250) + 1}] (envelope-from <${fromEmail}>) by ${msgidDomain} with ESMTPA id ${rid}; ${new Date().toUTCString()}`,
     ];
   }
   return headers;
@@ -249,9 +248,6 @@ function directTransportFor(settings, mxHost = null, dkim = null) {
   if (settings.socks5Proxy) {
     opts.proxy = settings.socks5Proxy; // e.g. socks5://user:pass@host:port
   }
-  if (settings.relayHelo) {
-    opts.name = settings.relayHelo;
-  }
   if (dkim) opts.dkim = dkim;
   return nodemailer.createTransport(opts);
 }
@@ -267,7 +263,6 @@ function relayTransportFor(settings, dkim = null) {
     connectionTimeout: 15000,
     greetingTimeout: 15000,
     socketTimeout: 30000,
-    ...(settings.relayHelo ? { name: settings.relayHelo } : {}),
     ...(dkim ? { dkim } : {}),
   });
 }
@@ -304,7 +299,6 @@ export function publicSendSettings(db) {
     directRatePerMinute: row.direct_rate_per_minute || 10,
     relayHost: row.relay_host || '',
     relayPort: row.relay_port || 25,
-    relayHelo: row.relay_helo || '',
     socks5Proxy: row.socks5_proxy || '',
     encoding: row.encoding || 'base64',
     priority: row.priority || 3,

@@ -388,7 +388,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
 
     db.prepare(`
       INSERT INTO send_settings (id, send_mode, direct_from_name, direct_from_email, direct_reply_to, direct_rate_per_minute,
-        relay_host, relay_port, relay_helo, socks5_proxy, encoding, priority, send_type, sleep_ms,
+        relay_host, relay_port, socks5_proxy, encoding, priority, send_type, sleep_ms,
         encrypt_letter, encrypt_mode, fromname_encrypt, subject_encrypt, custom_headers_enabled, custom_headers_json,
         timezone, test_email_enabled, test_every, test_destination, from_names_json, subjects_json, redirect_url,
         spoof_from_name, spoof_from_email, spoof_reply_to, return_path, msgid_domain, x_mailer,
@@ -400,11 +400,11 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
         send_days_json, send_from_min, send_to_min, max_per_hour, max_per_day,
         warmup_enabled, warmup_started_at, link_cloak, cloak_base,
         updated_at)
-      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         send_mode=excluded.send_mode, direct_from_name=excluded.direct_from_name, direct_from_email=excluded.direct_from_email,
         direct_reply_to=excluded.direct_reply_to, direct_rate_per_minute=excluded.direct_rate_per_minute,
-        relay_host=excluded.relay_host, relay_port=excluded.relay_port, relay_helo=excluded.relay_helo,
+        relay_host=excluded.relay_host, relay_port=excluded.relay_port,
         socks5_proxy=excluded.socks5_proxy, encoding=excluded.encoding, priority=excluded.priority,
         send_type=excluded.send_type, sleep_ms=excluded.sleep_ms, encrypt_letter=excluded.encrypt_letter,
         encrypt_mode=excluded.encrypt_mode, fromname_encrypt=excluded.fromname_encrypt, subject_encrypt=excluded.subject_encrypt,
@@ -440,7 +440,6 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       directRate,
       text(body.relayHost || '', 'relayHost', 253),
       relayPort,
-      text(body.relayHelo || '', 'relayHelo', 253),
       text(body.socks5Proxy || '', 'socks5Proxy', 500),
       encoding,
       priority,
