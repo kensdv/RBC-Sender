@@ -227,7 +227,7 @@ function transportFor(smtp, dkim = null, proxy = '') {
     host: smtp.host,
     port: smtp.port,
     secure: smtp.secure,
-    auth: { user: smtp.username, pass: smtp.password },
+    ...(smtp.password ? { auth: { user: smtp.username, pass: smtp.password } } : {}),
     connectionTimeout: 10000,
     greetingTimeout: 10000,
     socketTimeout: 30000,
@@ -712,12 +712,16 @@ export function createMailer({ db, config }) {
     return `${config.publicBaseUrl}/api/track/click?u=${enc}&e=${encodeURIComponent(normalized)}&t=${encodeURIComponent(token)}&c=${campaignId}`;
   }
 
+  function unescapeUrl(url) {
+    return String(url).replace(/&amp;/g, '&').replace(/&#0?39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+  }
+
   function wrapLinks(html, campaignId, email, settings) {
     if (!settings.trackClicks) return html;
     const base = (settings.clickTrackerUrl || `${config.publicBaseUrl}/api/track/click`).replace(/\/+$/, '');
     return html.replace(/href="(https?:\/\/[^"]+)"/gi, (m, url) => {
       if (url.includes(config.publicBaseUrl)) return m;
-      const tracked = `${base}?u=${Buffer.from(url).toString('base64url')}&e=${encodeURIComponent(email.toLowerCase())}&t=${unsubscribeToken(email.toLowerCase(), config.unsubscribeSecret)}&c=${campaignId}`;
+      const tracked = `${base}?u=${Buffer.from(unescapeUrl(url)).toString('base64url')}&e=${encodeURIComponent(email.toLowerCase())}&t=${unsubscribeToken(email.toLowerCase(), config.unsubscribeSecret)}&c=${campaignId}`;
       return `href="${escapeHtml(tracked)}"`;
     });
   }
@@ -727,10 +731,11 @@ export function createMailer({ db, config }) {
     const cloakBase = (base || '').trim() || 'https://www.google.com/url?q=';
     const sep = cloakBase.includes('?') ? '&' : '?';
     return html.replace(/href="(https?:\/\/[^"]+)"/gi, (m, url) => {
+      const target = unescapeUrl(url);
       if (cloakBase === 'https://www.google.com/url?q=') {
-        return `href="https://www.google.com/url?q=${encodeURIComponent(url)}"`;
+        return `href="https://www.google.com/url?q=${encodeURIComponent(target)}"`;
       }
-      return `href="${cloakBase}${sep}u=${encodeURIComponent(url)}"`;
+      return `href="${cloakBase}${sep}u=${encodeURIComponent(target)}"`;
     });
   }
 

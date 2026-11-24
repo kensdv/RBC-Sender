@@ -58,6 +58,7 @@ const BLOCK_SNIPPETS = [
 
 const SMTP_PRESETS = {
   gmail:      { label: 'Gmail',                host: 'smtp.gmail.com',                 port: 587, secure: false },
+  gmailrelay: { label: 'Google SMTP Relay',    host: 'smtp-relay.gmail.com',          port: 587, secure: false },
   outlook:    { label: 'Outlook / Hotmail',     host: 'smtp-mail.outlook.com',          port: 587, secure: false },
   yahoo:      { label: 'Yahoo',                host: 'smtp.mail.yahoo.com',            port: 465, secure: true },
   icloud:     { label: 'iCloud',               host: 'smtp.mail.me.com',               port: 587, secure: false },
@@ -1735,7 +1736,7 @@ sudo tail -f /var/log/maillog`}</pre>
                       <div><label className="field-label">HOST</label><input className="w-input" value={acctForm.host} onChange={(e) => setAcctForm({ ...acctForm, host: e.target.value })} /></div>
                       <div><label className="field-label">PORT</label><input className="w-input" type="number" value={acctForm.port} onChange={(e) => setAcctForm({ ...acctForm, port: Number(e.target.value) })} /></div>
                       <div><label className="field-label">USERNAME</label><input className="w-input" value={acctForm.username} onChange={(e) => setAcctForm({ ...acctForm, username: e.target.value })} /></div>
-                      <div><label className="field-label">PASSWORD {editingAcct ? <span className="dim">(blank = keep)</span> : null}</label><input className="w-input" type="password" value={acctForm.password} onChange={(e) => setAcctForm({ ...acctForm, password: e.target.value })} /></div>
+                      <div><label className="field-label">PASSWORD {editingAcct ? <span className="dim">(blank = keep)</span> : <span className="dim">(blank = no auth — IP allowlist relays)</span>}</label><input className="w-input" type="password" value={acctForm.password} onChange={(e) => setAcctForm({ ...acctForm, password: e.target.value })} /></div>
                       <div><label className="field-label">FROM EMAIL</label><input className="w-input" type="email" value={acctForm.fromEmail} onChange={(e) => setAcctForm({ ...acctForm, fromEmail: e.target.value })} /></div>
                       <div><label className="field-label">FROM NAME</label><input className="w-input" value={acctForm.fromName} onChange={(e) => setAcctForm({ ...acctForm, fromName: e.target.value })} /></div>
                       <div><label className="field-label">REPLY-TO</label><input className="w-input" type="email" value={acctForm.replyTo} onChange={(e) => setAcctForm({ ...acctForm, replyTo: e.target.value })} /></div>

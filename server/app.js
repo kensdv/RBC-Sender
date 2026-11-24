@@ -167,13 +167,12 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const body = request.body || {};
     const current = db.prepare('SELECT password_encrypted FROM smtp_settings WHERE id = 1').get();
     const password = String(body.password || '');
-    if (!password && !current) fail('SMTP password is required');
     const settings = {
       host: text(body.host, 'host', 253, true),
       port: Number(body.port),
       secure: body.secure === true ? 1 : 0,
-      username: text(body.username, 'username', 320, true),
-      passwordEncrypted: password ? encryptSecret(password, config.credentialKey) : current.password_encrypted,
+      username: text(body.username || '', 'username', 320),
+      passwordEncrypted: password ? encryptSecret(password, config.credentialKey) : (current?.password_encrypted || ''),
       fromName: text(body.fromName, 'fromName', 200, true),
       fromEmail: email(body.fromEmail, 'fromEmail'),
       replyTo: body.replyTo ? email(body.replyTo, 'replyTo') : '',
@@ -309,14 +308,14 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
 
   function accountBody(body, current = null) {
     const password = String(body.password || '');
-    if (!password && !current) fail('Password is required for a new account');
+    // blank password = unauthenticated relay (e.g. Google SMTP relay IP allowlist)
     return {
       label: text(body.label || '', 'label', 120),
       host: text(body.host, 'host', 253, true),
       port: Number(body.port),
       secure: body.secure === true ? 1 : 0,
-      username: text(body.username, 'username', 320, true),
-      passwordEncrypted: password ? encryptSecret(password, config.credentialKey) : current.password_encrypted,
+      username: text(body.username || '', 'username', 320),
+      passwordEncrypted: password ? encryptSecret(password, config.credentialKey) : (current?.password_encrypted || ''),
       fromName: text(body.fromName || '', 'fromName', 200),
       fromEmail: email(body.fromEmail, 'fromEmail'),
       replyTo: body.replyTo ? email(body.replyTo, 'replyTo') : '',
@@ -700,9 +699,11 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       scheduledFor = new Date(timestamp).toISOString();
     }
     transaction(db, () => {
+      const flipped = db.prepare("UPDATE campaigns SET status = 'queued', scheduled_for = ?, updated_at = ? WHERE id = ? AND status = 'draft'").run(scheduledFor, new Date().toISOString(), id);
+      if (!flipped.changes) fail('Campaign is no longer a draft', 409);
       const statement = db.prepare('INSERT INTO deliveries (campaign_id, recipient_id) VALUES (?, ?)');
       for (const recipient of recipients) statement.run(id, recipient.id);
-      db.prepare('UPDATE campaigns SET status = ?, scheduled_for = ?, updated_at = ? WHERE id = ?').run(scheduledFor ? 'scheduled' : 'queued', scheduledFor, new Date().toISOString(), id);
+      if (scheduledFor) db.prepare("UPDATE campaigns SET status = 'scheduled' WHERE id = ?").run(id);
     });
     worker.kick();
     emit('campaign_queued', { campaignId: id, name: campaign.name, subject: campaign.subject, total: recipients.length, scheduledFor });

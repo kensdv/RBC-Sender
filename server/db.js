@@ -214,6 +214,38 @@ export function openDatabase(path) {
   const acctCols = new Set(db.prepare('PRAGMA table_info(smtp_accounts)').all().map((c) => c.name));
   if (!acctCols.has('last_check')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN last_check TEXT");
   if (!acctCols.has('last_error')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN last_error TEXT NOT NULL DEFAULT ''");
+  // campaigns.status CHECK predates the 'failed' state — rebuild the table once
+  const campaignSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'campaigns'").get()?.sql || '';
+  if (!campaignSql.includes("'failed'")) {
+    db.exec('PRAGMA foreign_keys = OFF');
+    try {
+      db.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE campaigns_migrated (
+          id INTEGER PRIMARY KEY,
+          name TEXT NOT NULL,
+          subject TEXT NOT NULL,
+          preheader TEXT NOT NULL DEFAULT '',
+          html TEXT NOT NULL DEFAULT '',
+          text TEXT NOT NULL DEFAULT '',
+          attachments_json TEXT NOT NULL DEFAULT '[]',
+          status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'queued', 'scheduled', 'sending', 'completed', 'cancelled', 'failed')),
+          scheduled_for TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        INSERT INTO campaigns_migrated SELECT id, name, subject, preheader, html, text, COALESCE(attachments_json, '[]'), status, scheduled_for, created_at, updated_at FROM campaigns;
+        DROP TABLE campaigns;
+        ALTER TABLE campaigns_migrated RENAME TO campaigns;
+        COMMIT;
+      `);
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw error;
+    } finally {
+      db.exec('PRAGMA foreign_keys = ON');
+    }
+  }
   return db;
 }
 
