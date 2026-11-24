@@ -720,6 +720,7 @@ export default function App() {
   const [token, setToken] = useState(() => sessionStorage.getItem('mailerToken') || '');
   const [loginToken, setLoginToken] = useState('');
   const [state, setState] = useState(null);
+  const [netInfo, setNetInfo] = useState(null);
   const [tab, setTab] = useState('dashboard');
   const [draft, setDraft] = useState(emptyDraft);
   const [selectedId, setSelectedId] = useState(null);
@@ -768,6 +769,15 @@ export default function App() {
       if (err.status === 401) { sessionStorage.removeItem('mailerToken'); setToken(''); }
       showNotice(err.message, 'err');
     });
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    let alive = true;
+    const load = () => api(token, '/api/netinfo').then((n) => { if (alive) setNetInfo(n); }).catch(() => {});
+    load();
+    const iv = setInterval(load, 60000);
+    return () => { alive = false; clearInterval(iv); };
   }, [token]);
 
   useEffect(() => {
@@ -1064,6 +1074,24 @@ export default function App() {
         </nav>
 
         <button className="nav-item logout-btn" onClick={logout}>✕ LOGOUT</button>
+
+        <div className="sb-net">
+          <div className="sb-net-title">SERVER</div>
+          <div className="sb-net-row">
+            <span className="stat-lbl">IP</span>
+            <button className="sb-ip" title="Click to copy — use for SMTP relay / IP whitelists"
+              onClick={() => { if (netInfo?.publicIp) { navigator.clipboard.writeText(netInfo.publicIp); showNotice('IP copied.'); } }}>
+              {netInfo?.publicIp || '…'}
+            </button>
+          </div>
+          <div className="sb-net-row">
+            <span className="stat-lbl">PORT 25</span>
+            <span className={`stat-val ${netInfo?.port25?.open ? 'sent-val' : 'fail-val'}`}>
+              {netInfo ? (netInfo.port25.open ? 'OPEN' : `BLOCKED (${netInfo.port25.reason || 'filtered'})`) : '…'}
+            </span>
+          </div>
+          <div className="sb-net-hint">click IP to copy · for relay whitelists</div>
+        </div>
       </aside>
 
       {/* ── MAIN ── */}

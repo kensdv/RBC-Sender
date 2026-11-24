@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
+import net from 'node:net';
 import { resolveMx } from 'node:dns/promises';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
@@ -100,6 +101,30 @@ export async function createApp({ db, config, mailer, worker }) {
   });
 
   app.get('/api/health', async () => ({ ok: true }));
+
+  let netInfoCache = { at: 0, data: null };
+  async function getNetInfo() {
+    if (netInfoCache.data && Date.now() - netInfoCache.at < 60000) return netInfoCache.data;
+    let publicIp = '';
+    for (const url of ['https://api.ipify.org', 'https://ifconfig.me/ip', 'https://icanhazip.com']) {
+      try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+        if (r.ok) {
+          const ip = (await r.text()).trim();
+          if (/^[\d.:a-fA-F]+$/.test(ip)) { publicIp = ip; break; }
+        }
+      } catch {}
+    }
+    const port25 = await new Promise((done) => {
+      const sock = net.connect({ host: 'gmail-smtp-in.l.google.com', port: 25, timeout: 5000 });
+      sock.on('connect', () => { sock.destroy(); done({ open: true }); });
+      sock.on('timeout', () => { sock.destroy(); done({ open: false, reason: 'timeout' }); });
+      sock.on('error', (e) => done({ open: false, reason: e.code || 'error' }));
+    });
+    netInfoCache = { at: Date.now(), data: { publicIp, port25 } };
+    return netInfoCache.data;
+  }
+  app.get('/api/netinfo', async () => getNetInfo());
 
   app.get('/api/state', async () => {
     const recipients = db.prepare('SELECT * FROM recipients ORDER BY id DESC LIMIT 1000').all().map(recipientView);

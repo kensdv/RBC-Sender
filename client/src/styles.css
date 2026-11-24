@@ -412,3 +412,10 @@ code { background: rgba(255,255,255,0.06); border: 1px solid var(--border); padd
 .engine-row span { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; }
 .dash-bounce { display: flex; justify-content: space-between; gap: 10px; padding: 7px 2px; border-bottom: 1px solid rgba(255,255,255,.05); font-size: 12px; }
 .dash-bounce:last-child { border-bottom: none; }
+
+.sb-net { margin-top: auto; padding: 12px 14px; border-top: 1px solid var(--border); }
+.sb-net-title { font-family: var(--mono); font-size: 10px; letter-spacing: 2px; color: var(--txt-dim); margin-bottom: 8px; }
+.sb-net-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 12px; }
+.sb-ip { background: none; border: 1px dashed var(--border); color: var(--txt); font-family: var(--mono); font-size: 11px; padding: 3px 8px; border-radius: 6px; cursor: pointer; }
+.sb-ip:hover { border-color: var(--accent); color: var(--accent); }
+.sb-net-hint { font-size: 10px; color: var(--txt-dim); margin-top: 6px; }
