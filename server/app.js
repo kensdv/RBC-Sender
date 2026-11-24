@@ -195,6 +195,10 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     try { return await mailer.verify(); } catch (error) { fail(`SMTP verification failed: ${error.message}`, 400); }
   });
 
+  app.post('/api/smtp/verify-all', async () => {
+    try { return await mailer.verifyAll(); } catch (error) { fail(`SMTP verification failed: ${error.message}`, 400); }
+  });
+
   app.post('/api/test-send', async (request) => {
     const body = request.body || {};
     const to = body.to ? email(body.to, 'to') : '';
@@ -277,7 +281,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       username: row.username, hasPassword: Boolean(row.password_encrypted),
       fromName: row.from_name, fromEmail: row.from_email, replyTo: row.reply_to,
       enabled: Boolean(row.enabled), weight: row.weight, fails: row.fails,
-      cooldownUntil: row.cooldown_until, createdAt: row.created_at,
+      cooldownUntil: row.cooldown_until, lastCheck: row.last_check || null, lastError: row.last_error || '', createdAt: row.created_at,
     };
   }
 
@@ -694,6 +698,20 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     worker.kick();
     emit('campaign_queued', { campaignId: id, name: campaign.name, subject: campaign.subject, total: recipients.length, scheduledFor });
     return { id, queued: recipients.length, scheduledFor };
+  });
+
+  app.post('/api/campaigns/:id/retry', async (request) => {
+    const id = Number(request.params.id);
+    const campaign = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(id);
+    if (!campaign) fail('Campaign not found', 404);
+    if (campaign.status !== 'failed') fail('Only a failed campaign can be retried', 409);
+    const pending = db.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE campaign_id = ? AND status IN ('queued', 'sending')").get(id).c;
+    if (!pending) fail('No pending deliveries left to send', 409);
+    db.prepare("UPDATE campaigns SET status = 'queued', updated_at = ? WHERE id = ?").run(new Date().toISOString(), id);
+    if (worker.recheck) worker.recheck(id);
+    worker.kick();
+    emit('campaign_queued', { campaignId: id, name: campaign.name, subject: campaign.subject, total: pending, retried: true });
+    return { id, queued: pending };
   });
 
   app.post('/api/campaigns/:id/cancel', async (request) => {

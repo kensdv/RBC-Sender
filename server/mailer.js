@@ -850,6 +850,39 @@ export function createMailer({ db, config }) {
   }
 
   return {
+    // Test every enabled SMTP account. Dead ones get cooled down for 6h so the
+    // send pool drops them automatically; a later successful check revives them.
+    async verifyAll() {
+      const now = new Date().toISOString();
+      const deadUntil = new Date(Date.now() + 6 * 3600000).toISOString();
+      let rows = db.prepare('SELECT * FROM smtp_accounts WHERE enabled = 1').all();
+      if (!rows.length && smtpRow(db)) {
+        const legacy = smtpRow(db);
+        rows = [{ id: 0, label: 'Legacy SMTP', host: legacy.host, port: legacy.port, secure: legacy.secure, username: legacy.username, password_encrypted: legacy.password_encrypted, from_name: legacy.from_name, from_email: legacy.from_email, reply_to: legacy.reply_to || '' }];
+      }
+      const results = [];
+      for (const r of rows) {
+        const label = r.label || r.username || `account ${r.id}`;
+        let transporter = null;
+        try {
+          transporter = transportFor({
+            host: r.host, port: r.port, secure: Boolean(r.secure),
+            username: r.username, password: decryptSecret(r.password_encrypted, config.credentialKey),
+          });
+          await transporter.verify();
+          if (r.id) db.prepare("UPDATE smtp_accounts SET fails = 0, cooldown_until = NULL, last_check = ?, last_error = '' WHERE id = ?").run(now, r.id);
+          results.push({ id: r.id, label, host: r.host, ok: true, error: '' });
+        } catch (err) {
+          const msg = String(err.message || err).slice(0, 300);
+          if (r.id) db.prepare('UPDATE smtp_accounts SET fails = fails + 1, cooldown_until = ?, last_check = ?, last_error = ? WHERE id = ?').run(deadUntil, now, msg, r.id);
+          results.push({ id: r.id, label, host: r.host, ok: false, error: msg });
+        } finally {
+          try { transporter?.close(); } catch {}
+        }
+      }
+      return { results, live: results.filter((r) => r.ok).length, total: results.length };
+    },
+
     async verify() {
       const pool = loadSmtpPool(db, config);
       if (!pool.length) throw Object.assign(new Error('No SMTP account configured'), { statusCode: 400 });

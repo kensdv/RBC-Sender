@@ -727,6 +727,8 @@ const EVENT_STYLE = {
   bounce:           { icon: '⛔', color: 'var(--red)',    label: 'BOUNCE' },
   unsubscribe:      { icon: '⊘', color: 'var(--orange)', label: 'UNSUB' },
   telegram_fail:    { icon: '⚠', color: 'var(--orange)', label: 'TG-ERR' },
+  smtp_check:       { icon: '⇄', color: 'var(--cyan)',   label: 'SMTP' },
+  campaign_fail:    { icon: '✗', color: 'var(--red)',    label: 'FAIL' },
   info:             { icon: '·', color: 'var(--txt-dim)', label: 'INFO' },
 };
 
@@ -736,6 +738,8 @@ function eventLine(ev) {
     case 'send_fail':       return `${ev.email} — ${ev.error || 'failed'}`;
     case 'campaign_start':  return `${ev.name} — "${ev.subject || '(no subject)'}" · ${ev.total ?? '?'} recipients · ${ev.engine || ''}`;
     case 'campaign_queued': return `${ev.name} — "${ev.subject || '(no subject)'}" · ${ev.total ?? '?'} queued${ev.scheduledFor ? ' · scheduled ' + new Date(ev.scheduledFor).toLocaleString() : ''}`;
+    case 'smtp_check':      return `${ev.ok ? '✓' : '✗'} ${ev.label || 'smtp'}${ev.host ? ' @ ' + ev.host : ''}${ev.ok ? '' : ' — ' + (ev.error || 'failed')}`;
+    case 'campaign_fail':   return `${ev.name} FAILED — ${ev.error || 'error'}`;
     case 'campaign_done': {
       const s = {};
       for (const r of ev.stats || []) s[r.status] = r.c;
@@ -1684,8 +1688,15 @@ sudo tail -f /var/log/maillog`}</pre>
 
                 {/* SMTP ACCOUNT POOL */}
                 <div className="pane">
-                  <div className="pane-head"><span>ACCOUNT POOL — ROTATION & FAILOVER</span></div>
-                  <p className="dim-txt">Sends rotate across enabled accounts; failures cool an account down for 5 min and fail over to the next. The legacy config above acts as fallback when the pool is empty.</p>
+                  <div className="pane-head"><span>ACCOUNT POOL — ROTATION & FAILOVER</span>
+                    <button className="btn-sm" disabled={busy} onClick={() => run(async () => {
+                      const r = await api(token, '/api/smtp/verify-all', { method: 'POST' });
+                      const dead = (r.results || []).filter((x) => !x.ok);
+                      showNotice(dead.length ? `${r.live}/${r.total} live — ${dead.length} dead cooled 6h.` : `All ${r.total} accounts verified live.`);
+                      await refresh();
+                    })}>[ VERIFY ALL ]</button>
+                  </div>
+                  <p className="dim-txt">Sends rotate across enabled accounts; failures cool an account down and fail over to the next. VERIFY ALL handshakes every account — dead ones drop out of rotation for 6h. The legacy config above acts as fallback when the pool is empty.</p>
                   <div className="tbl-wrap" style={{maxHeight:240}}>
                     <table className="w-table">
                       <thead><tr><th>LABEL</th><th>HOST</th><th>USER</th><th>FROM</th><th>W</th><th>STATE</th><th></th></tr></thead>
@@ -1697,7 +1708,9 @@ sudo tail -f /var/log/maillog`}</pre>
                             <td className="dim">{a.username}</td>
                             <td className="dim">{a.fromEmail}</td>
                             <td>{a.weight}</td>
-                            <td><span className={`badge ${a.enabled ? 'badge-ok' : 'badge-def'}`}>{a.cooldownUntil && a.cooldownUntil > new Date().toISOString() ? 'COOLDOWN' : a.enabled ? 'ACTIVE' : 'OFF'}</span>{a.fails ? <span className="dim"> ({a.fails}f)</span> : null}</td>
+                            <td><span className={`badge ${a.enabled ? 'badge-ok' : 'badge-def'}`}>{a.cooldownUntil && a.cooldownUntil > new Date().toISOString() ? 'COOLDOWN' : a.enabled ? 'ACTIVE' : 'OFF'}</span>{a.fails ? <span className="dim"> ({a.fails}f)</span> : null}
+                              {a.lastError ? <div className="red-txt" style={{fontSize:11}} title={a.lastError}>{a.lastError.slice(0, 60)}</div>
+                                : a.lastCheck ? <div className="dim-txt" style={{fontSize:11}}>ok {new Date(a.lastCheck).toLocaleTimeString()}</div> : null}</td>
                             <td>
                               <div className="act-row">
                                 <button className="btn-xs" onClick={() => {
@@ -2455,6 +2468,7 @@ sudo tail -f /var/log/maillog`}</pre>
                                 <div className="act-row">
                                   <button className="btn-xs" onClick={() => run(async () => { const r = await api(token, `/api/campaigns/${c.id}/duplicate`, { method: 'POST' }); showNotice(`Draft #${r.id} created.`); await refresh(); })}>DUP</button>
                                   {c.status === 'draft' && <button className="btn-xs" onClick={() => editCampaign(c)}>EDIT</button>}
+                                  {c.status === 'failed' && <button className="btn-xs" onClick={() => { if (window.confirm(`Retry #${c.id}? SMTP will be re-verified first.`)) run(async () => { await api(token, `/api/campaigns/${c.id}/retry`, { method: 'POST' }); await refresh(); }); }}>RETRY</button>}
                                   {['queued','scheduled','sending'].includes(c.status) && <button className="btn-xs btn-danger" onClick={() => { if (window.confirm(`Cancel #${c.id}?`)) run(async () => { await api(token, `/api/campaigns/${c.id}/cancel`, { method: 'POST' }); await refresh(); }); }}>CANCEL</button>}
                                   <button className="btn-xs" onClick={() => run(() => exportCampaign(c.id))}>CSV</button>
                                 </div>

@@ -2,7 +2,7 @@ import { pushEvent, listEvents } from './events.js';
 import { decryptSecret, encryptSecret } from './crypto.js';
 import { escapeHtml } from './placeholders.js';
 
-const TG_KEYS = new Set(['campaign_start', 'campaign_done', 'open', 'bounce', 'unsubscribe']);
+const TG_KEYS = new Set(['campaign_start', 'campaign_done', 'campaign_fail', 'open', 'bounce', 'unsubscribe']);
 
 function getInt(db, key) {
   return db.prepare('SELECT value FROM integrations WHERE key = ?').get(key)?.value || '';
@@ -69,6 +69,8 @@ export function formatEvent(kind, d = {}) {
       const s = fmtStats(d.stats);
       return `🏁 <b>CAMPAIGN FINISHED</b>\n${DIV}\n📛 <b>${e(d.name)}</b>\n✅ Sent: <b>${s.sent}</b>\n❌ Failed: <b>${s.failed}</b>\n⏳ Left: ${s.queued}\n📈 Success: <b>${s.rate}%</b>\n🕐 ${clock()}`;
     }
+    case 'campaign_fail':
+      return `⛔ <b>CAMPAIGN FAILED</b>\n${DIV}\n📛 <b>${e(d.name)}</b>\n📝 ${e(d.subject || '(no subject)')}\n❗ ${e(d.error || 'unknown error')}\n🕐 ${clock()}`;
     case 'open':
       return `👁️ <b>EMAIL OPENED</b>\n${DIV}\n📧 <code>${e(d.email)}</code>\n📛 ${e(d.name || `campaign #${d.campaignId ?? '?'}`)}\n🕐 ${clock()}`;
     case 'click':

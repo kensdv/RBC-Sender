@@ -14,6 +14,7 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
   let stopped = true;
   let lastAttempt = 0;
   let sendCount = 0;
+  const preflighted = new Set();
 
   function getSettings() {
     const smtp = db.prepare('SELECT rate_per_minute FROM smtp_settings WHERE id = 1').get();
@@ -176,7 +177,38 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
     if (elapsed < minGap) return;
 
     const now = new Date().toISOString();
-    const rows = db.prepare(`${ROW_SELECT} LIMIT ?`).all(now, now, slots);
+    let rows = db.prepare(`${ROW_SELECT} LIMIT ?`).all(now, now, slots);
+
+    // Preflight: before a campaign's first send, verify every SMTP account.
+    // Dead accounts are cooled down by verifyAll; if none are live the campaign
+    // fails fast instead of burning deliveries.
+    if (rows.length && ctx.sendMode === 'smtp' && typeof mailer.verifyAll === 'function') {
+      const pending = [...new Set(rows.map((r) => r.campaign_id))].filter((id) => !preflighted.has(id));
+      const deadCampaigns = new Set();
+      for (const cid of pending) {
+        preflighted.add(cid);
+        const camp = rows.find((r) => r.campaign_id === cid);
+        let live = 0;
+        try {
+          const res = await mailer.verifyAll();
+          live = res.live;
+          for (const a of res.results) {
+            emit('smtp_check', { campaignId: cid, name: camp?.name, label: a.label, host: a.host, ok: a.ok, error: a.error });
+          }
+        } catch (err) {
+          emit('smtp_check', { campaignId: cid, name: camp?.name, label: 'smtp pool', ok: false, error: String(err.message || err).slice(0, 200) });
+        }
+        if (!live) {
+          deadCampaigns.add(cid);
+          db.prepare("UPDATE campaigns SET status = 'failed', updated_at = ? WHERE id = ? AND status IN ('queued', 'scheduled', 'sending')").run(new Date().toISOString(), cid);
+          emit('campaign_fail', { campaignId: cid, name: camp?.name, subject: camp?.subject, error: 'No live SMTP accounts — test them in the EMAIL tab' });
+        }
+      }
+      if (deadCampaigns.size) {
+        rows = rows.filter((r) => !deadCampaigns.has(r.campaign_id));
+        for (const cid of deadCampaigns) completeCampaign(cid);
+      }
+    }
 
     if (!rows.length) {
       const activeCampaigns = db.prepare("SELECT id FROM campaigns WHERE status IN ('queued', 'scheduled', 'sending')").all();
@@ -232,6 +264,7 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
     },
     kick: tick,
     diagnose,
+    recheck(campaignId) { preflighted.delete(Number(campaignId)); },
     async stop() {
       stopped = true;
       clearInterval(timer);
