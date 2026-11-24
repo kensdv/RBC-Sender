@@ -261,6 +261,7 @@ function relayTransportFor(settings, dkim = null) {
   // relaySecure: 0 = auto STARTTLS (default), 1 = implicit TLS/SSL, 2 = plaintext
   const secure = settings.relaySecure === 1;
   const plain = settings.relaySecure === 2;
+  const ehloName = settings.relayEhlo || (settings.directFromEmail || '').split('@')[1] || '';
   return nodemailer.createTransport({
     host: settings.relayHost,
     port: settings.relayPort,
@@ -269,7 +270,7 @@ function relayTransportFor(settings, dkim = null) {
       ? { auth: { user: settings.relayUsername || '', pass: settings.relayPassword || '' } }
       : {}),
     ignoreTLS: plain,
-    ...(settings.relayEhlo ? { name: settings.relayEhlo } : {}),
+    ...(ehloName ? { name: ehloName } : {}),
     tls: { rejectUnauthorized: false, minVersion: 'TLSv1.2' },
     connectionTimeout: 15000,
     greetingTimeout: 15000,
