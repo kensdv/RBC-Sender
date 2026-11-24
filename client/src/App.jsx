@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from './api.js';
 
 const emptyDraft = {
-  name: '', subject: '', preheader: '',
+  name: '', subject: '', preheader: '', providers: [],
   html: '<h1>Hello [Firstname]</h1>\n<p>Your account at ++rbc_domain1++ requires attention.</p>\n<p>Ref: ++rbc_number6++-++rbc_randstring++</p>',
   text: '',
   attachments: [],
@@ -809,6 +809,7 @@ export default function App() {
   const [notice, setNotice] = useState('');
   const [noticeType, setNoticeType] = useState('ok');
   const [busy, setBusy] = useState(false);
+  const [dialog, setDialog] = useState(null);
   const [bodyMode, setBodyMode] = useState('html');
   const htmlRef = useRef(null);
   const pasteRef = useRef(null);
@@ -915,6 +916,20 @@ export default function App() {
 
   function showNotice(msg, type = 'ok') { setNotice(msg); setNoticeType(type); }
 
+  // In-app dialog system — replaces window.confirm / window.prompt
+  function uiConfirm(message, { title = 'CONFIRM', danger = false, confirmLabel = 'CONFIRM' } = {}) {
+    return new Promise((resolve) => setDialog({ kind: 'confirm', title, message, danger, confirmLabel, value: '', resolve }));
+  }
+  function uiPrompt(message, { title = 'INPUT', placeholder = '', confirmLabel = 'OK' } = {}) {
+    return new Promise((resolve) => setDialog({ kind: 'prompt', title, message, placeholder, confirmLabel, value: '', resolve }));
+  }
+  function settleDialog(result) {
+    if (!dialog) return;
+    const value = dialog.kind === 'prompt' ? (result ? dialog.value : null) : Boolean(result);
+    dialog.resolve(value);
+    setDialog(null);
+  }
+
   async function run(action) {
     setBusy(true); setNotice('');
     try { await action(); }
@@ -957,10 +972,10 @@ export default function App() {
 
   const FONT_SIZE_PX = { 1: '12px', 2: '13px', 3: '14px', 4: '16px', 5: '18px', 6: '24px', 7: '32px' };
 
-  function execEdit(cmd, val = null) {
+  async function execEdit(cmd, val = null) {
     if (bodyMode === 'paste' || bodyMode === 'blocks') {
       if (cmd === 'createLink') {
-        const url = window.prompt('Link URL (https://...)');
+        const url = await uiPrompt('Link URL', { title: 'INSERT LINK', placeholder: 'https://...' });
         if (url) execEditPaste('createLink', url);
         return;
       }
@@ -981,7 +996,7 @@ export default function App() {
       case 'underline': return wrapSelection(field, ref, isText ? (s) => `__${s || 'underline'}__` : wrapHtml('u'));
       case 'strikeThrough': return wrapSelection(field, ref, isText ? (s) => `~~${s || 'strike'}~~` : wrapHtml('s'));
       case 'createLink': {
-        const url = window.prompt('Link URL (https://...)');
+        const url = await uiPrompt('Link URL', { title: 'INSERT LINK', placeholder: 'https://...' });
         if (!url) return;
         if (isText) return wrapSelection(field, ref, (s) => `[${s || 'link'}](${url})`);
         return wrapSelection(field, ref, (s) => `<a href="${url}">${s || 'link'}</a>`);
@@ -1069,7 +1084,7 @@ export default function App() {
   function editCampaign(c) {
     if (!['draft', 'failed', 'scheduled'].includes(c.status)) return;
     setSelectedId(c.id);
-    setDraft({ name: c.name, subject: c.subject, preheader: c.preheader || '', html: c.html, text: c.text, attachments: c.attachments || [] });
+    setDraft({ name: c.name, subject: c.subject, preheader: c.preheader || '', html: c.html, text: c.text, attachments: c.attachments || [], providers: c.providers || [] });
     setTab('compose');
   }
 
@@ -1209,6 +1224,42 @@ export default function App() {
 
                     <label className="field-label">PREHEADER <span className="dim">(inbox preview text)</span></label>
                     <input className="w-input" value={draft.preheader} onChange={(e) => updateDraft('preheader', e.target.value)} placeholder="Preview text recipients see next to the subject..." />
+
+                    {/* AUDIENCE TARGETING */}
+                    {(() => {
+                      const counts = {};
+                      for (const r of state.recipients) {
+                        if (!r.consentConfirmed || r.suppressed) continue;
+                        const p = r.custom?.provider || 'Unclassified';
+                        counts[p] = (counts[p] || 0) + 1;
+                      }
+                      const providers = Object.keys(counts).sort();
+                      const selected = draft.providers || [];
+                      const eligible = providers.filter((p) => !selected.length || selected.includes(p)).reduce((n, p) => n + counts[p], 0);
+                      const toggleProvider = (p) => {
+                        const next = selected.includes(p) ? selected.filter((x) => x !== p) : [...selected, p];
+                        updateDraft('providers', next);
+                      };
+                      return (
+                        <div className="audience-block">
+                          <label className="field-label">AUDIENCE <span className="dim">({eligible} of {state.recipients.length} eligible — blank = all providers)</span></label>
+                          <div className="provider-chips">
+                            {providers.length === 0 && <span className="dim">no classified recipients — run SORT BY PROVIDER in RECIPIENTS</span>}
+                            {providers.map((p) => (
+                              <button
+                                key={p}
+                                type="button"
+                                className={`prov-chip ${selected.includes(p) ? 'prov-chip-on' : ''}`}
+                                onClick={() => toggleProvider(p)}
+                              >{p} <span className="prov-count">{counts[p]}</span></button>
+                            ))}
+                            {selected.length > 0 && (
+                              <button type="button" className="prov-chip prov-chip-clear" onClick={() => updateDraft('providers', [])}>ALL</button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* PLACEHOLDER DROPDOWN */}
                     <div className="ph-dropdown-wrap">
@@ -1488,8 +1539,8 @@ export default function App() {
                               <td className="dim">{r.custom?.provider || '—'}</td>
                               <td><span className={`badge ${r.suppressed ? 'badge-fail' : 'badge-ok'}`}>{r.suppressed ? 'SUPPRESSED' : 'ACTIVE'}</span></td>
                               <td>{r.suppressed
-                                ? <button className="btn-xs" onClick={() => { if (window.confirm(`Unsuppress ${r.email}? They will receive future campaigns again.`)) run(async () => { await api(token, `/api/recipients/${r.id}/unsuppress`, { method: 'POST' }); await refresh(); }); }}>UNSUPPRESS</button>
-                                : <button className="btn-xs" onClick={() => { if (window.confirm(`Suppress ${r.email}?`)) run(async () => { await api(token, `/api/recipients/${r.id}/suppress`, { method: 'POST' }); await refresh(); }); }}>SUPPRESS</button>}</td>
+                                ? <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Unsuppress ${r.email}? They will receive future campaigns again.`, { title: 'UNSUPPRESS RECIPIENT', confirmLabel: 'UNSUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/unsuppress`, { method: 'POST' }); await refresh(); }); }}>UNSUPPRESS</button>
+                                : <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Suppress ${r.email}?`, { title: 'SUPPRESS RECIPIENT', danger: true, confirmLabel: 'SUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/suppress`, { method: 'POST' }); await refresh(); }); }}>SUPPRESS</button>}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -1724,7 +1775,7 @@ sudo tail -f /var/log/maillog`}</pre>
                                   setAcctForm({ label: a.label, host: a.host, port: a.port, secure: a.secure, username: a.username, password: '', fromName: a.fromName, fromEmail: a.fromEmail, replyTo: a.replyTo, weight: a.weight });
                                 }}>EDIT</button>
                                 <button className="btn-xs" onClick={() => run(async () => { await api(token, `/api/smtp/accounts/${a.id}`, { method: 'PUT', body: { label: a.label, host: a.host, port: a.port, secure: a.secure, username: a.username, fromName: a.fromName, fromEmail: a.fromEmail, replyTo: a.replyTo, weight: a.weight, enabled: !a.enabled } }); await refresh(); })}>{a.enabled ? 'DISABLE' : 'ENABLE'}</button>
-                                <button className="btn-xs btn-danger" onClick={() => { if (window.confirm(`Delete account ${a.label || a.username}?`)) run(async () => { await api(token, `/api/smtp/accounts/${a.id}`, { method: 'DELETE' }); await refresh(); }); }}>DEL</button>
+                                <button className="btn-xs btn-danger" onClick={async () => { if (await uiConfirm(`Delete account ${a.label || a.username}?`, { title: 'DELETE SMTP ACCOUNT', danger: true, confirmLabel: 'DELETE' })) run(async () => { await api(token, `/api/smtp/accounts/${a.id}`, { method: 'DELETE' }); await refresh(); }); }}>DEL</button>
                               </div>
                             </td>
                           </tr>
@@ -2511,7 +2562,7 @@ sudo tail -f /var/log/maillog`}</pre>
                           {state.campaigns.map((c) => (
                             <tr key={c.id}>
                               <td className="dim">{c.id}</td>
-                              <td>{c.name}</td>
+                              <td>{c.name}{c.providers?.length > 0 && <div className="dim-txt" style={{fontSize:11}}>→ {c.providers.join(', ')}</div>}</td>
                               <td>
                                 <span className={`badge ${c.status === 'completed' ? 'badge-ok' : c.status === 'failed' ? 'badge-fail' : 'badge-def'}`}>{c.status.toUpperCase()}</span>
                                 {c.total > 0 && (
@@ -2527,9 +2578,9 @@ sudo tail -f /var/log/maillog`}</pre>
                                 <div className="act-row">
                                   <button className="btn-xs" onClick={() => run(async () => { const r = await api(token, `/api/campaigns/${c.id}/duplicate`, { method: 'POST' }); showNotice(`Draft #${r.id} created.`); await refresh(); })}>DUP</button>
                                   {['draft', 'failed', 'scheduled'].includes(c.status) && <button className="btn-xs" onClick={() => editCampaign(c)}>EDIT</button>}
-                                  {c.status === 'failed' && <button className="btn-xs" onClick={() => { if (window.confirm(`Retry #${c.id}? SMTP will be re-verified first.`)) run(async () => { await api(token, `/api/campaigns/${c.id}/retry`, { method: 'POST' }); await refresh(); }); }}>RETRY</button>}
-                                  {!['queued', 'scheduled', 'sending'].includes(c.status) && <button className="btn-xs" onClick={() => { if (window.confirm(`Delete campaign #${c.id} "${c.name}" and its delivery history?`)) run(async () => { await api(token, `/api/campaigns/${c.id}`, { method: 'DELETE' }); await refresh(); }); }}>DEL</button>}
-                                  {['queued','scheduled','sending'].includes(c.status) && <button className="btn-xs btn-danger" onClick={() => { if (window.confirm(`Cancel #${c.id}?`)) run(async () => { await api(token, `/api/campaigns/${c.id}/cancel`, { method: 'POST' }); await refresh(); }); }}>CANCEL</button>}
+                                  {c.status === 'failed' && <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Retry #${c.id}? SMTP will be re-verified first.`, { title: 'RETRY CAMPAIGN', confirmLabel: 'RETRY' })) run(async () => { await api(token, `/api/campaigns/${c.id}/retry`, { method: 'POST' }); await refresh(); }); }}>RETRY</button>}
+                                  {!['queued', 'scheduled', 'sending'].includes(c.status) && <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Delete campaign #${c.id} "${c.name}" and its delivery history?`, { title: 'DELETE CAMPAIGN', danger: true, confirmLabel: 'DELETE' })) run(async () => { await api(token, `/api/campaigns/${c.id}`, { method: 'DELETE' }); await refresh(); }); }}>DEL</button>}
+                                  {['queued','scheduled','sending'].includes(c.status) && <button className="btn-xs btn-danger" onClick={async () => { if (await uiConfirm(`Cancel #${c.id}?`, { title: 'CANCEL CAMPAIGN', danger: true, confirmLabel: 'CANCEL SEND' })) run(async () => { await api(token, `/api/campaigns/${c.id}/cancel`, { method: 'POST' }); await refresh(); }); }}>CANCEL</button>}
                                   <button className="btn-xs" onClick={() => run(() => exportCampaign(c.id))}>CSV</button>
                                 </div>
                               </td>
@@ -2562,6 +2613,33 @@ sudo tail -f /var/log/maillog`}</pre>
                 : <button className="btn-primary" onClick={() => { setShowIntro(false); localStorage.setItem('rbc_intro_seen', '1'); setTab('dashboard'); }}>[ OPEN DASHBOARD ]</button>}
             </div>
             <button className="intro-skip" onClick={() => { setShowIntro(false); localStorage.setItem('rbc_intro_seen', '1'); }}>skip walkthrough</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── APP DIALOG ── */}
+      {dialog && (
+        <div className="dlg-overlay" onClick={() => settleDialog(false)}>
+          <div className="dlg-card" onClick={(e) => e.stopPropagation()}>
+            <div className="dlg-title">{dialog.title}</div>
+            <div className="dlg-msg">{dialog.message}</div>
+            {dialog.kind === 'prompt' && (
+              <input
+                className="w-input dlg-input"
+                autoFocus
+                placeholder={dialog.placeholder}
+                value={dialog.value}
+                onChange={(e) => setDialog({ ...dialog, value: e.target.value })}
+                onKeyDown={(e) => { if (e.key === 'Enter' && dialog.value.trim()) settleDialog(true); if (e.key === 'Escape') settleDialog(false); }}
+              />
+            )}
+            <div className="dlg-actions">
+              <button className="btn-sm" onClick={() => settleDialog(false)}>CANCEL</button>
+              <button
+                className={`btn-primary ${dialog.danger ? 'btn-danger-solid' : ''}`}
+                onClick={() => settleDialog(dialog.kind === 'prompt' ? dialog.value.trim() !== '' : true)}
+              >{dialog.confirmLabel}</button>
+            </div>
           </div>
         </div>
       )}

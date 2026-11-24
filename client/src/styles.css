@@ -427,3 +427,22 @@ code { background: rgba(255,255,255,0.06); border: 1px solid var(--border); padd
 .console-ico { flex-shrink: 0; width: 12px; text-align: center; }
 .console-tag { flex-shrink: 0; width: 52px; font-weight: 700; letter-spacing: .5px; }
 .console-msg { color: var(--txt); overflow: hidden; text-overflow: ellipsis; }
+
+/* ── app dialog ── */
+.dlg-overlay { position: fixed; inset: 0; background: rgba(5,8,15,0.7); backdrop-filter: blur(4px); z-index: 200; display: flex; align-items: center; justify-content: center; }
+.dlg-card { width: min(440px, 92vw); background: linear-gradient(160deg, #10182e, #0b1020); border: 1px solid var(--border); border-radius: 14px; padding: 24px 24px 20px; box-shadow: 0 24px 60px rgba(0,0,0,0.55); }
+.dlg-title { font-family: var(--mono); font-size: 11px; letter-spacing: 2px; color: var(--cyan); margin-bottom: 10px; }
+.dlg-msg { font-size: 13px; line-height: 1.6; color: var(--txt); margin-bottom: 16px; white-space: pre-wrap; }
+.dlg-input { width: 100%; margin-bottom: 16px; }
+.dlg-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.btn-danger-solid { background: linear-gradient(135deg, rgba(255,23,68,0.3), rgba(255,23,68,0.15)) !important; border-color: rgba(255,23,68,0.5) !important; color: #ff8aa5 !important; }
+
+/* ── audience provider chips ── */
+.audience-block { margin: 4px 0 14px; }
+.provider-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.prov-chip { background: rgba(255,255,255,0.04); border: 1px solid var(--border); color: var(--txt-dim); font-family: var(--mono); font-size: 11px; letter-spacing: .5px; padding: 6px 12px; border-radius: 999px; cursor: pointer; transition: all .15s; }
+.prov-chip:hover { border-color: var(--cyan); color: var(--txt); }
+.prov-chip-on { background: rgba(0,230,118,0.12); border-color: rgba(0,230,118,0.5); color: #6ee7a8; }
+.prov-chip-on:hover { border-color: #00e676; color: #00e676; }
+.prov-chip-clear { border-style: dashed; }
+.prov-count { opacity: .6; margin-left: 4px; }

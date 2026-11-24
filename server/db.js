@@ -215,6 +215,7 @@ export function openDatabase(path) {
   const campaignCols = new Set(db.prepare('PRAGMA table_info(campaigns)').all().map((c) => c.name));
   if (!campaignCols.has('preheader')) db.exec("ALTER TABLE campaigns ADD COLUMN preheader TEXT NOT NULL DEFAULT ''");
   if (!campaignCols.has('attachments_json')) db.exec("ALTER TABLE campaigns ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'");
+  if (!campaignCols.has('providers_json')) db.exec("ALTER TABLE campaigns ADD COLUMN providers_json TEXT NOT NULL DEFAULT '[]'");
   const acctCols = new Set(db.prepare('PRAGMA table_info(smtp_accounts)').all().map((c) => c.name));
   if (!acctCols.has('last_check')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN last_check TEXT");
   if (!acctCols.has('last_error')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN last_error TEXT NOT NULL DEFAULT ''");
@@ -233,12 +234,13 @@ export function openDatabase(path) {
           html TEXT NOT NULL DEFAULT '',
           text TEXT NOT NULL DEFAULT '',
           attachments_json TEXT NOT NULL DEFAULT '[]',
+          providers_json TEXT NOT NULL DEFAULT '[]',
           status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'queued', 'scheduled', 'sending', 'completed', 'cancelled', 'failed')),
           scheduled_for TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
-        INSERT INTO campaigns_migrated SELECT id, name, subject, preheader, html, text, COALESCE(attachments_json, '[]'), status, scheduled_for, created_at, updated_at FROM campaigns;
+        INSERT INTO campaigns_migrated SELECT id, name, subject, preheader, html, text, COALESCE(attachments_json, '[]'), COALESCE(providers_json, '[]'), status, scheduled_for, created_at, updated_at FROM campaigns;
         DROP TABLE campaigns;
         ALTER TABLE campaigns_migrated RENAME TO campaigns;
         COMMIT;

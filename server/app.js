@@ -58,9 +58,11 @@ function recipientView(row) {
 function campaignView(row) {
   let attachments = [];
   try { attachments = JSON.parse(row.attachments_json || '[]'); } catch {}
+  let providers = [];
+  try { providers = JSON.parse(row.providers_json || '[]'); } catch {}
   return {
     id: row.id, name: row.name, subject: row.subject, preheader: row.preheader || '', html: row.html, text: row.text,
-    attachments,
+    attachments, providers,
     status: row.status, scheduledFor: row.scheduled_for, createdAt: row.created_at,
     total: row.total || 0, sent: row.sent || 0, failed: row.failed || 0, queued: row.queued || 0,
   };
@@ -72,7 +74,10 @@ function campaignBody(body) {
   const plainText = String(body.text || '');
   if (!html.trim() && !plainText.trim()) fail('HTML or plain-text content is required');
   const attachments = sanitizeAttachments(body.attachments);
-  return { name: text(body.name, 'name', 120) || subject, subject, preheader: text(body.preheader || '', 'preheader', 300), html, text: plainText, attachments };
+  const providers = Array.isArray(body.providers)
+    ? body.providers.map((p) => text(p, 'provider', 60)).filter(Boolean).slice(0, 30)
+    : [];
+  return { name: text(body.name, 'name', 120) || subject, subject, preheader: text(body.preheader || '', 'preheader', 300), html, text: plainText, attachments, providers };
 }
 
 function unsubscribePage(message, action = '') {
@@ -695,7 +700,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
   app.post('/api/campaigns', async (request) => {
     const campaign = campaignBody(request.body || {});
     const now = new Date().toISOString();
-    const result = db.prepare("INSERT INTO campaigns (name, subject, preheader, html, text, attachments_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?)").run(campaign.name, campaign.subject, campaign.preheader, campaign.html, campaign.text, JSON.stringify(campaign.attachments || []), now, now);
+    const result = db.prepare("INSERT INTO campaigns (name, subject, preheader, html, text, attachments_json, providers_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)").run(campaign.name, campaign.subject, campaign.preheader, campaign.html, campaign.text, JSON.stringify(campaign.attachments || []), JSON.stringify(campaign.providers || []), now, now);
     return { id: Number(result.lastInsertRowid) };
   });
 
@@ -705,7 +710,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     if (!existing) fail('Campaign not found', 404);
     if (!['draft', 'failed', 'scheduled'].includes(existing.status)) fail('Only draft, scheduled or failed campaigns can be edited');
     const campaign = campaignBody(request.body || {});
-    db.prepare('UPDATE campaigns SET name = ?, subject = ?, preheader = ?, html = ?, text = ?, attachments_json = ?, updated_at = ? WHERE id = ?').run(campaign.name, campaign.subject, campaign.preheader, campaign.html, campaign.text, JSON.stringify(campaign.attachments || []), new Date().toISOString(), id);
+    db.prepare('UPDATE campaigns SET name = ?, subject = ?, preheader = ?, html = ?, text = ?, attachments_json = ?, providers_json = ?, updated_at = ? WHERE id = ?').run(campaign.name, campaign.subject, campaign.preheader, campaign.html, campaign.text, JSON.stringify(campaign.attachments || []), JSON.stringify(campaign.providers || []), new Date().toISOString(), id);
     return { id };
   });
 
@@ -713,7 +718,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const campaign = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(Number(request.params.id));
     if (!campaign) fail('Campaign not found', 404);
     const now = new Date().toISOString();
-    const result = db.prepare("INSERT INTO campaigns (name, subject, preheader, html, text, attachments_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?)").run(`${campaign.name} copy`.slice(0, 120), campaign.subject, campaign.preheader || '', campaign.html, campaign.text, campaign.attachments_json || '[]', now, now);
+    const result = db.prepare("INSERT INTO campaigns (name, subject, preheader, html, text, attachments_json, providers_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)").run(`${campaign.name} copy`.slice(0, 120), campaign.subject, campaign.preheader || '', campaign.html, campaign.text, campaign.attachments_json || '[]', campaign.providers_json || '[]', now, now);
     return { id: Number(result.lastInsertRowid) };
   });
 
@@ -732,8 +737,12 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     if ((settings.sendMode === 'direct' || settings.sendMode === 'socks5' || settings.sendMode === 'relay') && !settings.directFromEmail) fail('Configure direct sending from-email before queueing');
     if (settings.sendMode === 'graph' && (!settings.engineClientId || !settings.engineClientSecret || !settings.engineTenant)) fail('Configure Graph engine credentials before queueing');
     if (settings.sendMode === 'gmail' && (!settings.engineClientId || !settings.engineClientSecret || !settings.engineRefreshToken)) fail('Configure Gmail engine credentials before queueing');
-    const recipients = db.prepare('SELECT id FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0').all();
-    if (!recipients.length) fail('No confirmed, unsuppressed recipients are available');
+    let providers = [];
+    try { providers = JSON.parse(campaign.providers_json || '[]').filter((p) => typeof p === 'string' && p); } catch {}
+    const recipients = providers.length
+      ? db.prepare(`SELECT id FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0 AND json_extract(COALESCE(custom_json,'{}'), '$.provider') IN (${providers.map(() => '?').join(',')})`).all(...providers)
+      : db.prepare('SELECT id FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0').all();
+    if (!recipients.length) fail(providers.length ? 'No confirmed, unsuppressed recipients in the selected provider categories' : 'No confirmed, unsuppressed recipients are available');
     let scheduledFor = null;
     if (request.body?.scheduledFor) {
       const timestamp = Date.parse(request.body.scheduledFor);
