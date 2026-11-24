@@ -237,6 +237,7 @@ function transportFor(smtp, dkim = null, proxy = '') {
     greetingTimeout: 10000,
     socketTimeout: 30000,
     tls: { minVersion: 'TLSv1.2' },
+    debug: process.env.SMTP_DEBUG === '1',
     ...(proxy ? { proxy } : {}),
     ...(dkim ? { dkim } : {}),
   });
@@ -249,6 +250,7 @@ function directTransportFor(settings, mxHost = null, dkim = null) {
     connectionTimeout: 15000,
     greetingTimeout: 15000,
     socketTimeout: 30000,
+    debug: process.env.SMTP_DEBUG === '1',
   };
   if (settings.socks5Proxy) {
     opts.proxy = settings.socks5Proxy; // e.g. socks5://user:pass@host:port
@@ -275,6 +277,7 @@ function relayTransportFor(settings, dkim = null) {
     connectionTimeout: 15000,
     greetingTimeout: 15000,
     socketTimeout: 30000,
+    debug: process.env.SMTP_DEBUG === '1',
     ...(dkim ? { dkim } : {}),
   });
 }
