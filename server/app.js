@@ -502,7 +502,12 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
 
   app.post('/api/recipients/import', async (request) => {
     if (request.body?.consentConfirmed !== true) fail('Import requires explicit confirmation that every recipient opted in');
-    const parsed = parseRecipientsCsv(request.body?.csv);
+    let parsed;
+    try {
+      parsed = parseRecipientsCsv(request.body?.csv);
+    } catch (e) {
+      fail(e.message || 'Invalid CSV', 400);
+    }
     const unique = [...new Map(parsed.records.map((record) => [record.email, record])).values()];
     const now = new Date().toISOString();
     transaction(db, () => {
