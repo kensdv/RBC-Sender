@@ -146,7 +146,9 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
       }
     } catch (error) {
       const retry = temporary(error) && row.attempts + 1 < 3;
-      const nextAttempt = retry ? new Date(Date.now() + 2 ** row.attempts * 60000).toISOString() : null;
+      // 421 (throttling/tempfail) needs much longer backoff than auth/socket errors
+      const delayMs = error.responseCode === 421 ? (row.attempts + 1) * 10 * 60000 : 2 ** row.attempts * 60000;
+      const nextAttempt = retry ? new Date(Date.now() + delayMs).toISOString() : null;
       db.prepare('UPDATE deliveries SET status = ?, next_attempt_at = ?, error = ? WHERE id = ?').run(retry ? 'queued' : 'failed', nextAttempt, String(error.message || error).slice(0, 1000), row.delivery_id);
       logger.error(`Delivery ${row.delivery_id}: ${error.message || error}`);
       emit('send_fail', { campaignId: row.campaign_id, name: row.name, email: row.email, error: String(error.message || error).slice(0, 200) });
