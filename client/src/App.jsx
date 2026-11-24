@@ -1487,7 +1487,9 @@ export default function App() {
                               <td>{[r.firstName, r.lastName].filter(Boolean).join(' ')}</td>
                               <td className="dim">{r.custom?.provider || '—'}</td>
                               <td><span className={`badge ${r.suppressed ? 'badge-fail' : 'badge-ok'}`}>{r.suppressed ? 'SUPPRESSED' : 'ACTIVE'}</span></td>
-                              <td>{!r.suppressed && <button className="btn-xs" onClick={() => { if (window.confirm(`Suppress ${r.email}?`)) run(async () => { await api(token, `/api/recipients/${r.id}/suppress`, { method: 'POST' }); await refresh(); }); }}>SUPPRESS</button>}</td>
+                              <td>{r.suppressed
+                                ? <button className="btn-xs" onClick={() => { if (window.confirm(`Unsuppress ${r.email}? They will receive future campaigns again.`)) run(async () => { await api(token, `/api/recipients/${r.id}/unsuppress`, { method: 'POST' }); await refresh(); }); }}>UNSUPPRESS</button>
+                                : <button className="btn-xs" onClick={() => { if (window.confirm(`Suppress ${r.email}?`)) run(async () => { await api(token, `/api/recipients/${r.id}/suppress`, { method: 'POST' }); await refresh(); }); }}>SUPPRESS</button>}</td>
                             </tr>
                           ))}
                         </tbody>

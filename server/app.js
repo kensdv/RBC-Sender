@@ -667,6 +667,12 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     return { ok: true };
   });
 
+  app.post('/api/recipients/:id/unsuppress', async (request) => {
+    const result = db.prepare("UPDATE recipients SET suppressed = 0, suppression_reason = NULL, updated_at = ? WHERE id = ?").run(new Date().toISOString(), Number(request.params.id));
+    if (!result.changes) fail('Recipient not found', 404);
+    return { ok: true };
+  });
+
   app.post('/api/campaigns', async (request) => {
     const campaign = campaignBody(request.body || {});
     const now = new Date().toISOString();
