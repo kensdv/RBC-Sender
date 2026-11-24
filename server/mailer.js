@@ -269,8 +269,8 @@ function relayTransportFor(settings, dkim = null) {
     host: settings.relayHost,
     port: settings.relayPort,
     secure,
-    ...(settings.relayUsername || settings.relayPassword
-      ? { auth: { user: settings.relayUsername || '', pass: settings.relayPassword || '' } }
+    ...(settings.relayUsername && settings.relayPassword
+      ? { auth: { user: settings.relayUsername, pass: settings.relayPassword } }
       : {}),
     ignoreTLS: plain,
     ...(ehloName ? { name: ehloName } : {}),

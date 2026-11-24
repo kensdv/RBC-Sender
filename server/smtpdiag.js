@@ -130,8 +130,8 @@ export async function diagnoseRelay({ host, port = 587, security = 0, username =
       stage('STARTTLS', true, implicitTls ? 'implicit TLS' : 'plain (disabled)');
     }
 
-    // 5. AUTH LOGIN (only when username provided)
-    if (username) {
+    // 5. AUTH LOGIN (only when both username and password provided)
+    if (username && password) {
       try {
         let r = await s.command('AUTH LOGIN');
         if (r.code === 334) {
