@@ -1,0 +1,10 @@
+node_modules/
+client/dist/
+data/
+.env
+*.log
+put.json
+s.json
+comp.mbm
+W3LL Sender/
+*.png
