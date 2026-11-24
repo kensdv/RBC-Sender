@@ -77,7 +77,8 @@ class SmtpSession {
 export async function diagnoseRelay({ host, port = 587, security = 0, username = '', password = '', ehlo = '', from = '', testTo = '', timeoutMs = 20000 }) {
   const stages = [];
   const stage = (name, ok, detail = '') => { stages.push({ name, ok, detail }); return ok; };
-  const ehloName = ehlo || (from.includes('@') ? from.split('@')[1] : host);
+  const ehloName = (!ehlo.includes('@') && ehlo)
+    || (from.includes('@') ? from.split('@')[1] : host);
   const implicitTls = security === 1;
   const plain = security === 2;
 

@@ -263,7 +263,8 @@ function relayTransportFor(settings, dkim = null) {
   // relaySecure: 0 = auto STARTTLS (default), 1 = implicit TLS/SSL, 2 = plaintext
   const secure = settings.relaySecure === 1;
   const plain = settings.relaySecure === 2;
-  const ehloName = settings.relayEhlo || (settings.directFromEmail || '').split('@')[1] || '';
+  const ehloName = (!settings.relayEhlo.includes('@') && settings.relayEhlo)
+    || (settings.directFromEmail || '').split('@')[1] || '';
   return nodemailer.createTransport({
     host: settings.relayHost,
     port: settings.relayPort,
