@@ -43,6 +43,7 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
       maxPerDay: ss.max_per_day ?? 200,
       warmupEnabled: Boolean(ss.warmup_enabled),
       warmupStartedAt: ss.warmup_started_at || '',
+      scheduleEnabled: db.prepare("SELECT value FROM integrations WHERE key = 'schedule_enabled'").get()?.value !== '0',
     };
   }
 
@@ -63,6 +64,7 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
   }
 
   function withinSchedule(ctx) {
+    if (ctx.scheduleEnabled === false) return true;
     const { day, minute } = localClock(ctx);
     if (ctx.sendDays.length && !ctx.sendDays.includes(day)) return false;
     const from = ctx.sendFromMin, to = ctx.sendToMin;

@@ -349,7 +349,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
   app.get('/api/settings', async () => ({ sendSettings: publicSendSettings(db) }));
 
   app.put('/api/settings', async (request) => {
-    const body = request.body || {};
+    const body = { ...publicSendSettings(db), ...(request.body || {}) };
     const allowedModes = ['smtp', 'direct', 'relay', 'socks5', 'graph', 'gmail'];
     const sendMode = allowedModes.includes(body.sendMode) ? body.sendMode : 'smtp';
     const allowedEncodings = ['base64', '8bit', 'quoted-printable'];
@@ -503,6 +503,10 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       text(body.cloakBase || '', 'cloakBase', 500),
       new Date().toISOString(),
     );
+    if (body.scheduleEnabled !== undefined) {
+      db.prepare("INSERT INTO integrations (key, value) VALUES ('schedule_enabled', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .run(body.scheduleEnabled === false || body.scheduleEnabled === 'false' || body.scheduleEnabled === 0 ? '0' : '1');
+    }
     return { sendSettings: publicSendSettings(db) };
   });
 

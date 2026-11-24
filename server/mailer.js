@@ -291,8 +291,11 @@ export function publicSendSettings(db) {
   try { fromNames = JSON.parse(row.from_names_json || '[]'); } catch {}
   let subjectsList = [];
   try { subjectsList = JSON.parse(row.subjects_json || '[]'); } catch {}
+  let scheduleEnabled = true;
+  try { scheduleEnabled = db.prepare("SELECT value FROM integrations WHERE key = 'schedule_enabled'").get()?.value !== '0'; } catch {}
   return {
     sendMode: row.send_mode || 'smtp',
+    scheduleEnabled,
     directFromName: row.direct_from_name || '',
     directFromEmail: row.direct_from_email || '',
     directReplyTo: row.direct_reply_to || '',

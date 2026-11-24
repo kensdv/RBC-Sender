@@ -26,7 +26,7 @@ const emptySettings = {
   subjectB64: false, fromnameB64: false, disclaimerText: '',
   engineClientId: '', engineClientSecret: '', engineTenant: '', engineRefreshToken: '', engineSendAs: '',
   attachFormats: [], imageRecompress: false,
-  sendDays: [], sendFromMin: 480, sendToMin: 1200,
+  sendDays: [], sendFromMin: 480, sendToMin: 1200, scheduleEnabled: true,
   maxPerHour: 30, maxPerDay: 200, warmupEnabled: false, warmupStartedAt: '',
   linkCloak: false,
 };
@@ -125,6 +125,7 @@ function RbcLogo({ size = 44 }) {
 }
 
 const DAY_LABELS = { 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat', 7: 'Sun' };
+const fmtMin = (m) => `${String(Math.floor((m ?? 0) / 60)).padStart(2, '0')}:${String((m ?? 0) % 60).padStart(2, '0')}`;
 
 const LETTER_TEMPLATES = [
   {
@@ -1761,6 +1762,10 @@ sudo tail -f /var/log/maillog`}</pre>
                 <div className="pane">
                   <div className="pane-head"><span>SENDING HOURS</span></div>
                   <p className="dim-txt">The queue only sends inside this window, in the timezone set under SETTINGS → TIMEZONE. Empty days = every day.</p>
+                  <label className="check-row" style={{marginBottom:12}}>
+                    <input type="checkbox" checked={settings.scheduleEnabled !== false} onChange={(e) => setSettings({ ...settings, scheduleEnabled: e.target.checked })} />
+                    <span>Enforce window — <strong>{settings.scheduleEnabled !== false ? 'ON' : 'OFF (sends 24/7)'}</strong></span>
+                  </label>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
                     {Object.entries(DAY_LABELS).map(([d, label]) => {
                       const on = (settings.sendDays || []).includes(Number(d));
@@ -2427,6 +2432,15 @@ sudo tail -f /var/log/maillog`}</pre>
                     <div>
                       <div className="pane-head"><span>SEND NOW</span></div>
                       <p className="dim-txt">Mode: <strong className="green-txt">{sendMode.toUpperCase()}</strong> — {state.confirmed} active recipients</p>
+                      <p className="dim-txt">Window: <strong>{settings.scheduleEnabled === false ? '24/7 — always on' : `${(settings.sendDays || []).length ? (settings.sendDays || []).map((d) => DAY_LABELS[d] || d).join('/') : 'daily'} ${fmtMin(settings.sendFromMin)}–${fmtMin(settings.sendToMin)} ${settings.timezone || 'UTC'}`}</strong>{' '}
+                        {settings.scheduleEnabled === false
+                          ? <button className="btn-xs" onClick={() => setTab('settings')}>[ SET WINDOW ]</button>
+                          : <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
+                              const next = { ...settings, scheduleEnabled: false };
+                              await api(token, '/api/settings', { method: 'PUT', body: next });
+                              setSettings(next); showNotice('Send window OFF — queue sends 24/7.'); await refresh();
+                            })}>[ 24/7 ]</button>}
+                      </p>
                     </div>
                     <div style={{display:'flex',gap:8,alignItems:'center'}}>
                       <input className="w-input" style={{ maxWidth: 220 }} type="email" placeholder="test to…" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
