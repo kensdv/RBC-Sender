@@ -1,4 +1,4 @@
-app = "rbc-sender-kens"
+app = "rbc-email-sender"
 primary_region = "jnb"
 
 [build]
