@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import nodemailer from 'nodemailer';
 import { decryptSecret, unsubscribeToken } from './crypto.js';
 import { applyEncoding, createPlaceholderContext, escapeHtml, htmlToText, renderTemplate } from './placeholders.js';
+import { diagnoseRelay } from './smtpdiag.js';
 
 const UPLOADS_DIR = fileURLToPath(new URL('../data/uploads/', import.meta.url));
 
@@ -917,6 +918,16 @@ export function createMailer({ db, config }) {
         }
       }
       return { results, live: results.filter((r) => r.ok).length, total: results.length };
+    },
+
+    async relayDiag(testTo = '') {
+      const s = loadSendSettings(db, config);
+      if (!s.relayHost) throw Object.assign(new Error('Relay host not configured'), { statusCode: 400 });
+      return diagnoseRelay({
+        host: s.relayHost, port: s.relayPort, security: s.relaySecure,
+        username: s.relayUsername, password: s.relayPassword, ehlo: s.relayEhlo,
+        from: s.directFromEmail, testTo,
+      });
     },
 
     async verifyRelay() {

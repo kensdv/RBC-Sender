@@ -202,6 +202,13 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     try { return await mailer.verifyRelay(); } catch (error) { fail(`Relay check failed: ${error.message}`, 400); }
   });
 
+  app.post('/api/relay/diag', async (request) => {
+    try {
+      const testTo = request.body?.testTo ? email(request.body.testTo, 'testTo') : '';
+      return await mailer.relayDiag(testTo);
+    } catch (error) { fail(`Relay diag failed: ${error.message}`, error.statusCode && error.statusCode < 500 ? error.statusCode : 400); }
+  });
+
   app.post('/api/test-send', async (request) => {
     const body = request.body || {};
     const to = body.to ? email(body.to, 'to') : '';

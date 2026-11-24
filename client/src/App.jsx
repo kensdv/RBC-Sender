@@ -1897,17 +1897,34 @@ sudo tail -f /var/log/maillog`}</pre>
                         <div><label className="field-label">FROM EMAIL</label><input className="w-input" type="email" value={settings.directFromEmail} onChange={(e) => updateSettings('directFromEmail', e.target.value)} /></div>
                         <div><label className="field-label">REPLY-TO</label><input className="w-input" type="email" value={settings.directReplyTo} onChange={(e) => updateSettings('directReplyTo', e.target.value)} /></div>
                       </div>
-                      <div style={{display:'flex',gap:10,alignItems:'center',marginTop:12}}>
+                      <div style={{display:'flex',gap:10,alignItems:'center',marginTop:12,flexWrap:'wrap'}}>
                         <button className="btn-sm" disabled={busy || relayTest.state === 'testing' || !settings.relayHost} onClick={() => {
                           setRelayTest({ state: 'testing' });
                           api(token, '/api/relay/verify', { method: 'POST' })
                             .then((r) => setRelayTest({ state: 'ok', ms: r.ms, host: r.host }))
                             .catch((e) => setRelayTest({ state: 'fail', error: e.message || 'connection failed' }));
                         }}>{relayTest.state === 'testing' ? '[ TESTING… ]' : '[ TEST CONNECTION ]'}</button>
+                        <button className="btn-sm" disabled={busy || relayTest.state === 'testing' || !settings.relayHost} onClick={() => {
+                          setRelayTest({ state: 'testing' });
+                          api(token, '/api/relay/diag', { method: 'POST', body: { testTo: testTo.includes('@') ? testTo : '' } })
+                            .then((r) => setRelayTest({ state: 'diag', stages: r.stages || [], ok: r.ok }))
+                            .catch((e) => setRelayTest({ state: 'fail', error: e.message || 'diag failed' }));
+                        }}>[ DIAGNOSE ]</button>
+                        <input className="w-input" style={{maxWidth:210}} type="email" placeholder="rcpt to test (optional)…" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
                         {relayTest.state === 'ok' && <span className="green-txt" style={{fontSize:13}}>● CONNECTED {relayTest.host} · {relayTest.ms}ms</span>}
                         {relayTest.state === 'fail' && <span className="red-txt" style={{fontSize:13}}>● {relayTest.error}</span>}
                         {relayTest.state === 'idle' && <span className="dim-txt" style={{fontSize:12}}>handshakes the relay — EHLO + STARTTLS + AUTH</span>}
                       </div>
+                      {relayTest.state === 'diag' && (
+                        <div className="console" style={{marginTop:10, maxHeight: 220}}>
+                          {(relayTest.stages || []).map((s, i) => (
+                            <div key={i} style={{ color: s.ok ? 'var(--green)' : 'var(--red)', fontSize: 12, fontFamily: 'monospace', padding: '1px 0' }}>
+                              {s.ok ? '✓' : '✗'} {s.name}{s.detail ? ' — ' + s.detail : ''}
+                            </div>
+                          ))}
+                          <div className="dim-txt" style={{fontSize:11,marginTop:6}}>{relayTest.ok ? 'all stages passed' : 'stopped at first failure'}{testTo.includes('@') ? ' · envelope tested to ' + testTo : ' · add a test address above to also check MAIL/RCPT'}</div>
+                        </div>
+                      )}
                     </div>
                   )}
 
