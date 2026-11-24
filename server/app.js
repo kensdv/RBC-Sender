@@ -7,7 +7,7 @@ import { resolveMx } from 'node:dns/promises';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { decryptSecret, encryptSecret, tokensEqual, unsubscribeToken } from './crypto.js';
-import { parseRecipientsCsv } from './csv.js';
+import { parseRecipientsCsv, parseLooseEmails } from './csv.js';
 import { publicSmtp, publicSendSettings } from './mailer.js';
 import { escapeHtml } from './placeholders.js';
 import { transaction } from './db.js';
@@ -505,8 +505,10 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     let parsed;
     try {
       parsed = parseRecipientsCsv(request.body?.csv);
-    } catch (e) {
-      fail(e.message || 'Invalid CSV', 400);
+    } catch (strictErr) {
+      const loose = parseLooseEmails(request.body?.csv);
+      if (loose.records.length) parsed = loose;
+      else fail(strictErr.message || 'Invalid CSV', 400);
     }
     const unique = [...new Map(parsed.records.map((record) => [record.email, record])).values()];
     const now = new Date().toISOString();

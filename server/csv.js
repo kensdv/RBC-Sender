@@ -90,3 +90,27 @@ export function parseRecipientsCsv(input) {
   }
   return { records, errors, delimiter };
 }
+
+// Loose fallback: any text file — pulls every email-looking token regardless
+// of separators (comma, colon, semicolon, pipe, whitespace, newlines).
+export function parseLooseEmails(input) {
+  const source = String(input || '');
+  const tokens = source.match(/[^\s,;|:"'<>()\[\]{}]+/g) || [];
+  const records = [];
+  const errors = [];
+  const seen = new Set();
+  let row = 0;
+  for (const raw of tokens) {
+    row += 1;
+    const email = raw.trim().toLowerCase().replace(/[.,;:!?)\]}>]+$/, '');
+    if (!email) continue;
+    if (!validEmail(email)) {
+      if (email.includes('@')) errors.push({ row, error: 'Invalid email address' });
+      continue;
+    }
+    if (seen.has(email)) continue;
+    seen.add(email);
+    records.push({ row, email, firstName: '', lastName: '', company: '', custom: {} });
+  }
+  return { records, errors, delimiter: 'loose' };
+}

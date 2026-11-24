@@ -1418,7 +1418,7 @@ export default function App() {
                 <div className="two-col">
                   <div className="pane">
                     <div className="pane-head"><span>IMPORT MAIL LIST</span></div>
-                    <p className="dim-txt">Required column: <code>email</code>. Optional: <code>first_name</code>, <code>last_name</code>, <code>company</code>, any custom.</p>
+                    <p className="dim-txt">Any format works — CSV with <code>email</code> column, or a plain list (one per line, comma/colon separated). Optional columns: <code>first_name</code>, <code>last_name</code>, <code>company</code>.</p>
                     <input type="file" accept=".csv,text/csv" className="w-input" onChange={(e) => run(async () => { const f = e.target.files[0]; if (f) setCsv(await f.text()); })} />
                     <textarea className="w-textarea code-ta" rows={12} value={csv} onChange={(e) => setCsv(e.target.value)} />
                     <label className="check-row">
