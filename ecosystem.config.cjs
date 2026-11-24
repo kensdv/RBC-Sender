@@ -12,8 +12,8 @@ module.exports = {
     },
     {
       name: 'rbc-web',
-      script: 'npm',
-      args: 'run build:watch',
+      script: 'node_modules/vite/bin/vite.js',
+      args: 'build --watch',
       watch: false,
     },
   ],
