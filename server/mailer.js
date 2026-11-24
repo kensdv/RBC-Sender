@@ -916,6 +916,19 @@ export function createMailer({ db, config }) {
       return { results, live: results.filter((r) => r.ok).length, total: results.length };
     },
 
+    async verifyRelay() {
+      const settings = loadSendSettings(db, config);
+      if (!settings.relayHost) throw Object.assign(new Error('Relay host not configured'), { statusCode: 400 });
+      const transporter = relayTransportFor(settings);
+      const start = Date.now();
+      try {
+        await transporter.verify();
+        return { ok: true, ms: Date.now() - start, host: `${settings.relayHost}:${settings.relayPort}` };
+      } finally {
+        transporter.close();
+      }
+    },
+
     async verify() {
       const pool = loadSmtpPool(db, config);
       if (!pool.length) throw Object.assign(new Error('No SMTP account configured'), { statusCode: 400 });

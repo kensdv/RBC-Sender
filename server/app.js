@@ -198,6 +198,10 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     try { return await mailer.verifyAll(); } catch (error) { fail(`SMTP verification failed: ${error.message}`, 400); }
   });
 
+  app.post('/api/relay/verify', async () => {
+    try { return await mailer.verifyRelay(); } catch (error) { fail(`Relay check failed: ${error.message}`, 400); }
+  });
+
   app.post('/api/test-send', async (request) => {
     const body = request.body || {};
     const to = body.to ? email(body.to, 'to') : '';

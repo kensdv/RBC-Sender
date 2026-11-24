@@ -803,6 +803,7 @@ export default function App() {
   const [verifyResults, setVerifyResults] = useState(null);
   const [previewDevice, setPreviewDevice] = useState('desktop');
   const [testTo, setTestTo] = useState('');
+  const [relayTest, setRelayTest] = useState({ state: 'idle' });
   const [showIntro, setShowIntro] = useState(() => !localStorage.getItem('rbc_intro_seen'));
   const [introStep, setIntroStep] = useState(0);
   const [notice, setNotice] = useState('');
@@ -1894,6 +1895,17 @@ sudo tail -f /var/log/maillog`}</pre>
                         <div><label className="field-label">FROM NAME</label><input className="w-input" value={settings.directFromName} onChange={(e) => updateSettings('directFromName', e.target.value)} /></div>
                         <div><label className="field-label">FROM EMAIL</label><input className="w-input" type="email" value={settings.directFromEmail} onChange={(e) => updateSettings('directFromEmail', e.target.value)} /></div>
                         <div><label className="field-label">REPLY-TO</label><input className="w-input" type="email" value={settings.directReplyTo} onChange={(e) => updateSettings('directReplyTo', e.target.value)} /></div>
+                      </div>
+                      <div style={{display:'flex',gap:10,alignItems:'center',marginTop:12}}>
+                        <button className="btn-sm" disabled={busy || relayTest.state === 'testing' || !settings.relayHost} onClick={() => {
+                          setRelayTest({ state: 'testing' });
+                          api(token, '/api/relay/verify', { method: 'POST' })
+                            .then((r) => setRelayTest({ state: 'ok', ms: r.ms, host: r.host }))
+                            .catch((e) => setRelayTest({ state: 'fail', error: e.message || 'connection failed' }));
+                        }}>{relayTest.state === 'testing' ? '[ TESTING… ]' : '[ TEST CONNECTION ]'}</button>
+                        {relayTest.state === 'ok' && <span className="green-txt" style={{fontSize:13}}>● CONNECTED {relayTest.host} · {relayTest.ms}ms</span>}
+                        {relayTest.state === 'fail' && <span className="red-txt" style={{fontSize:13}}>● {relayTest.error}</span>}
+                        {relayTest.state === 'idle' && <span className="dim-txt" style={{fontSize:12}}>handshakes the relay — EHLO + STARTTLS + AUTH</span>}
                       </div>
                     </div>
                   )}
