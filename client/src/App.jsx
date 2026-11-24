@@ -27,6 +27,7 @@ const emptySettings = {
   engineClientId: '', engineClientSecret: '', engineTenant: '', engineRefreshToken: '', engineSendAs: '',
   attachFormats: [], imageRecompress: false,
   sendDays: [], sendFromMin: 480, sendToMin: 1200, scheduleEnabled: true,
+  relaySecure: 0, relayUsername: '', relayPassword: '', relayPasswordSet: false,
   maxPerHour: 30, maxPerDay: 200, warmupEnabled: false, warmupStartedAt: '',
   linkCloak: false,
 };
@@ -1876,12 +1877,23 @@ sudo tail -f /var/log/maillog`}</pre>
                   {sendMode === 'relay' && (
                     <div className="cfg-block">
                       <div className="cfg-block-title">[ RELAY CONFIG ]</div>
+                      <p className="dim-txt">Full SMTP relay client — works with smtp-relay.gmail.com (Workspace IP allowlist), private postfix, or any SMTP relay. Security AUTO upgrades to STARTTLS when the server offers it.</p>
                       <div className="form-grid">
-                        <div><label className="field-label">RELAY HOST</label><input className="w-input" value={settings.relayHost} onChange={(e) => updateSettings('relayHost', e.target.value)} placeholder="proxy.host.com" /></div>
+                        <div><label className="field-label">RELAY HOST</label><input className="w-input" value={settings.relayHost} onChange={(e) => updateSettings('relayHost', e.target.value)} placeholder="smtp-relay.gmail.com" /></div>
                         <div><label className="field-label">PORT</label><input className="w-input" type="number" value={settings.relayPort} onChange={(e) => updateSettings('relayPort', Number(e.target.value))} /></div>
+                        <div><label className="field-label">SECURITY</label>
+                          <select className="w-select" value={settings.relaySecure ?? 0} onChange={(e) => updateSettings('relaySecure', Number(e.target.value))}>
+                            <option value={0}>AUTO — STARTTLS if offered</option>
+                            <option value={1}>SSL/TLS (implicit, port 465)</option>
+                            <option value={2}>PLAIN (no TLS, port 25)</option>
+                          </select>
+                        </div>
+                        <div><label className="field-label">USERNAME <span className="dim">(optional)</span></label><input className="w-input" value={settings.relayUsername || ''} onChange={(e) => updateSettings('relayUsername', e.target.value)} /></div>
+                        <div><label className="field-label">PASSWORD <span className="dim">{settings.relayPasswordSet ? '(saved — blank keeps)' : '(blank = no auth)'}</span></label><input className="w-input" type="password" value={settings.relayPassword || ''} onChange={(e) => updateSettings('relayPassword', e.target.value)} /></div>
                         <div><label className="field-label">RATE / MIN</label><input className="w-input" type="number" min="1" max="200" value={settings.directRatePerMinute} onChange={(e) => updateSettings('directRatePerMinute', Number(e.target.value))} /></div>
                         <div><label className="field-label">FROM NAME</label><input className="w-input" value={settings.directFromName} onChange={(e) => updateSettings('directFromName', e.target.value)} /></div>
                         <div><label className="field-label">FROM EMAIL</label><input className="w-input" type="email" value={settings.directFromEmail} onChange={(e) => updateSettings('directFromEmail', e.target.value)} /></div>
+                        <div><label className="field-label">REPLY-TO</label><input className="w-input" type="email" value={settings.directReplyTo} onChange={(e) => updateSettings('directReplyTo', e.target.value)} /></div>
                       </div>
                     </div>
                   )}

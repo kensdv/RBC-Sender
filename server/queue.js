@@ -186,7 +186,7 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
     // Preflight: before a campaign's first send, verify every SMTP account.
     // Dead accounts are cooled down by verifyAll; if none are live the campaign
     // fails fast instead of burning deliveries.
-    if (rows.length && ctx.sendMode === 'smtp' && typeof mailer.verifyAll === 'function') {
+    if (rows.length && (ctx.sendMode === 'smtp' || ctx.sendMode === 'relay') && typeof mailer.verifyAll === 'function') {
       const pending = [...new Set(rows.map((r) => r.campaign_id))].filter((id) => !preflighted.has(id));
       const deadCampaigns = new Set();
       for (const cid of pending) {

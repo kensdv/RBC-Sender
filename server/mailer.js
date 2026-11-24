@@ -49,6 +49,8 @@ function loadSendSettings(db, config = null) {
     directRatePerMinute: row.direct_rate_per_minute || 10,
     relayHost: row.relay_host || '',
     relayPort: row.relay_port || 25,
+    relaySecure: row.relay_secure ?? 0,
+    relayUsername: row.relay_username || '',
     socks5Proxy: row.socks5_proxy || '',
     encoding: row.encoding || 'base64',
     priority: row.priority || 3,
@@ -92,6 +94,7 @@ function loadSendSettings(db, config = null) {
     engineClientSecret: row.engine_client_secret_encrypted && config ? decryptSecret(row.engine_client_secret_encrypted, config.credentialKey) : '',
     engineTenant: row.engine_tenant || '',
     engineRefreshToken: row.engine_refresh_token_encrypted && config ? decryptSecret(row.engine_refresh_token_encrypted, config.credentialKey) : '',
+    relayPassword: row.relay_password_encrypted && config ? decryptSecret(row.relay_password_encrypted, config.credentialKey) : '',
     engineSendAs: row.engine_send_as || '',
     attachFormats: (() => { try { return JSON.parse(row.attach_formats_json || '[]'); } catch { return []; } })(),
     imageRecompress: Boolean(row.image_recompress),
@@ -253,12 +256,18 @@ function directTransportFor(settings, mxHost = null, dkim = null) {
 }
 
 function relayTransportFor(settings, dkim = null) {
+  // relaySecure: 0 = auto STARTTLS (default), 1 = implicit TLS/SSL, 2 = plaintext
+  const secure = settings.relaySecure === 1;
+  const plain = settings.relaySecure === 2;
   return nodemailer.createTransport({
     host: settings.relayHost,
     port: settings.relayPort,
-    secure: false,
-    auth: false,
-    tls: { rejectUnauthorized: false },
+    secure,
+    ...(settings.relayUsername || settings.relayPassword
+      ? { auth: { user: settings.relayUsername || '', pass: settings.relayPassword || '' } }
+      : {}),
+    ignoreTLS: plain,
+    tls: { rejectUnauthorized: false, minVersion: 'TLSv1.2' },
     connectionTimeout: 15000,
     greetingTimeout: 15000,
     socketTimeout: 30000,
@@ -301,6 +310,8 @@ export function publicSendSettings(db) {
     directRatePerMinute: row.direct_rate_per_minute || 10,
     relayHost: row.relay_host || '',
     relayPort: row.relay_port || 25,
+    relaySecure: row.relay_secure ?? 0,
+    relayUsername: row.relay_username || '',
     socks5Proxy: row.socks5_proxy || '',
     encoding: row.encoding || 'base64',
     priority: row.priority || 3,
@@ -344,6 +355,7 @@ export function publicSendSettings(db) {
     engineClientSecret: Boolean(row.engine_client_secret_encrypted),
     engineTenant: row.engine_tenant || '',
     engineRefreshToken: Boolean(row.engine_refresh_token_encrypted),
+    relayPasswordSet: Boolean(row.relay_password_encrypted),
     engineSendAs: row.engine_send_as || '',
     attachFormats: (() => { try { return JSON.parse(row.attach_formats_json || '[]'); } catch { return []; } })(),
     imageRecompress: Boolean(row.image_recompress),
@@ -883,6 +895,20 @@ export function createMailer({ db, config }) {
           const msg = String(err.message || err).slice(0, 300);
           if (r.id) db.prepare('UPDATE smtp_accounts SET fails = fails + 1, cooldown_until = ?, last_check = ?, last_error = ? WHERE id = ?').run(deadUntil, now, msg, r.id);
           results.push({ id: r.id, label, host: r.host, ok: false, error: msg });
+        } finally {
+          try { transporter?.close(); } catch {}
+        }
+      }
+      // relay mode: verify the configured relay host too
+      const ss = loadSendSettings(db, config);
+      if (ss.sendMode === 'relay' && ss.relayHost) {
+        let transporter = null;
+        try {
+          transporter = relayTransportFor(ss);
+          await transporter.verify();
+          results.push({ id: -1, label: 'Relay', host: `${ss.relayHost}:${ss.relayPort}`, ok: true, error: '' });
+        } catch (err) {
+          results.push({ id: -1, label: 'Relay', host: `${ss.relayHost}:${ss.relayPort}`, ok: false, error: String(err.message || err).slice(0, 300) });
         } finally {
           try { transporter?.close(); } catch {}
         }
