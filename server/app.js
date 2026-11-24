@@ -140,7 +140,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const status = telegramStatus(db, config);
     if (!status.configured) fail('Configure bot token and chat ID first', 400);
     const res = await sendTelegram(db, config, `✅ <b>RBC SENDER</b>\n${'─'.repeat(18)}\nTelegram link is live.\nReports will land here.\n🕐 ${new Date().toLocaleString('en-GB', { hour12: false })}`);
-    if (!res.ok) fail(`Telegram error: ${res.error}`, 502);
+    if (!res.ok) fail(`Telegram error: ${res.error}`, 400);
     return { ok: true };
   });
 
@@ -214,7 +214,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
         totalRecipients: 1,
       });
     } catch (err) {
-      fail(`Send failed: ${err.message || err}`, err.statusCode && err.statusCode < 500 ? err.statusCode : 502);
+      fail(`Send failed: ${err.message || err}`, err.statusCode && err.statusCode < 500 ? err.statusCode : 400);
     }
     return { ok: true, messageId: info?.messageId || '' };
   });
