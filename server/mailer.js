@@ -51,6 +51,7 @@ function loadSendSettings(db, config = null) {
     relayPort: row.relay_port || 25,
     relaySecure: row.relay_secure ?? 0,
     relayUsername: row.relay_username || '',
+    relayEhlo: row.relay_ehlo || '',
     socks5Proxy: row.socks5_proxy || '',
     encoding: row.encoding || 'base64',
     priority: row.priority || 3,
@@ -267,6 +268,7 @@ function relayTransportFor(settings, dkim = null) {
       ? { auth: { user: settings.relayUsername || '', pass: settings.relayPassword || '' } }
       : {}),
     ignoreTLS: plain,
+    ...(settings.relayEhlo ? { name: settings.relayEhlo } : {}),
     tls: { rejectUnauthorized: false, minVersion: 'TLSv1.2' },
     connectionTimeout: 15000,
     greetingTimeout: 15000,
@@ -312,6 +314,7 @@ export function publicSendSettings(db) {
     relayPort: row.relay_port || 25,
     relaySecure: row.relay_secure ?? 0,
     relayUsername: row.relay_username || '',
+    relayEhlo: row.relay_ehlo || '',
     socks5Proxy: row.socks5_proxy || '',
     encoding: row.encoding || 'base64',
     priority: row.priority || 3,

@@ -27,7 +27,7 @@ const emptySettings = {
   engineClientId: '', engineClientSecret: '', engineTenant: '', engineRefreshToken: '', engineSendAs: '',
   attachFormats: [], imageRecompress: false,
   sendDays: [], sendFromMin: 480, sendToMin: 1200, scheduleEnabled: true,
-  relaySecure: 0, relayUsername: '', relayPassword: '', relayPasswordSet: false,
+  relaySecure: 0, relayUsername: '', relayPassword: '', relayPasswordSet: false, relayEhlo: '',
   maxPerHour: 30, maxPerDay: 200, warmupEnabled: false, warmupStartedAt: '',
   linkCloak: false,
 };
@@ -1889,6 +1889,7 @@ sudo tail -f /var/log/maillog`}</pre>
                             <option value={2}>PLAIN (no TLS, port 25)</option>
                           </select>
                         </div>
+                        <div><label className="field-label">EHLO NAME <span className="dim">(FQDN you own — e.g. mail.yourdomain.com)</span></label><input className="w-input" value={settings.relayEhlo || ''} onChange={(e) => updateSettings('relayEhlo', e.target.value)} placeholder="mail.yourdomain.com" /></div>
                         <div><label className="field-label">USERNAME <span className="dim">(optional)</span></label><input className="w-input" value={settings.relayUsername || ''} onChange={(e) => updateSettings('relayUsername', e.target.value)} /></div>
                         <div><label className="field-label">PASSWORD <span className="dim">{settings.relayPasswordSet ? '(saved — blank keeps)' : '(blank = no auth)'}</span></label><input className="w-input" type="password" value={settings.relayPassword || ''} onChange={(e) => updateSettings('relayPassword', e.target.value)} /></div>
                         <div><label className="field-label">RATE / MIN</label><input className="w-input" type="number" min="1" max="200" value={settings.directRatePerMinute} onChange={(e) => updateSettings('directRatePerMinute', Number(e.target.value))} /></div>

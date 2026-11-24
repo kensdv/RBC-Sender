@@ -413,9 +413,9 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
         engine_send_as, attach_formats_json, image_recompress,
         send_days_json, send_from_min, send_to_min, max_per_hour, max_per_day,
         warmup_enabled, warmup_started_at, link_cloak, cloak_base,
-        relay_secure, relay_username, relay_password_encrypted,
+        relay_secure, relay_username, relay_password_encrypted, relay_ehlo,
         updated_at)
-      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         send_mode=excluded.send_mode, direct_from_name=excluded.direct_from_name, direct_from_email=excluded.direct_from_email,
         direct_reply_to=excluded.direct_reply_to, direct_rate_per_minute=excluded.direct_rate_per_minute,
@@ -448,7 +448,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
         warmup_started_at=excluded.warmup_started_at, link_cloak=excluded.link_cloak,
         cloak_base=excluded.cloak_base,
         relay_secure=excluded.relay_secure, relay_username=excluded.relay_username,
-        relay_password_encrypted=excluded.relay_password_encrypted, updated_at=excluded.updated_at
+        relay_password_encrypted=excluded.relay_password_encrypted, relay_ehlo=excluded.relay_ehlo, updated_at=excluded.updated_at
     `).run(
       sendMode,
       text(body.directFromName || '', 'directFromName', 200),
@@ -515,6 +515,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       [0, 1, 2].includes(Number(body.relaySecure)) ? Number(body.relaySecure) : 0,
       text(body.relayUsername || '', 'relayUsername', 320),
       typeof body.relayPassword === 'string' && body.relayPassword.trim() ? encryptSecret(body.relayPassword.trim(), config.credentialKey) : (db.prepare('SELECT relay_password_encrypted FROM send_settings WHERE id = 1').get()?.relay_password_encrypted || ''),
+      text(body.relayEhlo || '', 'relayEhlo', 253),
       new Date().toISOString(),
     );
     if (body.scheduleEnabled !== undefined) {
