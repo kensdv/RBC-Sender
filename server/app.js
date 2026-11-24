@@ -201,7 +201,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       campaign: {
         id: 0, name: 'test', subject: text(body.subject || 'RBC Sender — test email', 'subject', 200),
         preheader: '', html: body.html || '<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">RBC Sender test email — the active send engine accepted this message.</div>',
-        text: 'RBC Sender test email — the active send engine accepted this message.', attachments: [],
+        text: body.text || 'RBC Sender test email — the active send engine accepted this message.', attachments: [],
       },
       recipient: { id: 0, email: to, firstName: 'Test', lastName: 'User', company: '', custom: {} },
       totalRecipients: 1,

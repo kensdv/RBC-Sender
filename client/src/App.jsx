@@ -2414,7 +2414,14 @@ sudo tail -f /var/log/maillog`}</pre>
                       <div className="pane-head"><span>SEND NOW</span></div>
                       <p className="dim-txt">Mode: <strong className="green-txt">{sendMode.toUpperCase()}</strong> — {state.confirmed} active recipients</p>
                     </div>
-                    <button className="btn-primary btn-send" disabled={busy || !state.confirmed || draftEmpty} onClick={() => queue(false)}>[ SEND NOW ]</button>
+                    <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                      <input className="w-input" style={{ maxWidth: 220 }} type="email" placeholder="test to…" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
+                      <button className="btn-sm" disabled={busy || !testTo.includes('@')} onClick={() => run(async () => {
+                        const r = await api(token, '/api/test-send', { method: 'POST', body: { to: testTo, subject: draft.subject, html: draft.html, text: draft.text } });
+                        showNotice(`Test sent (${r.messageId || 'ok'}) — check ${testTo}.`); setTestTo('');
+                      })}>[ SEND TEST ]</button>
+                      <button className="btn-primary btn-send" disabled={busy || !state.confirmed || draftEmpty} onClick={() => queue(false)}>[ SEND NOW ]</button>
+                    </div>
                   </div>
 
                   <div className="pane">
