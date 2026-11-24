@@ -656,7 +656,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const id = Number(request.params.id);
     const existing = db.prepare('SELECT status FROM campaigns WHERE id = ?').get(id);
     if (!existing) fail('Campaign not found', 404);
-    if (existing.status !== 'draft') fail('Only draft campaigns can be edited');
+    if (!['draft', 'failed', 'scheduled'].includes(existing.status)) fail('Only draft, scheduled or failed campaigns can be edited');
     const campaign = campaignBody(request.body || {});
     db.prepare('UPDATE campaigns SET name = ?, subject = ?, preheader = ?, html = ?, text = ?, attachments_json = ?, updated_at = ? WHERE id = ?').run(campaign.name, campaign.subject, campaign.preheader, campaign.html, campaign.text, JSON.stringify(campaign.attachments || []), new Date().toISOString(), id);
     return { id };
@@ -702,6 +702,18 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     worker.kick();
     emit('campaign_queued', { campaignId: id, name: campaign.name, subject: campaign.subject, total: recipients.length, scheduledFor });
     return { id, queued: recipients.length, scheduledFor };
+  });
+
+  app.delete('/api/campaigns/:id', async (request) => {
+    const id = Number(request.params.id);
+    const campaign = db.prepare('SELECT status FROM campaigns WHERE id = ?').get(id);
+    if (!campaign) fail('Campaign not found', 404);
+    if (['queued', 'scheduled', 'sending'].includes(campaign.status)) fail('Cancel the campaign before deleting it', 409);
+    transaction(db, () => {
+      db.prepare('DELETE FROM deliveries WHERE campaign_id = ?').run(id);
+      db.prepare('DELETE FROM campaigns WHERE id = ?').run(id);
+    });
+    return { ok: true };
   });
 
   app.post('/api/campaigns/:id/retry', async (request) => {

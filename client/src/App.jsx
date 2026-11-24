@@ -1064,7 +1064,7 @@ export default function App() {
   }
 
   function editCampaign(c) {
-    if (c.status !== 'draft') return;
+    if (!['draft', 'failed', 'scheduled'].includes(c.status)) return;
     setSelectedId(c.id);
     setDraft({ name: c.name, subject: c.subject, preheader: c.preheader || '', html: c.html, text: c.text, attachments: c.attachments || [] });
     setTab('compose');
@@ -2481,8 +2481,9 @@ sudo tail -f /var/log/maillog`}</pre>
                               <td>
                                 <div className="act-row">
                                   <button className="btn-xs" onClick={() => run(async () => { const r = await api(token, `/api/campaigns/${c.id}/duplicate`, { method: 'POST' }); showNotice(`Draft #${r.id} created.`); await refresh(); })}>DUP</button>
-                                  {c.status === 'draft' && <button className="btn-xs" onClick={() => editCampaign(c)}>EDIT</button>}
+                                  {['draft', 'failed', 'scheduled'].includes(c.status) && <button className="btn-xs" onClick={() => editCampaign(c)}>EDIT</button>}
                                   {c.status === 'failed' && <button className="btn-xs" onClick={() => { if (window.confirm(`Retry #${c.id}? SMTP will be re-verified first.`)) run(async () => { await api(token, `/api/campaigns/${c.id}/retry`, { method: 'POST' }); await refresh(); }); }}>RETRY</button>}
+                                  {!['queued', 'scheduled', 'sending'].includes(c.status) && <button className="btn-xs" onClick={() => { if (window.confirm(`Delete campaign #${c.id} "${c.name}" and its delivery history?`)) run(async () => { await api(token, `/api/campaigns/${c.id}`, { method: 'DELETE' }); await refresh(); }); }}>DEL</button>}
                                   {['queued','scheduled','sending'].includes(c.status) && <button className="btn-xs btn-danger" onClick={() => { if (window.confirm(`Cancel #${c.id}?`)) run(async () => { await api(token, `/api/campaigns/${c.id}/cancel`, { method: 'POST' }); await refresh(); }); }}>CANCEL</button>}
                                   <button className="btn-xs" onClick={() => run(() => exportCampaign(c.id))}>CSV</button>
                                 </div>
