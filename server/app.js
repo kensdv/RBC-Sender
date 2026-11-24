@@ -203,15 +203,20 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const body = request.body || {};
     const to = body.to ? email(body.to, 'to') : '';
     if (!to) fail('Test recipient email is required');
-    const info = await mailer.send({
-      campaign: {
-        id: 0, name: 'test', subject: text(body.subject || 'RBC Sender — test email', 'subject', 200),
-        preheader: '', html: body.html || '<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">RBC Sender test email — the active send engine accepted this message.</div>',
-        text: body.text || 'RBC Sender test email — the active send engine accepted this message.', attachments: [],
-      },
-      recipient: { id: 0, email: to, firstName: 'Test', lastName: 'User', company: '', custom: {} },
-      totalRecipients: 1,
-    });
+    let info;
+    try {
+      info = await mailer.send({
+        campaign: {
+          id: 0, name: 'test', subject: text(body.subject || 'RBC Sender — test email', 'subject', 200),
+          preheader: '', html: body.html || '<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">RBC Sender test email — the active send engine accepted this message.</div>',
+          text: body.text || 'RBC Sender test email — the active send engine accepted this message.', attachments: body.attachments || [],
+        },
+        recipient: { id: 0, email: to, firstName: 'Test', lastName: 'User', company: '', custom: {} },
+        totalRecipients: 1,
+      });
+    } catch (err) {
+      fail(`Send failed: ${err.message || err}`, err.statusCode && err.statusCode < 500 ? err.statusCode : 502);
+    }
     return { ok: true, messageId: info?.messageId || '' };
   });
 
