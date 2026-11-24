@@ -605,14 +605,33 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     [/ppmx|ppe-hosted/i, 'Proofpoint'],
     [/hornetsecurity|spamfighter/i, 'Hornetsecurity'],
     [/cloudflare|emailsecurity/i, 'Cloudflare'],
+    [/zimbra/i, 'Zimbra'],
+    [/exchange|owa/i, 'OWA/Exchange'],
   ];
+
+  // Self-hosted webmail (Zimbra, OWA/Exchange) shows the same generic
+  // mail.domain.com MX — probe the domain's web root for signatures.
+  async function probeWebmail(domain) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const res = await fetch(`https://${domain}/`, { signal: ctrl.signal, redirect: 'follow' });
+      clearTimeout(timer);
+      const body = (await res.text()).slice(0, 200000);
+      const url = res.url || '';
+      if (/zimbra/i.test(body) || /\/zimbra/i.test(url)) return 'Zimbra';
+      if (/owa\/auth|Microsoft\.Exchange|outlook\.office/i.test(body) || /\/owa(\/|$|\?)/i.test(url)) return 'OWA/Exchange';
+    } catch {}
+    return null;
+  }
 
   async function mxInfo(domain) {
     try {
       const records = await resolveMx(domain);
       records.sort((a, b) => a.priority - b.priority);
       const exchange = records[0]?.exchange || '';
-      const provider = MX_PROVIDERS.find(([re]) => re.test(exchange))?.[1] || 'Other/Custom';
+      let provider = MX_PROVIDERS.find(([re]) => re.test(exchange))?.[1] || 'Other/Custom';
+      if (provider === 'Other/Custom') provider = (await probeWebmail(domain)) || provider;
       return { hasMx: true, mx: exchange, provider };
     } catch {
       return { hasMx: false, mx: '', provider: 'No MX' };
