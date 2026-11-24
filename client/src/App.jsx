@@ -716,11 +716,72 @@ const NAV_ITEMS = [
   { id: 'send',       label: 'SEND',        icon: '▶' },
 ];
 
+const EVENT_STYLE = {
+  send_ok:          { icon: '✓', color: 'var(--green)',  label: 'SENT' },
+  send_fail:        { icon: '✗', color: 'var(--red)',    label: 'FAIL' },
+  campaign_start:   { icon: '▶', color: 'var(--cyan)',   label: 'START' },
+  campaign_queued:  { icon: '⇩', color: 'var(--cyan)',   label: 'QUEUE' },
+  campaign_done:    { icon: '■', color: 'var(--purple)', label: 'DONE' },
+  open:             { icon: '◉', color: 'var(--yellow)', label: 'OPEN' },
+  click:            { icon: '↗', color: 'var(--cyan)',   label: 'CLICK' },
+  bounce:           { icon: '⛔', color: 'var(--red)',    label: 'BOUNCE' },
+  unsubscribe:      { icon: '⊘', color: 'var(--orange)', label: 'UNSUB' },
+  telegram_fail:    { icon: '⚠', color: 'var(--orange)', label: 'TG-ERR' },
+  info:             { icon: '·', color: 'var(--txt-dim)', label: 'INFO' },
+};
+
+function eventLine(ev) {
+  switch (ev.kind) {
+    case 'send_ok':         return `${ev.email}`;
+    case 'send_fail':       return `${ev.email} — ${ev.error || 'failed'}`;
+    case 'campaign_start':  return `${ev.name} — "${ev.subject || '(no subject)'}" · ${ev.total ?? '?'} recipients · ${ev.engine || ''}`;
+    case 'campaign_queued': return `${ev.name} — "${ev.subject || '(no subject)'}" · ${ev.total ?? '?'} queued${ev.scheduledFor ? ' · scheduled ' + new Date(ev.scheduledFor).toLocaleString() : ''}`;
+    case 'campaign_done': {
+      const s = {};
+      for (const r of ev.stats || []) s[r.status] = r.c;
+      return `${ev.name} — sent ${s.sent || 0} · failed ${s.failed || 0} · left ${(s.queued || 0) + (s.sending || 0)}`;
+    }
+    case 'open':            return `${ev.email} opened ${ev.name ? `“${ev.name}”` : ''}`;
+    case 'click':           return `${ev.email} → ${String(ev.target || '').slice(0, 80)}`;
+    case 'bounce':          return `${ev.email} — ${ev.reason || ev.kind}`;
+    case 'unsubscribe':     return `${ev.email} unsubscribed`;
+    case 'telegram_fail':   return `telegram: ${ev.error}`;
+    default:                return ev.message || ev.kind;
+  }
+}
+
+function LiveConsole({ events }) {
+  const ref = useRef(null);
+  const list = (events || []).slice(-100);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [list.length]);
+  return (
+    <div className="console" ref={ref}>
+      {list.length === 0 && <div className="console-empty">[ AWAITING EVENTS — SENDS, OPENS, CLICKS, BOUNCES STREAM HERE ]</div>}
+      {list.map((ev, i) => {
+        const st = EVENT_STYLE[ev.kind] || EVENT_STYLE.info;
+        return (
+          <div key={i} className="console-line">
+            <span className="console-ts">{new Date(ev.ts).toLocaleTimeString('en-GB', { hour12: false })}</span>
+            <span className="console-ico" style={{ color: st.color }}>{st.icon}</span>
+            <span className="console-tag" style={{ color: st.color }}>{st.label}</span>
+            <span className="console-msg">{eventLine(ev)}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function App() {
   const [token, setToken] = useState(() => sessionStorage.getItem('mailerToken') || '');
   const [loginToken, setLoginToken] = useState('');
   const [state, setState] = useState(null);
   const [netInfo, setNetInfo] = useState(null);
+  const [tgToken, setTgToken] = useState('');
+  const [tgChat, setTgChat] = useState('');
   const [tab, setTab] = useState('dashboard');
   const [draft, setDraft] = useState(emptyDraft);
   const [selectedId, setSelectedId] = useState(null);
@@ -772,6 +833,10 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
+    if (state?.telegram?.chatId && !tgChat) setTgChat(state.telegram.chatId);
+  }, [state?.telegram?.chatId]);
+
+  useEffect(() => {
     if (!token) return;
     let alive = true;
     const load = () => api(token, '/api/netinfo').then((n) => { if (alive) setNetInfo(n); }).catch(() => {});
@@ -781,7 +846,7 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
-    if (!token || tab !== 'send') return;
+    if (!token || (tab !== 'send' && tab !== 'dashboard')) return;
     const iv = setInterval(() => refresh(token).catch(() => {}), 3000);
     return () => clearInterval(iv);
   }, [token, tab]);
@@ -2173,6 +2238,24 @@ sudo tail -f /var/log/maillog`}</pre>
                     )}
                   </div>
 
+                  {/* Telegram */}
+                  <div className="cfg-block">
+                    <div className="cfg-block-title">[ TELEGRAM REPORTS ]</div>
+                    <p className="dim-txt">Campaign start/finish, opens, clicks, bounces and unsubscribes are pushed here live. Create a bot via @BotFather, get your chat id from @userinfobot.</p>
+                    <div className="form-grid">
+                      <div><label className="field-label">BOT TOKEN</label><input className="w-input" type="password" value={tgToken} onChange={(e) => setTgToken(e.target.value)} placeholder={state.telegram?.configured ? '•••••••• (saved — leave blank to keep)' : '123456:ABC-DEF...'} /></div>
+                      <div><label className="field-label">CHAT ID</label><input className="w-input" value={tgChat} onChange={(e) => setTgChat(e.target.value)} placeholder="-1001234567890" /></div>
+                    </div>
+                    <div style={{display:'flex',gap:10,marginTop:12,alignItems:'center'}}>
+                      <button className="btn-sm" disabled={busy} onClick={() => run(async () => {
+                        await api(token, '/api/telegram', { method: 'PUT', body: { botToken: tgToken, chatId: tgChat } });
+                        setTgToken(''); await refresh(); showNotice('Telegram saved.');
+                      })}>[ SAVE ]</button>
+                      <button className="btn-sm" disabled={busy || !state.telegram?.configured} onClick={() => run(async () => { await api(token, '/api/telegram/test', { method: 'POST' }); showNotice('Test sent — check telegram.'); })}>[ TEST ]</button>
+                      <span className={`stat-val ${state.telegram?.configured ? 'sent-val' : 'fail-val'}`} style={{fontSize:11}}>{state.telegram?.configured ? `● LINKED · ${state.telegram.chatId}` : '○ NOT CONFIGURED'}</span>
+                    </div>
+                  </div>
+
                   <button className="btn-primary" disabled={busy} onClick={saveSettings}>[ SAVE SETTINGS ]</button>
                 </div>
               )}
@@ -2303,6 +2386,10 @@ sudo tail -f /var/log/maillog`}</pre>
                       </div>
                     </div>
                   </div>
+                  <div className="pane">
+                    <div className="pane-head"><span>LIVE CONSOLE</span><span className="dim">streaming sends · opens · clicks · bounces</span></div>
+                    <LiveConsole events={state.events} />
+                  </div>
                 </div>
               )}
 
@@ -2329,6 +2416,11 @@ sudo tail -f /var/log/maillog`}</pre>
                       <p className="dim-txt">Mode: <strong className="green-txt">{sendMode.toUpperCase()}</strong> — {state.confirmed} active recipients</p>
                     </div>
                     <button className="btn-primary btn-send" disabled={busy || !state.confirmed || draftEmpty} onClick={() => queue(false)}>[ SEND NOW ]</button>
+                  </div>
+
+                  <div className="pane">
+                    <div className="pane-head"><span>LIVE CONSOLE</span><span className="dim">streaming sends · opens · clicks · bounces</span></div>
+                    <LiveConsole events={state.events} />
                   </div>
 
                   <div className="pane">

@@ -11,6 +11,8 @@ import { parseRecipientsCsv } from './csv.js';
 import { publicSmtp, publicSendSettings } from './mailer.js';
 import { escapeHtml } from './placeholders.js';
 import { transaction } from './db.js';
+import { createEmitter, telegramStatus, saveTelegram, sendTelegram, formatEvent } from './telegram.js';
+import { listEvents } from './events.js';
 
 function fail(message, statusCode = 400) {
   throw Object.assign(new Error(message), { statusCode });
@@ -77,7 +79,8 @@ function unsubscribePage(message, action = '') {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Subscription preferences</title><style>body{font:16px system-ui;max-width:560px;margin:12vh auto;padding:24px;background:#0b1020;color:#e5eaf5}button{background:#2563eb;color:white;border:0;border-radius:8px;padding:12px 18px;cursor:pointer}a{color:#93c5fd}</style></head><body><h1>Subscription preferences</h1><p>${escapeHtml(message)}</p>${action ? `<form method="post" action="${escapeHtml(action)}"><button type="submit">Unsubscribe</button></form>` : ''}</body></html>`;
 }
 
-export async function createApp({ db, config, mailer, worker }) {
+export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
+  const emit = emitFn || createEmitter({ db, config });
   const app = Fastify({ logger: process.env.NODE_ENV !== 'test', bodyLimit: 4 * 1024 * 1024 });
   app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (request, body, done) => {
     try { done(null, Object.fromEntries(new URLSearchParams(body))); } catch (error) { done(error); }
@@ -126,6 +129,21 @@ export async function createApp({ db, config, mailer, worker }) {
   }
   app.get('/api/netinfo', async () => getNetInfo());
 
+  app.get('/api/telegram', async () => telegramStatus(db, config));
+
+  app.put('/api/telegram', async (request) => {
+    const body = request.body || {};
+    return saveTelegram(db, config, { botToken: body.botToken, chatId: body.chatId });
+  });
+
+  app.post('/api/telegram/test', async () => {
+    const status = telegramStatus(db, config);
+    if (!status.configured) fail('Configure bot token and chat ID first', 400);
+    const res = await sendTelegram(db, config, `✅ <b>RBC SENDER</b>\n${'─'.repeat(18)}\nTelegram link is live.\nReports will land here.\n🕐 ${new Date().toLocaleString('en-GB', { hour12: false })}`);
+    if (!res.ok) fail(`Telegram error: ${res.error}`, 502);
+    return { ok: true };
+  });
+
   app.get('/api/state', async () => {
     const recipients = db.prepare('SELECT * FROM recipients ORDER BY id DESC LIMIT 1000').all().map(recipientView);
     const campaigns = db.prepare(`
@@ -140,7 +158,7 @@ export async function createApp({ db, config, mailer, worker }) {
     const confirmed = db.prepare('SELECT COUNT(*) AS count FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0').get().count;
     seedPoolFromLegacy();
     const smtpAccounts = db.prepare('SELECT * FROM smtp_accounts ORDER BY id').all().map(accountView);
-    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db), recipients, campaigns, bounces, confirmed, publicBaseUrl: config.publicBaseUrl };
+    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db), recipients, campaigns, bounces, confirmed, publicBaseUrl: config.publicBaseUrl, events: listEvents(120), telegram: telegramStatus(db, config) };
   });
 
   app.put('/api/smtp', async (request) => {
@@ -664,6 +682,7 @@ export async function createApp({ db, config, mailer, worker }) {
       db.prepare('UPDATE campaigns SET status = ?, scheduled_for = ?, updated_at = ? WHERE id = ?').run(scheduledFor ? 'scheduled' : 'queued', scheduledFor, new Date().toISOString(), id);
     });
     worker.kick();
+    emit('campaign_queued', { campaignId: id, name: campaign.name, subject: campaign.subject, total: recipients.length, scheduledFor });
     return { id, queued: recipients.length, scheduledFor };
   });
 
@@ -706,7 +725,9 @@ export async function createApp({ db, config, mailer, worker }) {
     if (!config.webhookToken) fail('Bounce webhook is not configured', 503);
     if (!tokensEqual(request.headers['x-webhook-token'], config.webhookToken)) fail('Unauthorized', 401);
     const kind = request.body?.kind === 'complaint' ? 'complaint' : 'bounce';
-    suppress(request.body?.email, text(request.body?.reason, 'reason', 1000) || kind, kind);
+    const reason = text(request.body?.reason, 'reason', 1000) || kind;
+    suppress(request.body?.email, reason, kind);
+    emit('bounce', { email: String(request.body?.email || '').toLowerCase(), reason, kind });
     return { ok: true };
   });
 
@@ -720,6 +741,11 @@ export async function createApp({ db, config, mailer, worker }) {
     if (address && tokensEqual(token, unsubscribeToken(address, config.unsubscribeSecret))) {
       try {
         db.prepare('INSERT INTO tracking_events (campaign_id, email, kind, created_at) VALUES (?, ?, ?, ?)').run(campaignId, address, 'open', new Date().toISOString());
+        const opens = db.prepare("SELECT COUNT(*) AS c FROM tracking_events WHERE kind = 'open' AND email = ? AND campaign_id IS ?").get(address, campaignId).c;
+        if (opens === 1) {
+          const camp = campaignId ? db.prepare('SELECT name FROM campaigns WHERE id = ?').get(campaignId) : null;
+          emit('open', { campaignId, email: address, name: camp?.name });
+        }
       } catch {}
     }
     return reply.type('image/gif').header('cache-control', 'no-store, no-cache, must-revalidate').header('pragma', 'no-cache').send(PIXEL_GIF);
@@ -733,6 +759,8 @@ export async function createApp({ db, config, mailer, worker }) {
     if (address && tokensEqual(token, unsubscribeToken(address, config.unsubscribeSecret)) && /^https?:\/\//i.test(target)) {
       try {
         db.prepare('INSERT INTO tracking_events (campaign_id, email, kind, target, created_at) VALUES (?, ?, ?, ?, ?)').run(campaignId, address, 'click', target.slice(0, 2000), new Date().toISOString());
+        const camp = campaignId ? db.prepare('SELECT name FROM campaigns WHERE id = ?').get(campaignId) : null;
+        emit('click', { campaignId, email: address, target, name: camp?.name });
       } catch {}
       return reply.redirect(target, 302);
     }
@@ -756,6 +784,7 @@ export async function createApp({ db, config, mailer, worker }) {
     const address = email(request.query?.email);
     if (!tokensEqual(request.query?.token, unsubscribeToken(address, config.unsubscribeSecret))) fail('Invalid unsubscribe token', 403);
     suppress(address, 'Unsubscribed by recipient', 'unsubscribe');
+    emit('unsubscribe', { email: address });
     return reply.type('text/html').send(unsubscribePage(`${address} has been unsubscribed.`));
   });
 

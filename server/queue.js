@@ -8,7 +8,7 @@ function temporary(error) {
   return (error.responseCode >= 400 && error.responseCode < 500) || ['ECONNECTION', 'ETIMEDOUT', 'ESOCKET'].includes(error.code);
 }
 
-export function createWorker({ db, mailer, logger = console }) {
+export function createWorker({ db, mailer, logger = console, emit = () => {} }) {
   let timer;
   let active = null;
   let stopped = true;
@@ -27,6 +27,7 @@ export function createWorker({ db, mailer, logger = console }) {
     let sendDays = [];
     try { sendDays = JSON.parse(ss.send_days_json || '[]'); } catch {}
     return {
+      sendMode: mode,
       ratePerMinute,
       sleepMs: ss.sleep_ms || 0,
       parallel: Math.min(30, Math.max(1, Number(ss.parallel_sends) || 1)),
@@ -80,7 +81,13 @@ export function createWorker({ db, mailer, logger = console }) {
 
   function completeCampaign(campaignId) {
     const remaining = db.prepare("SELECT COUNT(*) AS count FROM deliveries WHERE campaign_id = ? AND status IN ('queued', 'sending')").get(campaignId).count;
-    if (!remaining) db.prepare("UPDATE campaigns SET status = 'completed', updated_at = ? WHERE id = ? AND status != 'cancelled'").run(new Date().toISOString(), campaignId);
+    if (remaining) return;
+    const camp = db.prepare('SELECT id, name, subject, status FROM campaigns WHERE id = ?').get(campaignId);
+    if (!camp || camp.status === 'completed' || camp.status === 'cancelled') return;
+    const done = db.prepare("UPDATE campaigns SET status = 'completed', updated_at = ? WHERE id = ? AND status NOT IN ('completed', 'cancelled')").run(new Date().toISOString(), campaignId);
+    if (!done.changes) return;
+    const stats = db.prepare('SELECT status, COUNT(*) AS c FROM deliveries WHERE campaign_id = ? GROUP BY status').all(campaignId);
+    emit('campaign_done', { campaignId, name: camp.name, subject: camp.subject, stats });
   }
 
   const ROW_SELECT = `
@@ -104,7 +111,11 @@ export function createWorker({ db, mailer, logger = console }) {
     const now = new Date().toISOString();
     const claimed = db.prepare("UPDATE deliveries SET status = 'sending', attempts = attempts + 1 WHERE id = ? AND status = 'queued'").run(row.delivery_id);
     if (!claimed.changes) return;
-    db.prepare("UPDATE campaigns SET status = 'sending', updated_at = ? WHERE id = ?").run(now, row.campaign_id);
+    const flipped = db.prepare("UPDATE campaigns SET status = 'sending', updated_at = ? WHERE id = ? AND status IN ('queued', 'scheduled')").run(now, row.campaign_id);
+    if (flipped.changes) {
+      const total = db.prepare('SELECT COUNT(*) AS count FROM deliveries WHERE campaign_id = ?').get(row.campaign_id).count;
+      emit('campaign_start', { campaignId: row.campaign_id, name: row.name, subject: row.subject, total, engine: ctx.sendMode });
+    }
 
     try {
       const total = db.prepare('SELECT COUNT(*) AS count FROM deliveries WHERE campaign_id = ?').get(row.campaign_id).count;
@@ -114,6 +125,7 @@ export function createWorker({ db, mailer, logger = console }) {
         totalRecipients: total,
       });
       db.prepare("UPDATE deliveries SET status = 'sent', provider_message_id = ?, sent_at = ?, error = NULL WHERE id = ?").run(info.messageId || '', new Date().toISOString(), row.delivery_id);
+      emit('send_ok', { campaignId: row.campaign_id, name: row.name, email: row.email });
       if (ctx.warmupEnabled) db.prepare("UPDATE send_settings SET warmup_started_at = ? WHERE id = 1 AND warmup_enabled = 1 AND warmup_started_at = ''").run(new Date().toISOString());
       sendCount++;
 
@@ -134,6 +146,7 @@ export function createWorker({ db, mailer, logger = console }) {
       const nextAttempt = retry ? new Date(Date.now() + 2 ** row.attempts * 60000).toISOString() : null;
       db.prepare('UPDATE deliveries SET status = ?, next_attempt_at = ?, error = ? WHERE id = ?').run(retry ? 'queued' : 'failed', nextAttempt, String(error.message || error).slice(0, 1000), row.delivery_id);
       logger.error(`Delivery ${row.delivery_id}: ${error.message || error}`);
+      emit('send_fail', { campaignId: row.campaign_id, name: row.name, email: row.email, error: String(error.message || error).slice(0, 200) });
     } finally {
       completeCampaign(row.campaign_id);
     }

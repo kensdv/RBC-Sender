@@ -161,6 +161,10 @@ export function openDatabase(path) {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS tracking_events_idx ON tracking_events(email, kind);
+    CREATE TABLE IF NOT EXISTS integrations (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL DEFAULT ''
+    );
     PRAGMA user_version = 2;
   `);
   const cols = new Set(db.prepare('PRAGMA table_info(send_settings)').all().map((c) => c.name));
