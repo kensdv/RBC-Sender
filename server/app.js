@@ -154,6 +154,8 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       FROM campaigns c LEFT JOIN deliveries d ON d.campaign_id = c.id
       GROUP BY c.id ORDER BY c.id DESC LIMIT 200
     `).all().map(campaignView);
+    const hold = worker.diagnose ? worker.diagnose() : null;
+    if (hold) for (const c of campaigns) if (['queued', 'scheduled', 'sending'].includes(c.status) && c.queued > 0) c.hold = hold;
     const bounces = db.prepare('SELECT id, email, kind, reason, created_at AS createdAt FROM bounces ORDER BY id DESC LIMIT 500').all();
     const confirmed = db.prepare('SELECT COUNT(*) AS count FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0').get().count;
     seedPoolFromLegacy();
@@ -667,6 +669,8 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const campaign = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(id);
     if (!campaign) fail('Campaign not found', 404);
     if (campaign.status !== 'draft') fail('Only a draft campaign can be queued');
+    if (!campaign.subject?.trim()) fail('Campaign has no subject');
+    if (!campaign.html?.trim() && !campaign.text?.trim()) fail('Campaign has no content');
     const settings = publicSendSettings(db);
     if (settings.sendMode === 'smtp' && !db.prepare('SELECT 1 FROM smtp_settings WHERE id = 1').get() && !db.prepare('SELECT 1 FROM smtp_accounts LIMIT 1').get()) fail('Configure SMTP before queueing');
     if (settings.sendMode === 'relay' && !settings.relayHost) fail('Configure relay host before queueing');

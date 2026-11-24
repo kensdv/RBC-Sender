@@ -188,6 +188,34 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
     await Promise.all(rows.map((row) => sendOne(row, ctx)));
   }
 
+  function fmtMin(m) {
+    const h = Math.floor(m / 60) % 24, mm = m % 60;
+    return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  }
+
+  // why queued deliveries aren't moving right now — null when the worker is ready to send
+  function diagnose() {
+    const ctx = getSettings();
+    if (!withinSchedule(ctx)) {
+      const days = ctx.sendDays.length ? ctx.sendDays.map((d) => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d - 1] || d).join('/') : 'daily';
+      return `paused — outside send window (${days} ${fmtMin(ctx.sendFromMin)}–${fmtMin(ctx.sendToMin)} ${ctx.timezone})`;
+    }
+    const hourAgo = new Date(Date.now() - 3600000).toISOString();
+    const dayAgo = new Date(Date.now() - 86400000).toISOString();
+    if (ctx.maxPerHour > 0) {
+      const n = db.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE status = 'sent' AND sent_at >= ?").get(hourAgo).c;
+      if (n >= ctx.maxPerHour) return `paused — hourly cap ${ctx.maxPerHour} reached`;
+    }
+    const dayCap = effectiveDailyCap(ctx);
+    if (dayCap > 0) {
+      const n = db.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE status = 'sent' AND sent_at >= ?").get(dayAgo).c;
+      if (n >= dayCap) return `paused — daily cap ${dayCap} reached`;
+    }
+    const next = db.prepare("SELECT MIN(next_attempt_at) AS n FROM deliveries WHERE status = 'queued' AND next_attempt_at IS NOT NULL").get().n;
+    if (next && next > new Date().toISOString()) return `paused — retry backoff until ${new Date(next).toLocaleTimeString()}`;
+    return null;
+  }
+
   function tick() {
     if (stopped) return;
     if (active) return active;
@@ -203,6 +231,7 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
       timer.unref();
     },
     kick: tick,
+    diagnose,
     async stop() {
       stopped = true;
       clearInterval(timer);

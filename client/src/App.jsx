@@ -1110,6 +1110,7 @@ export default function App() {
 
   const sendMode = settings.sendMode || 'smtp';
   const draftEmpty = !draft.html.trim() && !draft.text.trim();
+  const canQueue = !draftEmpty && draft.subject.trim().length > 0;
 
   return (
     <div className="layout">
@@ -2266,7 +2267,7 @@ sudo tail -f /var/log/maillog`}</pre>
                   <p className="dim-txt">{selectedId ? `Draft #${selectedId} selected.` : 'Current compose content will be saved as a draft.'}</p>
                   <label className="field-label">DELIVERY DATE / TIME</label>
                   <input className="w-input" type="datetime-local" value={scheduledFor} onChange={(e) => setScheduledFor(e.target.value)} />
-                  <button className="btn-primary" style={{marginTop:14}} disabled={busy || !scheduledFor || draftEmpty} onClick={() => { try { new Date(scheduledFor).toISOString(); queue(true); } catch { showNotice('Invalid date.', 'err'); } }}>[ QUEUE SCHEDULED ]</button>
+                  <button className="btn-primary" style={{marginTop:14}} disabled={busy || !scheduledFor || !canQueue} onClick={() => { try { new Date(scheduledFor).toISOString(); queue(true); } catch { showNotice('Invalid date.', 'err'); } }}>[ QUEUE SCHEDULED ]</button>
                 </div>
               )}
 
@@ -2420,7 +2421,7 @@ sudo tail -f /var/log/maillog`}</pre>
                         const r = await api(token, '/api/test-send', { method: 'POST', body: { to: testTo, subject: draft.subject, html: draft.html, text: draft.text } });
                         showNotice(`Test sent (${r.messageId || 'ok'}) — check ${testTo}.`); setTestTo('');
                       })}>[ SEND TEST ]</button>
-                      <button className="btn-primary btn-send" disabled={busy || !state.confirmed || draftEmpty} onClick={() => queue(false)}>[ SEND NOW ]</button>
+                      <button className="btn-primary btn-send" disabled={busy || !state.confirmed || !canQueue} onClick={() => queue(false)}>[ SEND NOW ]</button>
                     </div>
                   </div>
 
@@ -2444,6 +2445,7 @@ sudo tail -f /var/log/maillog`}</pre>
                                 {c.total > 0 && (
                                   <div className="prog-bar"><div className="prog-fill" style={{ width: `${Math.round(((c.sent + c.failed) / c.total) * 100)}%` }} /></div>
                                 )}
+                                {c.hold && <div className="dim-txt" style={{fontSize:11,marginTop:4}}>{c.hold}</div>}
                               </td>
                               <td>{c.total}</td>
                               <td className="green-txt">{c.sent}</td>
