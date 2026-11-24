@@ -240,7 +240,7 @@ function transportFor(smtp, dkim = null, proxy = '') {
 function directTransportFor(settings, mxHost = null, dkim = null) {
   const opts = {
     direct: !mxHost,
-    ...(mxHost ? { host: mxHost, port: 25, secure: false, auth: false, ignoreTLS: true, tls: { rejectUnauthorized: false } } : {}),
+    ...(mxHost ? { host: mxHost, port: 25, secure: false, auth: false, tls: { rejectUnauthorized: false } } : {}),
     connectionTimeout: 15000,
     greetingTimeout: 15000,
     socketTimeout: 30000,
@@ -258,7 +258,6 @@ function relayTransportFor(settings, dkim = null) {
     port: settings.relayPort,
     secure: false,
     auth: false,
-    ignoreTLS: true,
     tls: { rejectUnauthorized: false },
     connectionTimeout: 15000,
     greetingTimeout: 15000,
