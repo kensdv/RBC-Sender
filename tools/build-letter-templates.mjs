@@ -8,12 +8,17 @@ import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, relative } from 'node:path';
 
-const SKIP_PATH = /evilginx|node_modules|contact-us-tool|netryx_full_src|\/results\/|monitor|vendor\/|\.git|dist\/|src\//i;
+const SKIP_PATH = /evilginx|node_modules|contact-us-tool|netryx_full_src|\/results\/|monitor|vendor\/|\.git|dist\/|src\/|page\/template|run\/templates|Desktop[\\/]run|EmailExtractor/i;
+const TXT_TAG = /<(html|body|table|div|p|span|td|tr|a|img|h[1-6]|!doctype|tbody|font|center|b|i|u|br|hr)\b/i;
 const SKIP_NAME = /^(js[_ ]|C_Users)/i;
-const SKIP_CONTENT = /<form\b|type=["']?password|name=["']?password|<input\b[^>]*password/i;
+const SKIP_CONTENT = /<form\b|type=["']?password|name=["']?password|<input\b[^>]*password|\{\{[^}]*\}\}/i;
 const TOKEN_MAP = [
   [/\{lure_url_html\}|\{lure_url_js\}|\{lure_url\}|\{redirectUrl\}|\{redirect_url\}/gi, '++rbc_url++'],
   [/\{email\}/gi, '++rbc_email++'],
+  [/\[Email\]/gi, '++rbc_email++'],
+  [/\[Email_LocalPart\]/gi, '++rbc_user++'],
+  [/\[Email_DomainPart\]/gi, '++rbc_domain++'],
+  [/\[Date_long\]/gi, '[Datum_lang]'],
   [/\{username\}/gi, '++rbc_user++'],
   [/\{current_date\}|\{date\}|\{year\}/gi, '++rbc_date++'],
   [/\{name\}/gi, '[Firstname]'],
@@ -24,12 +29,12 @@ function* walk(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, entry.name);
     if (entry.isDirectory()) { if (!SKIP_PATH.test(p)) yield* walk(p); }
-    else if (/\.html?$/i.test(entry.name)) yield p;
+    else if (/\.(html?|txt)$/i.test(entry.name)) yield p;
   }
 }
 
 function cleanLabel(file) {
-  let name = basename(file).replace(/\.html?$/i, '');
+  let name = basename(file).replace(/\.(html?|txt)$/i, '');
   name = name.replace(/\s*\(\d+\)\s*/g, ' ').replace(/_/g, ' ');
   name = name.replace(/\s+/g, ' ').trim() || 'letter';
   return name.slice(0, 60);
@@ -79,13 +84,22 @@ for (const file of files) {
   if (SKIP_NAME.test(basename(file))) continue;
   let raw;
   try { raw = readFileSync(file, 'utf8'); } catch { continue; }
+  const isTxt = /\.txt$/i.test(file);
   if (raw.length < 2000 || raw.length > 900 * 1024) continue;
-  if (!/<body|<table/i.test(raw)) continue;
+  if (raw.slice(0, 4) === 'PK\x03\x04' || /[\x00-\x08\x0B\x0C\x0E-\x1F]{4,}/.test(raw.slice(0, 8000))) continue;
+  if (isTxt) {
+    if (!TXT_TAG.test(raw)) continue;
+    const lines = raw.split('\n');
+    const emailLines = lines.filter((l) => /^\s*\S+@\S+/.test(l)).length;
+    if (emailLines > lines.length * 0.3) continue;
+  }
+  if (!/<body|<table|<[a-z]+[\s>]/i.test(raw)) continue;
   if (SKIP_CONTENT.test(raw)) continue;
   const hash = createHash('md5').update(raw).digest('hex');
   if (seen.has(hash)) continue;
   seen.add(hash);
   const html = refine(raw);
+  if (htmlToText(html).length < 80) continue;
   let label = cleanLabel(file);
   let n = 2;
   while (templates.some((t) => t.label === `✉ ${label}`)) label = `${cleanLabel(file)} (${n++})`;
