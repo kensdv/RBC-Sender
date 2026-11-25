@@ -1236,6 +1236,7 @@ export default function App() {
             <button className="btn-primary" type="submit">[ ACCESS ]</button>
           </form>
           {notice && <p className="login-err">[ ERROR ] {notice}</p>}
+          <p className="login-made">made with ❤️ @fuckmonad</p>
         </div>
       </div>
       </>
