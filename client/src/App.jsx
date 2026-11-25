@@ -803,6 +803,9 @@ export default function App() {
   const [verifyResults, setVerifyResults] = useState(null);
   const [extraRecipients, setExtraRecipients] = useState([]);
   const [previewDevice, setPreviewDevice] = useState('desktop');
+  const [versionInfo, setVersionInfo] = useState(null);
+  const [updateInfo, setUpdateInfo] = useState(null);
+  const [updating, setUpdating] = useState(false);
   const [testTo, setTestTo] = useState('');
   const [relayTest, setRelayTest] = useState({ state: 'idle' });
   const [showIntro, setShowIntro] = useState(() => !localStorage.getItem('rbc_intro_seen'));
@@ -853,6 +856,21 @@ export default function App() {
     const load = () => api(token, '/api/netinfo').then((n) => { if (alive) setNetInfo(n); }).catch(() => {});
     load();
     const iv = setInterval(load, 60000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    let alive = true;
+    const check = () => api(token, '/api/update/check')
+      .then((r) => {
+        if (!alive) return;
+        setVersionInfo({ version: r.version, commit: r.local });
+        if (!r.upToDate && r.remote) setUpdateInfo(r);
+      })
+      .catch(() => {});
+    check();
+    const iv = setInterval(check, 60 * 60 * 1000);
     return () => { alive = false; clearInterval(iv); };
   }, [token]);
 
@@ -942,6 +960,17 @@ export default function App() {
     try { await action(); }
     catch (err) { showNotice(err.message, 'err'); }
     finally { setBusy(false); }
+  }
+
+  async function applyUpdate() {
+    setUpdating(true);
+    setUpdateInfo(null);
+    try {
+      await api(token, '/api/update/apply', { method: 'POST' });
+    } catch (err) {
+      setUpdating(false);
+      showNotice(`Update failed: ${err.message}`, 'err');
+    }
   }
 
   function login(e) {
@@ -1149,7 +1178,14 @@ export default function App() {
       <aside className="sidebar">
         <div className="sidebar-brand">
           <RbcLogo size={34} />
-          <span className="sb-wordmark">RBC<span>SENDER</span></span>
+          <div>
+            <span className="sb-wordmark">RBC<span>SENDER</span></span>
+            {versionInfo && (
+              <div className="sb-ver">
+                v{versionInfo.version}{versionInfo.commit ? ` · ${versionInfo.commit.slice(0, 7)}` : ''}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="sb-stats">
@@ -2670,6 +2706,39 @@ sudo tail -f /var/log/maillog`}</pre>
                 className={`btn-primary ${dialog.danger ? 'btn-danger-solid' : ''}`}
                 onClick={() => settleDialog(dialog.kind === 'prompt' ? dialog.value.trim() !== '' : true)}
               >{dialog.confirmLabel}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── UPDATE AVAILABLE MODAL ── */}
+      {updateInfo && !updating && (
+        <div className="dlg-overlay">
+          <div className="dlg-card" onClick={(e) => e.stopPropagation()}>
+            <div className="dlg-title" style={{ color: 'var(--yellow)' }}>UPDATE AVAILABLE</div>
+            <div className="dlg-msg">
+              A new version is available on GitHub.<br /><br />
+              <span className="dim">LOCAL &nbsp;</span><code style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{updateInfo.local?.slice(0, 7) || '—'}</code><br />
+              <span className="dim">REMOTE </span><code style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{updateInfo.remote?.slice(0, 7) || '—'}</code><br /><br />
+              Click <strong>[ YES ]</strong> to run <code style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>git pull → npm install → npm run build</code> and restart the server automatically.
+            </div>
+            <div className="dlg-actions">
+              <button className="btn-sm" onClick={() => setUpdateInfo(null)}>LATER</button>
+              <button className="btn-primary" onClick={applyUpdate}>[ YES — UPDATE ]</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── UPDATING OVERLAY ── */}
+      {updating && (
+        <div className="dlg-overlay">
+          <div className="dlg-card">
+            <div className="dlg-title" style={{ color: 'var(--cyan)' }}>UPDATING...</div>
+            <div className="dlg-msg">
+              Running <code style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>git pull → npm install → npm run build</code>.<br /><br />
+              The server will restart automatically when done.<br />
+              <strong>Refresh this page in ~30 seconds.</strong>
             </div>
           </div>
         </div>

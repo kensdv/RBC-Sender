@@ -158,15 +158,96 @@ Azure portal → App registrations → new registration → API permissions → 
 
 The app is a **stateful Node server** (Fastify + SQLite + a background send queue). It cannot run on static hosts.
 
-- **GitHub Pages / Vercel static** — not suitable: the UI calls `/api/*` which requires the Node backend.
-- **Recommended**: any Node host — Railway, Render, Fly.io, a VPS, or a Windows service via `nssm`/`pm2`.
-- Set `HOST=0.0.0.0` and `PUBLIC_BASE_URL=https://your-domain` on the host, put it behind HTTPS (Caddy/nginx/Cloudflare), and point `DATABASE_PATH` at a persistent volume.
+### Quick install on Windows RDP
+
+```powershell
+# PowerShell as Administrator
+Set-ExecutionPolicy Bypass -Scope Process -Force
+.\install.ps1
+```
+
+The installer handles everything: Chocolatey, Git, Node 22, repo clone, `.env` generation, npm build, PM2 process manager, Caddy reverse proxy, and NSSM service registration. Re-running it pulls latest changes and restarts cleanly.
+
+### Manual setup (any OS)
 
 ```bash
-# example: pm2 on a VPS
+npm install
+npm run build
+npm start
+```
+
+Set in `.env`:
+
+```
+HOST=0.0.0.0
+PORT=3000
+PUBLIC_BASE_URL=https://your-domain.com
+```
+
+### Caddy reverse proxy (Windows)
+
+Caddy handles HTTP→HTTPS or plain HTTP proxying to the Node process on `:3000`.
+
+```powershell
+# Install Caddy + NSSM
+choco install caddy nssm -y
+
+# Write Caddyfile
+@"
+:80 {
+    reverse_proxy localhost:3000
+    encode gzip
+    header {
+        -Server
+        X-Frame-Options DENY
+        X-Content-Type-Options nosniff
+    }
+}
+"@ | Set-Content C:\Caddy\Caddyfile
+
+# Register as Windows service
+$caddyExe = (Get-Command caddy).Source
+nssm install CaddyRBC "$caddyExe" "run --config `"C:\Caddy\Caddyfile`" --adapter caddyfile"
+nssm set CaddyRBC AppDirectory C:\Caddy
+nssm set CaddyRBC Start SERVICE_AUTO_START
+netsh advfirewall firewall add rule name="Caddy HTTP" protocol=TCP dir=in action=allow localport=80
+Start-Service CaddyRBC
+```
+
+**Traffic chain:** Cloudflare (orange cloud) → Caddy `:80` → Node `:3000`
+
+No cloudflared needed — Cloudflare proxies to the RDP's public IP on port 80.
+
+### PM2 process manager
+
+```powershell
 npm install -g pm2
-pm2 start server/index.js --name rbc-sender
+pm2 start ecosystem.config.cjs --only rbc-api --update-env
 pm2 save
+pm2 startup  # registers auto-start on Windows boot
+```
+
+### Cloudflare DNS setup
+
+In the Cloudflare dashboard for your domain:
+
+| Record | Name | Value | Proxy |
+|--------|------|-------|-------|
+| A | `@` | `<RDP public IP>` | Orange cloud ON |
+| A | `mail` | `<RDP public IP>` | Orange cloud ON |
+
+- `@` → dashboard URL (`https://yourdomain.com`)
+- `mail` → email tracking/unsubscribe base (`PUBLIC_BASE_URL` in `.env`)
+
+### Useful commands
+
+```powershell
+pm2 logs rbc-api              # live log stream
+pm2 restart rbc-api           # restart node server
+pm2 status                    # process table
+Get-Service CaddyRBC          # caddy service status
+Restart-Service CaddyRBC      # reload caddy
+Get-Service cloudflared       # tunnel status (if using tunnel instead of CF proxy)
 ```
 
 ## Project layout

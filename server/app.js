@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { execSync } from 'node:child_process';
 import net from 'node:net';
 import { resolveMx } from 'node:dns/promises';
 import Fastify from 'fastify';
@@ -19,6 +20,7 @@ function fail(message, statusCode = 400) {
 }
 
 const UPLOADS_DIR = fileURLToPath(new URL('../data/uploads/', import.meta.url));
+const APP_ROOT    = fileURLToPath(new URL('../', import.meta.url));
 mkdirSync(UPLOADS_DIR, { recursive: true });
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
@@ -92,7 +94,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
   });
   app.addHook('onRequest', async (request, reply) => {
     const path = request.url.split('?', 1)[0];
-    const publicPath = path === '/api/health' || path === '/api/unsubscribe' || path === '/api/webhooks/bounce' || path === '/api/engine/gmail/callback' || path === '/api/go' || path.startsWith('/api/track/');
+    const publicPath = path === '/api/health' || path === '/api/version' || path === '/api/unsubscribe' || path === '/api/webhooks/bounce' || path === '/api/engine/gmail/callback' || path === '/api/go' || path.startsWith('/api/track/');
     if (path.startsWith('/api/') && !publicPath) {
       const authorization = request.headers.authorization || '';
       const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
@@ -925,6 +927,48 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     suppress(address, 'Unsubscribed by recipient', 'unsubscribe');
     emit('unsubscribe', { email: address });
     return reply.type('text/html').send(unsubscribePage(`${address} has been unsubscribed.`));
+  });
+
+  // ── Version / Auto-update ──
+  function localCommit() {
+    try { return execSync('git rev-parse HEAD', { cwd: APP_ROOT, stdio: 'pipe' }).toString().trim(); }
+    catch { return ''; }
+  }
+
+  let _pkgVersion = '1.0.0';
+  try { _pkgVersion = JSON.parse(readFileSync(resolve(APP_ROOT, 'package.json'), 'utf8')).version; } catch {}
+
+  app.get('/api/version', async () => ({ version: _pkgVersion, commit: localCommit() }));
+
+  app.get('/api/update/check', async () => {
+    const local = localCommit();
+    let remote = '';
+    try {
+      const r = await fetch('https://api.github.com/repos/kensdv/RBC-Sender/branches/main', {
+        headers: { 'User-Agent': 'rbc-sender-autoupdate/1.0' },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (r.ok) { const j = await r.json(); remote = j?.commit?.sha || ''; }
+    } catch {}
+    return { upToDate: !remote || local === remote, local, remote, version: _pkgVersion };
+  });
+
+  app.post('/api/update/apply', async (request, reply) => {
+    reply.send({ ok: true, message: 'Update started — the server will restart automatically.' });
+    setTimeout(async () => {
+      try {
+        console.log('[update] Running git pull...');
+        execSync('git pull --rebase', { cwd: APP_ROOT, stdio: 'inherit', shell: true });
+        console.log('[update] Running npm install...');
+        execSync('npm install', { cwd: APP_ROOT, stdio: 'inherit', shell: true });
+        console.log('[update] Running npm run build...');
+        execSync('npm run build', { cwd: APP_ROOT, stdio: 'inherit', shell: true });
+        console.log('[update] Done — restarting process.');
+        process.exit(0);
+      } catch (e) {
+        console.error('[update] FAILED:', e.message);
+      }
+    }, 300);
   });
 
   app.setErrorHandler((error, request, reply) => {

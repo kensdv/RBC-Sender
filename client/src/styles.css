@@ -398,6 +398,7 @@ code { background: rgba(255,255,255,0.06); border: 1px solid var(--border); padd
 .login-wordmark span { display: block; font-size: 10px; letter-spacing: .5em; color: var(--cyan); text-align: center; margin-top: 2px; }
 .sb-wordmark { font-family: var(--mono); font-weight: 800; font-size: 15px; letter-spacing: .12em; color: var(--txt); line-height: 1; }
 .sb-wordmark span { display: block; font-size: 8px; letter-spacing: .42em; color: var(--cyan); margin-top: 3px; }
+.sb-ver { font-family: var(--mono); font-size: 9px; color: var(--txt-dim); letter-spacing: .06em; margin-top: 5px; opacity: .7; }
 .sidebar-brand { display: flex; align-items: center; gap: 12px; }
 
 /* ── DASHBOARD ── */
