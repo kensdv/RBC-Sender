@@ -12,100 +12,118 @@ function ChromosomeBackground() {
     resize();
     window.addEventListener('resize', resize);
 
-    // ── Chromosomes (X shapes) ──
-    const chroms = Array.from({ length: 14 }, () => ({
-      x: Math.random() * window.innerWidth,
-      y: Math.random() * window.innerHeight,
-      vx: (Math.random() - 0.5) * 0.2,
-      vy: (Math.random() - 0.5) * 0.2,
-      rot: Math.random() * Math.PI * 2,
-      rs: (Math.random() - 0.5) * 0.006,
-      tilt: Math.random() * Math.PI,
-      ts: (Math.random() - 0.5) * 0.004,
-      size: 14 + Math.random() * 32,
-      alpha: 0.06 + Math.random() * 0.14,
-      cyan: Math.random() < 0.3,
-    }));
+    // Shell radii ratios — clearly nested: inner, mid, outer
+    const SHELL_R = [1, 1.85, 2.9];
+    // Plane angles fixed 60° apart so shells always cross each other visibly
+    const PLANE_BASE = [0, Math.PI / 3, 2 * Math.PI / 3];
 
-    // ── DNA helix strips ──
-    const RUNG_COLORS = ['0,255,65', '0,255,220', '68,255,136', '0,200,255'];
-    const dnaStrips = Array.from({ length: 8 }, (_, i) => ({
-      cx: (i + 0.5) * (window.innerWidth / 8) + (Math.random() - 0.5) * 120,
-      vx: (Math.random() - 0.5) * 0.35,
-      vy: (Math.random() - 0.5) * 0.18,
-      yOff: Math.random() * 300,          // scroll phase
-      scrollSpeed: 0.4 + Math.random() * 0.5,
-      tilt: Math.random() * Math.PI * 2,  // 3D rotation phase
-      tiltSpeed: 0.004 + Math.random() * 0.006,
-      amp: 18 + Math.random() * 22,       // helix half-width
-      period: 90 + Math.random() * 60,    // pixels per full twist
-      alpha: 0.13 + Math.random() * 0.18,
-      angle: (Math.random() - 0.5) * 0.55, // lean angle
-      rungCols: [0, 1, 2, 3].map(() => Math.floor(Math.random() * RUNG_COLORS.length)),
-    }));
+    const mkAtom = () => {
+      const baseR = 28 + Math.random() * 36;        // nucleus-to-shell-1 distance
+      const alpha  = 0.18 + Math.random() * 0.28;
+      const nR     = 3 + Math.random() * 4;
+      return {
+        cx: Math.random() * window.innerWidth,
+        cy: Math.random() * window.innerHeight,
+        vx: (Math.random() - 0.5) * 0.24,
+        vy: (Math.random() - 0.5) * 0.24,
+        nR, alpha,
+        // 3 shells — fixed spacing multiplied by baseR, staggered plane angles
+        shells: SHELL_R.map((rm, si) => ({
+          r: baseR * rm,
+          // Tilt: controls 3D perspective — persp = 0.4 + 0.6*|sin(tilt)| so never collapses
+          tilt:     Math.random() * Math.PI * 2,
+          tiltSpd:  0.004 + Math.random() * 0.007 * (Math.random() > 0.5 ? 1 : -1),
+          // Plane angle spread 60° apart + slow individual precession
+          planeAngle: PLANE_BASE[si] + Math.random() * 0.4,
+          planeSpd:   (Math.random() - 0.5) * 0.0014,
+          // Electrons: 1, 2, 3 on shells 0,1,2 — classic Bohr
+          electrons: Array.from({ length: si + 1 }, (_, ei, a) => ({
+            phase: (ei / (si + 1)) * Math.PI * 2,
+            spd:   (0.014 + Math.random() * 0.018) * (Math.random() > 0.5 ? 1 : -1),
+            trail: [],     // stores recent positions for motion trail
+          })),
+          col: si === 1 ? '0,220,255' : '0,255,65',  // mid shell cyan, rest green
+        })),
+      };
+    };
 
-    const drawDNA = (strip) => {
-      const { cx, yOff, amp, period, alpha, angle } = strip;
-      const H = canvas.height + 60;
-      const perspective = 0.35 + 0.65 * Math.abs(Math.sin(strip.tilt)); // 3D depth factor
-      const effAmp = amp * perspective;
+    const atoms = Array.from({ length: 12 }, mkAtom);
+
+    const drawShell = (sh, alpha) => {
+      // 3D perspective — floor at 0.4 so ring always reads as ellipse
+      const persp = 0.4 + 0.6 * Math.abs(Math.sin(sh.tilt));
+      const rx = sh.r, ry = sh.r * persp;
+      const { col } = sh;
 
       ctx.save();
-      ctx.translate(cx, -30);
-      ctx.rotate(angle);
+      ctx.rotate(sh.planeAngle);
 
-      const step = 6;
-      const rungStep = Math.round(period / 8); // rungs every 1/8 period
+      // Ring — bright, clearly visible
+      ctx.beginPath();
+      ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${col},${alpha * 0.55})`;
+      ctx.lineWidth = 1.1;
+      ctx.stroke();
 
-      // Build backbone point arrays
-      const pts1 = [], pts2 = [];
-      for (let y = 0; y <= H; y += step) {
-        const phase = ((y + yOff) / period) * Math.PI * 2;
-        pts1.push({ x: effAmp * Math.sin(phase),          y });
-        pts2.push({ x: effAmp * Math.sin(phase + Math.PI), y });
+      // Separate front half (brighter) from back half (dimmer)
+      // Front = sin(angle) < 0 in rotated space
+      for (const el of sh.electrons) {
+        const ex = rx * Math.cos(el.phase);
+        const ey = ry * Math.sin(el.phase);
+        const isFront = Math.sin(el.phase) < 0;
+        const depth = isFront ? 1 : 0.4;
+
+        // Trail — 8 ghost dots fading behind the electron
+        const tlen = el.trail.length;
+        for (let ti = 0; ti < tlen; ti++) {
+          const tp = el.trail[ti];
+          const tf = (ti / tlen) * 0.35 * depth;
+          ctx.fillStyle = `rgba(${col},${alpha * tf})`;
+          ctx.beginPath(); ctx.arc(tp.x, tp.y, 1.4, 0, Math.PI * 2); ctx.fill();
+        }
+
+        if (isFront) {
+          // Glow halo
+          const eg = ctx.createRadialGradient(ex, ey, 0, ex, ey, 9);
+          eg.addColorStop(0, `rgba(${col},${alpha * 0.9})`);
+          eg.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = eg;
+          ctx.beginPath(); ctx.arc(ex, ey, 9, 0, Math.PI * 2); ctx.fill();
+          // Bright core
+          ctx.fillStyle = `rgba(230,255,245,${Math.min(1, alpha * 2.6)})`;
+          ctx.beginPath(); ctx.arc(ex, ey, 2.6, 0, Math.PI * 2); ctx.fill();
+        } else {
+          // Dim back dot
+          ctx.fillStyle = `rgba(${col},${alpha * 0.45})`;
+          ctx.beginPath(); ctx.arc(ex, ey, 1.8, 0, Math.PI * 2); ctx.fill();
+        }
+
+        // Store trail
+        el.trail.push({ x: ex, y: ey });
+        if (el.trail.length > 8) el.trail.shift();
       }
 
-      // Draw strand 1
-      ctx.beginPath();
-      ctx.moveTo(pts1[0].x, pts1[0].y);
-      for (let i = 1; i < pts1.length; i++) ctx.lineTo(pts1[i].x, pts1[i].y);
-      ctx.strokeStyle = `rgba(0,255,65,${alpha})`;
-      ctx.lineWidth = 1.6;
-      ctx.lineCap = 'round';
-      ctx.stroke();
+      ctx.restore();
+    };
 
-      // Draw strand 2
-      ctx.beginPath();
-      ctx.moveTo(pts2[0].x, pts2[0].y);
-      for (let i = 1; i < pts2.length; i++) ctx.lineTo(pts2[i].x, pts2[i].y);
-      ctx.strokeStyle = `rgba(0,220,255,${alpha})`;
-      ctx.lineWidth = 1.6;
-      ctx.stroke();
+    const drawAtom = (a) => {
+      ctx.save();
+      ctx.translate(a.cx, a.cy);
 
-      // Draw rungs (base pairs) — only where strands are crossing from front to back
-      const totalSteps = pts1.length;
-      for (let i = 0; i < totalSteps; i++) {
-        const y = pts1[i].y;
-        const phase = ((y + yOff) / period) * Math.PI * 2;
-        const normPhase = ((phase % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-        // Place rungs uniformly every rungStep pixels in y
-        if (Math.round(y) % rungStep !== 0) continue;
-        const x1 = pts1[i].x, x2 = pts2[i].x;
-        // Fade rungs based on 3D perspective — wider = more visible
-        const rungAlpha = alpha * 0.65 * perspective;
-        // Color cycles through base-pair palette
-        const colIdx = strip.rungCols[Math.floor((y / rungStep) % 4)];
-        const col = RUNG_COLORS[Math.abs(colIdx) % RUNG_COLORS.length];
-        ctx.beginPath();
-        ctx.moveTo(x1, y);
-        ctx.lineTo(x2, y);
-        ctx.strokeStyle = `rgba(${col},${rungAlpha})`;
-        ctx.lineWidth = 1.2;
-        ctx.stroke();
-        // Node dots at each rung end
-        ctx.fillStyle = `rgba(${col},${rungAlpha * 1.4})`;
-        ctx.beginPath(); ctx.arc(x1, y, 1.8, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(x2, y, 1.8, 0, Math.PI * 2); ctx.fill();
+      // Nucleus — large glow + bright hard dot
+      const nr = a.nR;
+      const ng = ctx.createRadialGradient(0, 0, 0, 0, 0, nr * 7);
+      ng.addColorStop(0,   `rgba(120,255,160,${a.alpha * 1.8})`);
+      ng.addColorStop(0.4, `rgba(0,255,65,${a.alpha})`);
+      ng.addColorStop(1,   'rgba(0,0,0,0)');
+      ctx.fillStyle = ng;
+      ctx.beginPath(); ctx.arc(0, 0, nr * 7, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = `rgba(210,255,225,${Math.min(1, a.alpha * 2.8)})`;
+      ctx.beginPath(); ctx.arc(0, 0, nr, 0, Math.PI * 2); ctx.fill();
+
+      // Draw shells outer→inner so inner draws on top
+      for (let si = a.shells.length - 1; si >= 0; si--) {
+        drawShell(a.shells[si], a.alpha);
       }
 
       ctx.restore();
@@ -115,48 +133,23 @@ function ChromosomeBackground() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       // Subtle grid
-      ctx.strokeStyle = 'rgba(0,255,65,0.015)';
+      ctx.strokeStyle = 'rgba(0,255,65,0.013)';
       ctx.lineWidth = 1;
       const gs = 55;
       for (let x = 0; x < canvas.width; x += gs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); }
       for (let y = 0; y < canvas.height; y += gs) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
 
-      // Draw DNA strips
-      for (const d of dnaStrips) {
-        d.yOff += d.scrollSpeed;
-        d.cx += d.vx;
-        d.tilt += d.tiltSpeed;
-        const margin = 80;
-        if (d.cx < -margin) d.cx = canvas.width + margin;
-        else if (d.cx > canvas.width + margin) d.cx = -margin;
-        drawDNA(d);
-      }
-
-      // Draw chromosomes on top
-      for (const c of chroms) {
-        c.x += c.vx; c.y += c.vy; c.rot += c.rs; c.tilt += c.ts;
-        if (c.x < -90) c.x = canvas.width + 90; else if (c.x > canvas.width + 90) c.x = -90;
-        if (c.y < -90) c.y = canvas.height + 90; else if (c.y > canvas.height + 90) c.y = -90;
-        const scY = 0.28 + 0.72 * Math.abs(Math.cos(c.tilt));
-        const a = c.alpha * (0.45 + 0.55 * scY);
-        const col = c.cyan ? '0,255,220' : '0,255,65';
-        const s = c.size;
-        ctx.save();
-        ctx.translate(c.x, c.y);
-        ctx.rotate(c.rot);
-        ctx.scale(1, scY);
-        ctx.lineWidth = 2.4; ctx.lineCap = 'round';
-        ctx.strokeStyle = `rgba(${col},${a})`;
-        ctx.beginPath(); ctx.moveTo(-s * 0.62, -s * 0.88); ctx.bezierCurveTo(-s * 0.1, -s * 0.1, s * 0.1, s * 0.1, s * 0.62, s * 0.88); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(s * 0.62, -s * 0.88); ctx.bezierCurveTo(s * 0.1, -s * 0.1, -s * 0.1, s * 0.1, -s * 0.62, s * 0.88); ctx.stroke();
-        ctx.lineWidth = 1.4; ctx.strokeStyle = `rgba(${col},${a * 0.5})`;
-        ctx.beginPath(); ctx.moveTo(-s * 0.62 + 4, -s * 0.88); ctx.bezierCurveTo(-s * 0.1 + 3, -s * 0.1, s * 0.1 + 3, s * 0.1, s * 0.62 + 4, s * 0.88); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(s * 0.62 + 4, -s * 0.88); ctx.bezierCurveTo(s * 0.1 + 3, -s * 0.1, -s * 0.1 + 3, s * 0.1, -s * 0.62 + 4, s * 0.88); ctx.stroke();
-        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, s * 0.2);
-        g.addColorStop(0, `rgba(${col},${Math.min(1, a * 1.8)})`);
-        g.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, s * 0.2, 0, Math.PI * 2); ctx.fill();
-        ctx.restore();
+      for (const a of atoms) {
+        a.cx += a.vx; a.cy += a.vy;
+        const m = 180;
+        if (a.cx < -m) a.cx = canvas.width + m; else if (a.cx > canvas.width + m) a.cx = -m;
+        if (a.cy < -m) a.cy = canvas.height + m; else if (a.cy > canvas.height + m) a.cy = -m;
+        for (const sh of a.shells) {
+          sh.tilt       += sh.tiltSpd;
+          sh.planeAngle += sh.planeSpd;
+          for (const el of sh.electrons) el.phase += el.spd;
+        }
+        drawAtom(a);
       }
 
       animId = requestAnimationFrame(draw);
