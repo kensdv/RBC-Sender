@@ -12,144 +12,63 @@ function ChromosomeBackground() {
     resize();
     window.addEventListener('resize', resize);
 
-    // Shell radii ratios — clearly nested: inner, mid, outer
-    const SHELL_R = [1, 1.85, 2.9];
-    // Plane angles fixed 60° apart so shells always cross each other visibly
-    const PLANE_BASE = [0, Math.PI / 3, 2 * Math.PI / 3];
+    // ── Neon galaxy: static stars + slow nebula glow pulses ──
+    const STAR_COUNT = 400;
+    const NEBULA_COUNT = 6;
 
-    const mkAtom = () => {
-      const baseR = 28 + Math.random() * 36;        // nucleus-to-shell-1 distance
-      const alpha  = 0.18 + Math.random() * 0.28;
-      const nR     = 3 + Math.random() * 4;
-      return {
-        cx: Math.random() * window.innerWidth,
-        cy: Math.random() * window.innerHeight,
-        vx: (Math.random() - 0.5) * 0.24,
-        vy: (Math.random() - 0.5) * 0.24,
-        nR, alpha,
-        // 3 shells — fixed spacing multiplied by baseR, staggered plane angles
-        shells: SHELL_R.map((rm, si) => ({
-          r: baseR * rm,
-          // Tilt: controls 3D perspective — persp = 0.4 + 0.6*|sin(tilt)| so never collapses
-          tilt:     Math.random() * Math.PI * 2,
-          tiltSpd:  0.004 + Math.random() * 0.007 * (Math.random() > 0.5 ? 1 : -1),
-          // Plane angle spread 60° apart + slow individual precession
-          planeAngle: PLANE_BASE[si] + Math.random() * 0.4,
-          planeSpd:   (Math.random() - 0.5) * 0.0014,
-          // Electrons: 1, 2, 3 on shells 0,1,2 — classic Bohr
-          electrons: Array.from({ length: si + 1 }, (_, ei, a) => ({
-            phase: (ei / (si + 1)) * Math.PI * 2,
-            spd:   (0.014 + Math.random() * 0.018) * (Math.random() > 0.5 ? 1 : -1),
-            trail: [],     // stores recent positions for motion trail
-          })),
-          col: si === 1 ? '0,220,255' : '0,255,65',  // mid shell cyan, rest green
-        })),
-      };
-    };
+    const stars = Array.from({ length: STAR_COUNT }, () => ({
+      x: Math.random() * window.innerWidth,
+      y: Math.random() * window.innerHeight,
+      r: 0.3 + Math.random() * 1.4,
+      alpha: 0.2 + Math.random() * 0.8,
+      cyan: Math.random() < 0.2,
+      pulse: Math.random() * Math.PI * 2,
+      pulseSpd: 0.008 + Math.random() * 0.012,
+    }));
 
-    const atoms = Array.from({ length: 12 }, mkAtom);
-
-    const drawShell = (sh, alpha) => {
-      // 3D perspective — floor at 0.4 so ring always reads as ellipse
-      const persp = 0.4 + 0.6 * Math.abs(Math.sin(sh.tilt));
-      const rx = sh.r, ry = sh.r * persp;
-      const { col } = sh;
-
-      ctx.save();
-      ctx.rotate(sh.planeAngle);
-
-      // Ring — bright, clearly visible
-      ctx.beginPath();
-      ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(${col},${alpha * 0.55})`;
-      ctx.lineWidth = 1.1;
-      ctx.stroke();
-
-      // Separate front half (brighter) from back half (dimmer)
-      // Front = sin(angle) < 0 in rotated space
-      for (const el of sh.electrons) {
-        const ex = rx * Math.cos(el.phase);
-        const ey = ry * Math.sin(el.phase);
-        const isFront = Math.sin(el.phase) < 0;
-        const depth = isFront ? 1 : 0.4;
-
-        // Trail — 8 ghost dots fading behind the electron
-        const tlen = el.trail.length;
-        for (let ti = 0; ti < tlen; ti++) {
-          const tp = el.trail[ti];
-          const tf = (ti / tlen) * 0.35 * depth;
-          ctx.fillStyle = `rgba(${col},${alpha * tf})`;
-          ctx.beginPath(); ctx.arc(tp.x, tp.y, 1.4, 0, Math.PI * 2); ctx.fill();
-        }
-
-        if (isFront) {
-          // Glow halo
-          const eg = ctx.createRadialGradient(ex, ey, 0, ex, ey, 9);
-          eg.addColorStop(0, `rgba(${col},${alpha * 0.9})`);
-          eg.addColorStop(1, 'rgba(0,0,0,0)');
-          ctx.fillStyle = eg;
-          ctx.beginPath(); ctx.arc(ex, ey, 9, 0, Math.PI * 2); ctx.fill();
-          // Bright core
-          ctx.fillStyle = `rgba(230,255,245,${Math.min(1, alpha * 2.6)})`;
-          ctx.beginPath(); ctx.arc(ex, ey, 2.6, 0, Math.PI * 2); ctx.fill();
-        } else {
-          // Dim back dot
-          ctx.fillStyle = `rgba(${col},${alpha * 0.45})`;
-          ctx.beginPath(); ctx.arc(ex, ey, 1.8, 0, Math.PI * 2); ctx.fill();
-        }
-
-        // Store trail
-        el.trail.push({ x: ex, y: ey });
-        if (el.trail.length > 8) el.trail.shift();
-      }
-
-      ctx.restore();
-    };
-
-    const drawAtom = (a) => {
-      ctx.save();
-      ctx.translate(a.cx, a.cy);
-
-      // Nucleus — large glow + bright hard dot
-      const nr = a.nR;
-      const ng = ctx.createRadialGradient(0, 0, 0, 0, 0, nr * 7);
-      ng.addColorStop(0,   `rgba(120,255,160,${a.alpha * 1.8})`);
-      ng.addColorStop(0.4, `rgba(0,255,65,${a.alpha})`);
-      ng.addColorStop(1,   'rgba(0,0,0,0)');
-      ctx.fillStyle = ng;
-      ctx.beginPath(); ctx.arc(0, 0, nr * 7, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = `rgba(210,255,225,${Math.min(1, a.alpha * 2.8)})`;
-      ctx.beginPath(); ctx.arc(0, 0, nr, 0, Math.PI * 2); ctx.fill();
-
-      // Draw shells outer→inner so inner draws on top
-      for (let si = a.shells.length - 1; si >= 0; si--) {
-        drawShell(a.shells[si], a.alpha);
-      }
-
-      ctx.restore();
-    };
+    const nebulas = Array.from({ length: NEBULA_COUNT }, () => ({
+      cx: Math.random() * window.innerWidth,
+      cy: Math.random() * window.innerHeight,
+      r: 120 + Math.random() * 200,
+      alpha: 0.06 + Math.random() * 0.12,
+      pulse: Math.random() * Math.PI * 2,
+      pulseSpd: 0.003 + Math.random() * 0.006,
+      col: ['0,255,65', '0,220,255', '68,255,136', '0,150,255'][Math.floor(Math.random() * 4)],
+    }));
 
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Subtle grid
-      ctx.strokeStyle = 'rgba(0,255,65,0.013)';
-      ctx.lineWidth = 1;
-      const gs = 55;
-      for (let x = 0; x < canvas.width; x += gs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); }
-      for (let y = 0; y < canvas.height; y += gs) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
+      // Deep dark base
+      ctx.fillStyle = '#020402';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      for (const a of atoms) {
-        a.cx += a.vx; a.cy += a.vy;
-        const m = 180;
-        if (a.cx < -m) a.cx = canvas.width + m; else if (a.cx > canvas.width + m) a.cx = -m;
-        if (a.cy < -m) a.cy = canvas.height + m; else if (a.cy > canvas.height + m) a.cy = -m;
-        for (const sh of a.shells) {
-          sh.tilt       += sh.tiltSpd;
-          sh.planeAngle += sh.planeSpd;
-          for (const el of sh.electrons) el.phase += el.spd;
+      // Nebula clouds — slow pulsing radial gradients
+      for (const n of nebulas) {
+        n.pulse += n.pulseSpd;
+        const amp = 0.7 + 0.3 * Math.sin(n.pulse);
+        const g = ctx.createRadialGradient(n.cx, n.cy, 0, n.cx, n.cy, n.r * amp);
+        g.addColorStop(0,   `rgba(${n.col},${n.alpha * amp})`);
+        g.addColorStop(0.5, `rgba(${n.col},${n.alpha * 0.4 * amp})`);
+        g.addColorStop(1,   'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(n.cx, n.cy, n.r * amp, 0, Math.PI * 2); ctx.fill();
+      }
+
+      // Stars — static positions, pulsing brightness
+      for (const s of stars) {
+        s.pulse += s.pulseSpd;
+        const a = s.alpha * (0.6 + 0.4 * Math.sin(s.pulse));
+        const col = s.cyan ? '0,220,255' : '0,255,65';
+        ctx.fillStyle = `rgba(${col},${a})`;
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+        // Occasional bright cross for larger stars
+        if (s.r > 1 && Math.random() < 0.01) {
+          ctx.strokeStyle = `rgba(${col},${a * 0.8})`;
+          ctx.lineWidth = 0.6;
+          ctx.beginPath(); ctx.moveTo(s.x - s.r * 3, s.y); ctx.lineTo(s.x + s.r * 3, s.y); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(s.x, s.y - s.r * 3); ctx.lineTo(s.x, s.y + s.r * 3); ctx.stroke();
         }
-        drawAtom(a);
       }
 
       animId = requestAnimationFrame(draw);
