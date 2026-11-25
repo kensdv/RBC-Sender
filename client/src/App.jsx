@@ -115,7 +115,7 @@ function RbcLogo({ size = 44 }) {
     <svg width={size} height={size} viewBox="0 0 48 48" fill="none" aria-hidden="true">
       <defs>
         <linearGradient id="rbcg" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#00e5a0" /><stop offset="1" stopColor="#00c8ff" />
+          <stop stopColor="#00ff41" /><stop offset="1" stopColor="#00ffff" />
         </linearGradient>
       </defs>
       <path d="M24 2 42 12v24L24 46 6 36V12L24 2Z" fill="url(#rbcg)" opacity="0.14" stroke="url(#rbcg)" strokeWidth="2" />
@@ -1155,7 +1155,7 @@ export default function App() {
             <RbcLogo size={72} />
             <div className="login-wordmark">RBC<span>SENDER</span></div>
           </div>
-          <p className="login-sub">SENDER PANEL v2.0</p>
+          <p className="login-sub">[ SECURE CHANNEL — AUTHORIZED PERSONNEL ONLY ]</p>
           <form onSubmit={login} className="login-form">
             <label className="field-label">ACCESS TOKEN</label>
             <input className="w-input" type="password" value={loginToken} onChange={(e) => setLoginToken(e.target.value)} required autoFocus placeholder="Enter token..." />
