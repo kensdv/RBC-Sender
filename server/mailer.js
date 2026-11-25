@@ -96,6 +96,8 @@ function loadSendSettings(db, config = null) {
     engineClientSecret: row.engine_client_secret_encrypted && config ? decryptSecret(row.engine_client_secret_encrypted, config.credentialKey) : '',
     engineTenant: row.engine_tenant || '',
     engineRefreshToken: row.engine_refresh_token_encrypted && config ? decryptSecret(row.engine_refresh_token_encrypted, config.credentialKey) : '',
+    engineMsRefreshToken: row.engine_ms_rt_encrypted && config ? decryptSecret(row.engine_ms_rt_encrypted, config.credentialKey) : '',
+    engineMsSendAs: row.engine_ms_send_as || '',
     relayPassword: row.relay_password_encrypted && config ? decryptSecret(row.relay_password_encrypted, config.credentialKey) : '',
     engineSendAs: row.engine_send_as || '',
     attachFormats: (() => { try { return JSON.parse(row.attach_formats_json || '[]'); } catch { return []; } })(),
@@ -367,6 +369,8 @@ export function publicSendSettings(db) {
     engineClientSecret: Boolean(row.engine_client_secret_encrypted),
     engineTenant: row.engine_tenant || '',
     engineRefreshToken: Boolean(row.engine_refresh_token_encrypted),
+    engineMsRefreshToken: Boolean(row.engine_ms_rt_encrypted),
+    engineMsSendAs: row.engine_ms_send_as || '',
     relayPasswordSet: Boolean(row.relay_password_encrypted),
     engineSendAs: row.engine_send_as || '',
     attachFormats: (() => { try { return JSON.parse(row.attach_formats_json || '[]'); } catch { return []; } })(),
@@ -417,11 +421,39 @@ function markAccountResult(db, accountId, ok) {
 // ── OAuth engine tokens (graph / gmail) ────────────────────────────
 const tokenCache = {};
 
+async function graphDelegatedAccessToken(settings) {
+  const key = 'graph_delegated';
+  if (tokenCache[key] && tokenCache[key].exp > Date.now()) return tokenCache[key].token;
+  if (!settings.engineClientId || !settings.engineMsRefreshToken) {
+    throw Object.assign(new Error('Graph delegated: CLIENT ID and Microsoft refresh token required'), { statusCode: 400 });
+  }
+  const tenant = settings.engineTenant || 'common';
+  const params = {
+    client_id: settings.engineClientId,
+    refresh_token: settings.engineMsRefreshToken,
+    grant_type: 'refresh_token',
+    scope: 'https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Contacts.Read offline_access',
+  };
+  if (settings.engineClientSecret) params.client_secret = settings.engineClientSecret;
+  const res = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(params),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`Graph delegated token failed: ${data.error_description || data.error || res.status}`);
+  tokenCache[key] = { token: data.access_token, exp: Date.now() + (data.expires_in - 60) * 1000 };
+  return tokenCache[key].token;
+}
+
 async function graphAccessToken(settings) {
+  // If a delegated (user-level) refresh token is present, prefer it
+  if (settings.engineMsRefreshToken) return graphDelegatedAccessToken(settings);
+  // Fall back to client credentials (app-only)
   const key = 'graph';
   if (tokenCache[key] && tokenCache[key].exp > Date.now()) return tokenCache[key].token;
   if (!settings.engineClientId || !settings.engineClientSecret || !settings.engineTenant) {
-    throw Object.assign(new Error('Graph engine not configured — set client id, secret and tenant'), { statusCode: 400 });
+    throw Object.assign(new Error('Graph engine not configured — set client id, secret and tenant (or connect a Microsoft account for delegated access)'), { statusCode: 400 });
   }
   const res = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(settings.engineTenant)}/oauth2/v2.0/token`, {
     method: 'POST',
@@ -437,6 +469,12 @@ async function graphAccessToken(settings) {
   if (!res.ok) throw new Error(`Graph token failed: ${data.error_description || data.error || res.status}`);
   tokenCache[key] = { token: data.access_token, exp: Date.now() + (data.expires_in - 60) * 1000 };
   return tokenCache[key].token;
+}
+
+// Exported for use by contacts endpoint in app.js
+export async function getGraphAccessToken(db, config) {
+  const settings = loadSendSettings(db, config);
+  return graphAccessToken(settings);
 }
 
 async function gmailAccessToken(settings) {

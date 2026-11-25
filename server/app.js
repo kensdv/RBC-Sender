@@ -9,7 +9,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { decryptSecret, encryptSecret, tokensEqual, unsubscribeToken } from './crypto.js';
 import { parseRecipientsCsv, parseLooseEmails } from './csv.js';
-import { publicSmtp, publicSendSettings } from './mailer.js';
+import { publicSmtp, publicSendSettings, getGraphAccessToken } from './mailer.js';
 import { escapeHtml } from './placeholders.js';
 import { transaction } from './db.js';
 import { createEmitter, telegramStatus, saveTelegram, sendTelegram, formatEvent } from './telegram.js';
@@ -94,7 +94,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
   });
   app.addHook('onRequest', async (request, reply) => {
     const path = request.url.split('?', 1)[0];
-    const publicPath = path === '/api/health' || path === '/api/version' || path === '/api/unsubscribe' || path === '/api/webhooks/bounce' || path === '/api/engine/gmail/callback' || path === '/api/go' || path.startsWith('/api/track/');
+    const publicPath = path === '/api/health' || path === '/api/version' || path === '/api/unsubscribe' || path === '/api/webhooks/bounce' || path === '/api/engine/gmail/callback' || path === '/api/engine/graph/callback' || path === '/api/go' || path.startsWith('/api/track/');
     if (path.startsWith('/api/') && !publicPath) {
       const authorization = request.headers.authorization || '';
       const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
@@ -295,6 +295,114 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     } catch (e) {
       return back(`gmail=error&msg=${encodeURIComponent(e.message || 'connect failed')}`);
     }
+  });
+
+  // ── Microsoft Graph delegated OAuth ──
+  const graphOAuthStates = new Map();
+
+  function graphCredentials() {
+    const row = db.prepare('SELECT engine_client_id, engine_client_secret_encrypted, engine_tenant FROM send_settings WHERE id = 1').get() || {};
+    const clientId = row.engine_client_id || '';
+    const clientSecret = decryptSecret(row.engine_client_secret_encrypted || '', config.credentialKey);
+    const tenant = row.engine_tenant || 'common';
+    return { clientId, clientSecret, tenant };
+  }
+
+  app.post('/api/engine/graph/connect', async () => {
+    const { clientId, clientSecret, tenant } = graphCredentials();
+    if (!clientId || !clientSecret) fail('Save CLIENT ID and CLIENT SECRET first, then connect');
+    const state = randomBytes(16).toString('base64url');
+    graphOAuthStates.set(state, Date.now() + 10 * 60 * 1000);
+    const redirectUri = `${config.publicBaseUrl}/api/engine/graph/callback`;
+    const url = `https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0/authorize?` + new URLSearchParams({
+      client_id: clientId,
+      response_type: 'code',
+      redirect_uri: redirectUri,
+      scope: 'offline_access Mail.Send Contacts.Read',
+      state,
+      prompt: 'select_account',
+    });
+    return { url };
+  });
+
+  app.get('/api/engine/graph/callback', async (request, reply) => {
+    const back = (q) => reply.redirect(`/?${q}`);
+    const { code, state, error } = request.query || {};
+    const valid = state && graphOAuthStates.get(state) > Date.now();
+    if (state) graphOAuthStates.delete(state);
+    if (error || !valid || !code) return back(`graph=error&msg=${encodeURIComponent(String(error || 'invalid or expired state'))}`);
+    try {
+      const { clientId, clientSecret, tenant } = graphCredentials();
+      const redirectUri = `${config.publicBaseUrl}/api/engine/graph/callback`;
+      const tokRes = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0/token`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ code: String(code), client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, grant_type: 'authorization_code', scope: 'offline_access Mail.Send Contacts.Read' }),
+      });
+      const tok = await tokRes.json().catch(() => ({}));
+      if (!tokRes.ok) return back(`graph=error&msg=${encodeURIComponent(tok.error_description || tok.error || 'token exchange failed')}`);
+      if (!tok.refresh_token) return back('graph=error&msg=no_refresh_token_returned');
+      let sendAs = '';
+      try {
+        const prof = await fetch('https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName', { headers: { authorization: `Bearer ${tok.access_token}` } });
+        const me = await prof.json().catch(() => ({}));
+        sendAs = me.mail || me.userPrincipalName || '';
+      } catch {}
+      db.prepare(`INSERT INTO send_settings (id, engine_ms_rt_encrypted, engine_ms_send_as, updated_at)
+        VALUES (1, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET engine_ms_rt_encrypted=excluded.engine_ms_rt_encrypted, engine_ms_send_as=excluded.engine_ms_send_as, updated_at=excluded.updated_at`)
+        .run(encryptSecret(tok.refresh_token, config.credentialKey), sendAs, new Date().toISOString());
+      return back(`graph=connected&email=${encodeURIComponent(sendAs)}`);
+    } catch (e) {
+      return back(`graph=error&msg=${encodeURIComponent(e.message || 'connect failed')}`);
+    }
+  });
+
+  app.delete('/api/engine/graph/token', async () => {
+    db.prepare("UPDATE send_settings SET engine_ms_rt_encrypted='', engine_ms_send_as='' WHERE id=1").run();
+    return { ok: true };
+  });
+
+  // ── Graph contacts pull → import ──
+  app.post('/api/graph/contacts', async () => {
+    const accessToken = await getGraphAccessToken(db, config).catch((e) => { fail(e.message, 400); });
+    const contacts = [];
+    let url = 'https://graph.microsoft.com/v1.0/me/contacts?$select=emailAddresses,givenName,surname,companyName&$top=100&$orderby=displayName';
+    while (url && contacts.length < 2000) {
+      const res = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` } });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        fail(`Graph contacts failed ${res.status}: ${data.error?.message || res.statusText}`, 400);
+      }
+      const page = await res.json().catch(() => ({ value: [] }));
+      for (const c of page.value || []) {
+        const emails = (c.emailAddresses || []).filter((e) => e.address);
+        for (const em of emails) {
+          contacts.push({
+            email: em.address.toLowerCase().trim(),
+            firstName: (c.givenName || '').trim(),
+            lastName: (c.surname || '').trim(),
+            company: (c.companyName || '').trim(),
+          });
+        }
+      }
+      url = page['@odata.nextLink'] || null;
+    }
+    if (!contacts.length) return { imported: 0, duplicates: 0, errors: [], total: 0 };
+    // Deduplicate by email
+    const unique = [...new Map(contacts.map((c) => [c.email, c])).values()]
+      .filter((c) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email));
+    const now = new Date().toISOString();
+    transaction(db, () => {
+      const stmt = db.prepare(`
+        INSERT INTO recipients (email, first_name, last_name, company, custom_json, consent_confirmed, created_at, updated_at)
+        VALUES (?, ?, ?, ?, '{}', 1, ?, ?)
+        ON CONFLICT(email) DO UPDATE SET first_name=excluded.first_name, last_name=excluded.last_name,
+          company=excluded.company, consent_confirmed=1, updated_at=excluded.updated_at
+      `);
+      for (const c of unique) stmt.run(c.email, c.firstName, c.lastName, c.company, now, now);
+    });
+    return { imported: unique.length, duplicates: contacts.length - unique.length, errors: [], total: contacts.length };
   });
 
   // ── SMTP account pool ──

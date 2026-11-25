@@ -212,6 +212,8 @@ export function openDatabase(path) {
   ensureColumn('relay_username', "relay_username TEXT NOT NULL DEFAULT ''");
   ensureColumn('relay_password_encrypted', "relay_password_encrypted TEXT NOT NULL DEFAULT ''");
   ensureColumn('relay_ehlo', "relay_ehlo TEXT NOT NULL DEFAULT ''");
+  ensureColumn('engine_ms_rt_encrypted', "engine_ms_rt_encrypted TEXT NOT NULL DEFAULT ''");
+  ensureColumn('engine_ms_send_as', "engine_ms_send_as TEXT NOT NULL DEFAULT ''");
   const campaignCols = new Set(db.prepare('PRAGMA table_info(campaigns)').all().map((c) => c.name));
   if (!campaignCols.has('preheader')) db.exec("ALTER TABLE campaigns ADD COLUMN preheader TEXT NOT NULL DEFAULT ''");
   if (!campaignCols.has('attachments_json')) db.exec("ALTER TABLE campaigns ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'");
