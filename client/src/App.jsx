@@ -11,27 +11,128 @@ function ChromosomeBackground() {
     const resize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
     resize();
     window.addEventListener('resize', resize);
-    const N = 20;
-    const chroms = Array.from({ length: N }, () => ({
+
+    // ── Chromosomes (X shapes) ──
+    const chroms = Array.from({ length: 14 }, () => ({
       x: Math.random() * window.innerWidth,
       y: Math.random() * window.innerHeight,
-      vx: (Math.random() - 0.5) * 0.22,
-      vy: (Math.random() - 0.5) * 0.22,
+      vx: (Math.random() - 0.5) * 0.2,
+      vy: (Math.random() - 0.5) * 0.2,
       rot: Math.random() * Math.PI * 2,
-      rs: (Math.random() - 0.5) * 0.007,
+      rs: (Math.random() - 0.5) * 0.006,
       tilt: Math.random() * Math.PI,
       ts: (Math.random() - 0.5) * 0.004,
-      size: 16 + Math.random() * 38,
-      alpha: 0.07 + Math.random() * 0.16,
+      size: 14 + Math.random() * 32,
+      alpha: 0.06 + Math.random() * 0.14,
       cyan: Math.random() < 0.3,
     }));
+
+    // ── DNA helix strips ──
+    const RUNG_COLORS = ['0,255,65', '0,255,220', '68,255,136', '0,200,255'];
+    const dnaStrips = Array.from({ length: 8 }, (_, i) => ({
+      cx: (i + 0.5) * (window.innerWidth / 8) + (Math.random() - 0.5) * 120,
+      vx: (Math.random() - 0.5) * 0.35,
+      vy: (Math.random() - 0.5) * 0.18,
+      yOff: Math.random() * 300,          // scroll phase
+      scrollSpeed: 0.4 + Math.random() * 0.5,
+      tilt: Math.random() * Math.PI * 2,  // 3D rotation phase
+      tiltSpeed: 0.004 + Math.random() * 0.006,
+      amp: 18 + Math.random() * 22,       // helix half-width
+      period: 90 + Math.random() * 60,    // pixels per full twist
+      alpha: 0.13 + Math.random() * 0.18,
+      angle: (Math.random() - 0.5) * 0.55, // lean angle
+      rungCols: [0, 1, 2, 3].map(() => Math.floor(Math.random() * RUNG_COLORS.length)),
+    }));
+
+    const drawDNA = (strip) => {
+      const { cx, yOff, amp, period, alpha, angle } = strip;
+      const H = canvas.height + 60;
+      const perspective = 0.35 + 0.65 * Math.abs(Math.sin(strip.tilt)); // 3D depth factor
+      const effAmp = amp * perspective;
+
+      ctx.save();
+      ctx.translate(cx, -30);
+      ctx.rotate(angle);
+
+      const step = 6;
+      const rungStep = Math.round(period / 8); // rungs every 1/8 period
+
+      // Build backbone point arrays
+      const pts1 = [], pts2 = [];
+      for (let y = 0; y <= H; y += step) {
+        const phase = ((y + yOff) / period) * Math.PI * 2;
+        pts1.push({ x: effAmp * Math.sin(phase),          y });
+        pts2.push({ x: effAmp * Math.sin(phase + Math.PI), y });
+      }
+
+      // Draw strand 1
+      ctx.beginPath();
+      ctx.moveTo(pts1[0].x, pts1[0].y);
+      for (let i = 1; i < pts1.length; i++) ctx.lineTo(pts1[i].x, pts1[i].y);
+      ctx.strokeStyle = `rgba(0,255,65,${alpha})`;
+      ctx.lineWidth = 1.6;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+
+      // Draw strand 2
+      ctx.beginPath();
+      ctx.moveTo(pts2[0].x, pts2[0].y);
+      for (let i = 1; i < pts2.length; i++) ctx.lineTo(pts2[i].x, pts2[i].y);
+      ctx.strokeStyle = `rgba(0,220,255,${alpha})`;
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+
+      // Draw rungs (base pairs) — only where strands are crossing from front to back
+      const totalSteps = pts1.length;
+      for (let i = 0; i < totalSteps; i++) {
+        const y = pts1[i].y;
+        const phase = ((y + yOff) / period) * Math.PI * 2;
+        const normPhase = ((phase % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+        // Place rungs uniformly every rungStep pixels in y
+        if (Math.round(y) % rungStep !== 0) continue;
+        const x1 = pts1[i].x, x2 = pts2[i].x;
+        // Fade rungs based on 3D perspective — wider = more visible
+        const rungAlpha = alpha * 0.65 * perspective;
+        // Color cycles through base-pair palette
+        const colIdx = strip.rungCols[Math.floor((y / rungStep) % 4)];
+        const col = RUNG_COLORS[Math.abs(colIdx) % RUNG_COLORS.length];
+        ctx.beginPath();
+        ctx.moveTo(x1, y);
+        ctx.lineTo(x2, y);
+        ctx.strokeStyle = `rgba(${col},${rungAlpha})`;
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        // Node dots at each rung end
+        ctx.fillStyle = `rgba(${col},${rungAlpha * 1.4})`;
+        ctx.beginPath(); ctx.arc(x1, y, 1.8, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(x2, y, 1.8, 0, Math.PI * 2); ctx.fill();
+      }
+
+      ctx.restore();
+    };
+
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.strokeStyle = 'rgba(0,255,65,0.018)';
+
+      // Subtle grid
+      ctx.strokeStyle = 'rgba(0,255,65,0.015)';
       ctx.lineWidth = 1;
       const gs = 55;
       for (let x = 0; x < canvas.width; x += gs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); }
       for (let y = 0; y < canvas.height; y += gs) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
+
+      // Draw DNA strips
+      for (const d of dnaStrips) {
+        d.yOff += d.scrollSpeed;
+        d.cx += d.vx;
+        d.tilt += d.tiltSpeed;
+        const margin = 80;
+        if (d.cx < -margin) d.cx = canvas.width + margin;
+        else if (d.cx > canvas.width + margin) d.cx = -margin;
+        drawDNA(d);
+      }
+
+      // Draw chromosomes on top
       for (const c of chroms) {
         c.x += c.vx; c.y += c.vy; c.rot += c.rs; c.tilt += c.ts;
         if (c.x < -90) c.x = canvas.width + 90; else if (c.x > canvas.width + 90) c.x = -90;
@@ -57,6 +158,7 @@ function ChromosomeBackground() {
         ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, s * 0.2, 0, Math.PI * 2); ctx.fill();
         ctx.restore();
       }
+
       animId = requestAnimationFrame(draw);
     };
     draw();
