@@ -697,6 +697,18 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     return { ok: true };
   });
 
+  app.delete('/api/recipients/:id', async (request) => {
+    const result = db.prepare('DELETE FROM recipients WHERE id = ?').run(Number(request.params.id));
+    if (!result.changes) fail('Recipient not found', 404);
+    return { ok: true };
+  });
+
+  app.delete('/api/recipients', async () => {
+    const count = db.prepare('SELECT COUNT(*) AS c FROM recipients').get().c;
+    db.prepare('DELETE FROM recipients').run();
+    return { ok: true, deleted: count };
+  });
+
   app.post('/api/campaigns', async (request) => {
     const campaign = campaignBody(request.body || {});
     const now = new Date().toISOString();

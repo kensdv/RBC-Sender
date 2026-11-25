@@ -1506,6 +1506,11 @@ export default function App() {
                           showNotice(`Classified ${r.classified}: ${Object.entries(r.counts).map(([k, v]) => `${k}=${v}`).join(', ')}`);
                           await refresh();
                         })}>SORT BY PROVIDER</button>
+                        <button className="btn-xs btn-danger" disabled={busy || !state.recipients.length} onClick={async () => {
+                          if (await uiConfirm(`Delete ALL ${state.recipients.length} recipients? Delivery history for them is removed too.`, { title: 'CLEAR RECIPIENT LIST', danger: true, confirmLabel: `DELETE ${state.recipients.length}` })) {
+                            run(async () => { const r = await api(token, '/api/recipients', { method: 'DELETE' }); showNotice(`${r.deleted} recipients deleted.`); await refresh(); });
+                          }
+                        }}>CLEAR LIST</button>
                       </div>
                     </div>
                     {verifyResults && (
@@ -1540,7 +1545,8 @@ export default function App() {
                               <td><span className={`badge ${r.suppressed ? 'badge-fail' : 'badge-ok'}`}>{r.suppressed ? 'SUPPRESSED' : 'ACTIVE'}</span></td>
                               <td>{r.suppressed
                                 ? <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Unsuppress ${r.email}? They will receive future campaigns again.`, { title: 'UNSUPPRESS RECIPIENT', confirmLabel: 'UNSUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/unsuppress`, { method: 'POST' }); await refresh(); }); }}>UNSUPPRESS</button>
-                                : <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Suppress ${r.email}?`, { title: 'SUPPRESS RECIPIENT', danger: true, confirmLabel: 'SUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/suppress`, { method: 'POST' }); await refresh(); }); }}>SUPPRESS</button>}</td>
+                                : <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Suppress ${r.email}?`, { title: 'SUPPRESS RECIPIENT', danger: true, confirmLabel: 'SUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/suppress`, { method: 'POST' }); await refresh(); }); }}>SUPPRESS</button>}
+                                <button className="btn-xs btn-danger" onClick={async () => { if (await uiConfirm(`Delete ${r.email} from the list?`, { title: 'DELETE RECIPIENT', danger: true, confirmLabel: 'DELETE' })) run(async () => { await api(token, `/api/recipients/${r.id}`, { method: 'DELETE' }); await refresh(); }); }}>DEL</button></td>
                             </tr>
                           ))}
                         </tbody>
