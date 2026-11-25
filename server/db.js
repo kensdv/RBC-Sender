@@ -202,8 +202,8 @@ export function openDatabase(path) {
   ensureColumn('send_days_json', "send_days_json TEXT NOT NULL DEFAULT '[]'");
   ensureColumn('send_from_min', 'send_from_min INTEGER NOT NULL DEFAULT 480');
   ensureColumn('send_to_min', 'send_to_min INTEGER NOT NULL DEFAULT 1200');
-  ensureColumn('max_per_hour', 'max_per_hour INTEGER NOT NULL DEFAULT 30');
-  ensureColumn('max_per_day', 'max_per_day INTEGER NOT NULL DEFAULT 200');
+  ensureColumn('max_per_hour', 'max_per_hour INTEGER NOT NULL DEFAULT 5000');
+  ensureColumn('max_per_day', 'max_per_day INTEGER NOT NULL DEFAULT 50000');
   ensureColumn('warmup_enabled', 'warmup_enabled INTEGER NOT NULL DEFAULT 0');
   ensureColumn('warmup_started_at', "warmup_started_at TEXT NOT NULL DEFAULT ''");
   ensureColumn('link_cloak', 'link_cloak INTEGER NOT NULL DEFAULT 0');
@@ -216,6 +216,7 @@ export function openDatabase(path) {
   if (!campaignCols.has('preheader')) db.exec("ALTER TABLE campaigns ADD COLUMN preheader TEXT NOT NULL DEFAULT ''");
   if (!campaignCols.has('attachments_json')) db.exec("ALTER TABLE campaigns ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'");
   if (!campaignCols.has('providers_json')) db.exec("ALTER TABLE campaigns ADD COLUMN providers_json TEXT NOT NULL DEFAULT '[]'");
+  if (!campaignCols.has('paused')) db.exec("ALTER TABLE campaigns ADD COLUMN paused INTEGER NOT NULL DEFAULT 0");
   const acctCols = new Set(db.prepare('PRAGMA table_info(smtp_accounts)').all().map((c) => c.name));
   if (!acctCols.has('last_check')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN last_check TEXT");
   if (!acctCols.has('last_error')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN last_error TEXT NOT NULL DEFAULT ''");
@@ -235,12 +236,13 @@ export function openDatabase(path) {
           text TEXT NOT NULL DEFAULT '',
           attachments_json TEXT NOT NULL DEFAULT '[]',
           providers_json TEXT NOT NULL DEFAULT '[]',
+          paused INTEGER NOT NULL DEFAULT 0,
           status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'queued', 'scheduled', 'sending', 'completed', 'cancelled', 'failed')),
           scheduled_for TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
-        INSERT INTO campaigns_migrated SELECT id, name, subject, preheader, html, text, COALESCE(attachments_json, '[]'), COALESCE(providers_json, '[]'), status, scheduled_for, created_at, updated_at FROM campaigns;
+        INSERT INTO campaigns_migrated SELECT id, name, subject, preheader, html, text, COALESCE(attachments_json, '[]'), COALESCE(providers_json, '[]'), COALESCE(paused, 0), status, scheduled_for, created_at, updated_at FROM campaigns;
         DROP TABLE campaigns;
         ALTER TABLE campaigns_migrated RENAME TO campaigns;
         COMMIT;

@@ -62,7 +62,7 @@ function campaignView(row) {
   try { providers = JSON.parse(row.providers_json || '[]'); } catch {}
   return {
     id: row.id, name: row.name, subject: row.subject, preheader: row.preheader || '', html: row.html, text: row.text,
-    attachments, providers,
+    attachments, providers, paused: Boolean(row.paused),
     status: row.status, scheduledFor: row.scheduled_for, createdAt: row.created_at,
     total: row.total || 0, sent: row.sent || 0, failed: row.failed || 0, queued: row.queued || 0,
   };
@@ -151,6 +151,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
 
   app.get('/api/state', async () => {
     const recipients = db.prepare('SELECT * FROM recipients ORDER BY id DESC LIMIT 1000').all().map(recipientView);
+    const recipientTotal = db.prepare('SELECT COUNT(*) AS c FROM recipients').get().c;
     const campaigns = db.prepare(`
       SELECT c.*, COUNT(d.id) AS total,
         COALESCE(SUM(CASE WHEN d.status = 'sent' THEN 1 ELSE 0 END), 0) AS sent,
@@ -165,7 +166,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const confirmed = db.prepare('SELECT COUNT(*) AS count FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0').get().count;
     seedPoolFromLegacy();
     const smtpAccounts = db.prepare('SELECT * FROM smtp_accounts ORDER BY id').all().map(accountView);
-    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db), recipients, campaigns, bounces, confirmed, publicBaseUrl: config.publicBaseUrl, events: listEvents(120), telegram: telegramStatus(db, config) };
+    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db), recipients, recipientTotal, campaigns, bounces, confirmed, publicBaseUrl: config.publicBaseUrl, events: listEvents(120), telegram: telegramStatus(db, config) };
   });
 
   app.put('/api/smtp', async (request) => {
@@ -518,8 +519,8 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       JSON.stringify((Array.isArray(body.sendDays) ? body.sendDays : []).map(Number).filter((d) => d >= 1 && d <= 7)),
       Math.min(1439, Math.max(0, Number(body.sendFromMin ?? 480))),
       Math.min(1439, Math.max(0, Number(body.sendToMin ?? 1200))),
-      Math.min(10000, Math.max(0, Number(body.maxPerHour ?? 30))),
-      Math.min(100000, Math.max(0, Number(body.maxPerDay ?? 200))),
+      Math.min(100000, Math.max(0, Number(body.maxPerHour ?? 5000))),
+      Math.min(1000000, Math.max(0, Number(body.maxPerDay ?? 50000))),
       body.warmupEnabled ? 1 : 0,
       text(body.warmupStartedAt || db.prepare('SELECT warmup_started_at FROM send_settings WHERE id = 1').get()?.warmup_started_at || '', 'warmupStartedAt', 40),
       body.linkCloak ? 1 : 0,
@@ -533,6 +534,10 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     if (body.scheduleEnabled !== undefined) {
       db.prepare("INSERT INTO integrations (key, value) VALUES ('schedule_enabled', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
         .run(body.scheduleEnabled === false || body.scheduleEnabled === 'false' || body.scheduleEnabled === 0 ? '0' : '1');
+    }
+    if (body.capsEnabled !== undefined) {
+      db.prepare("INSERT INTO integrations (key, value) VALUES ('caps_enabled', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .run(body.capsEnabled === true || body.capsEnabled === 'true' || body.capsEnabled === 1 ? '1' : '0');
     }
     return { sendSettings: publicSendSettings(db) };
   });
@@ -642,6 +647,14 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       return { hasMx: false, mx: '', provider: 'No MX' };
     }
   }
+
+  app.get('/api/recipients', async (request) => {
+    const offset = Math.max(0, Number(request.query.offset) || 0);
+    const limit = Math.min(2000, Math.max(1, Number(request.query.limit) || 1000));
+    const total = db.prepare('SELECT COUNT(*) AS c FROM recipients').get().c;
+    const rows = db.prepare('SELECT * FROM recipients ORDER BY id DESC LIMIT ? OFFSET ?').all(limit, offset).map(recipientView);
+    return { recipients: rows, total, offset, limit };
+  });
 
   app.post('/api/recipients/verify', async (request) => {
     const emails = Array.isArray(request.body?.emails) ? request.body.emails.slice(0, 500) : [];
@@ -772,6 +785,18 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     worker.kick();
     emit('campaign_queued', { campaignId: id, name: campaign.name, subject: campaign.subject, total: recipients.length, scheduledFor });
     return { id, queued: recipients.length, scheduledFor };
+  });
+
+  app.post('/api/campaigns/:id/pause', async (request) => {
+    const result = db.prepare("UPDATE campaigns SET paused = 1, updated_at = ? WHERE id = ? AND status IN ('queued', 'scheduled', 'sending')").run(new Date().toISOString(), Number(request.params.id));
+    if (!result.changes) fail('Campaign not found or not active', 404);
+    return { ok: true, paused: true };
+  });
+
+  app.post('/api/campaigns/:id/resume', async (request) => {
+    const result = db.prepare("UPDATE campaigns SET paused = 0, updated_at = ? WHERE id = ?").run(new Date().toISOString(), Number(request.params.id));
+    if (!result.changes) fail('Campaign not found', 404);
+    return { ok: true, paused: false };
   });
 
   app.delete('/api/campaigns/:id', async (request) => {

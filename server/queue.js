@@ -39,11 +39,12 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
       sendDays,
       sendFromMin: ss.send_from_min ?? 480,
       sendToMin: ss.send_to_min ?? 1200,
-      maxPerHour: ss.max_per_hour ?? 30,
-      maxPerDay: ss.max_per_day ?? 200,
+      maxPerHour: ss.max_per_hour ?? 5000,
+      maxPerDay: ss.max_per_day ?? 50000,
       warmupEnabled: Boolean(ss.warmup_enabled),
       warmupStartedAt: ss.warmup_started_at || '',
       scheduleEnabled: db.prepare("SELECT value FROM integrations WHERE key = 'schedule_enabled'").get()?.value !== '0',
+      capsEnabled: db.prepare("SELECT value FROM integrations WHERE key = 'caps_enabled'").get()?.value === '1',
     };
   }
 
@@ -103,6 +104,7 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
       AND c.status IN ('queued', 'scheduled', 'sending')
       AND (c.scheduled_for IS NULL OR c.scheduled_for <= ?)
       AND (d.next_attempt_at IS NULL OR d.next_attempt_at <= ?)
+      AND c.paused = 0
       AND r.consent_confirmed = 1 AND r.suppressed = 0
     ORDER BY d.id`;
 
@@ -162,16 +164,18 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
     db.prepare("UPDATE deliveries SET status = 'suppressed' WHERE status = 'queued' AND recipient_id IN (SELECT id FROM recipients WHERE consent_confirmed = 0 OR suppressed = 1)").run();
 
     if (!withinSchedule(ctx)) return;
-    const hourAgo = new Date(Date.now() - 3600000).toISOString();
-    const dayAgo = new Date(Date.now() - 86400000).toISOString();
-    if (ctx.maxPerHour > 0) {
-      const n = db.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE status = 'sent' AND sent_at >= ?").get(hourAgo).c;
-      if (n >= ctx.maxPerHour) return;
-    }
-    const dayCap = effectiveDailyCap(ctx);
-    if (dayCap > 0) {
-      const n = db.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE status = 'sent' AND sent_at >= ?").get(dayAgo).c;
-      if (n >= dayCap) return;
+    if (ctx.capsEnabled) {
+      const hourAgo = new Date(Date.now() - 3600000).toISOString();
+      const dayAgo = new Date(Date.now() - 86400000).toISOString();
+      if (ctx.maxPerHour > 0) {
+        const n = db.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE status = 'sent' AND sent_at >= ?").get(hourAgo).c;
+        if (n >= ctx.maxPerHour) return;
+      }
+      const dayCap = effectiveDailyCap(ctx);
+      if (dayCap > 0) {
+        const n = db.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE status = 'sent' AND sent_at >= ?").get(dayAgo).c;
+        if (n >= dayCap) return;
+      }
     }
 
     const slots = ctx.parallel;
@@ -215,7 +219,7 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
     }
 
     if (!rows.length) {
-      const activeCampaigns = db.prepare("SELECT id FROM campaigns WHERE status IN ('queued', 'scheduled', 'sending')").all();
+      const activeCampaigns = db.prepare("SELECT id FROM campaigns WHERE status IN ('queued', 'scheduled', 'sending') AND paused = 0").all();
       for (const campaign of activeCampaigns) completeCampaign(campaign.id);
       return;
     }
@@ -236,16 +240,18 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
       const days = ctx.sendDays.length ? ctx.sendDays.map((d) => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d - 1] || d).join('/') : 'daily';
       return `paused — outside send window (${days} ${fmtMin(ctx.sendFromMin)}–${fmtMin(ctx.sendToMin)} ${ctx.timezone})`;
     }
-    const hourAgo = new Date(Date.now() - 3600000).toISOString();
-    const dayAgo = new Date(Date.now() - 86400000).toISOString();
-    if (ctx.maxPerHour > 0) {
-      const n = db.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE status = 'sent' AND sent_at >= ?").get(hourAgo).c;
-      if (n >= ctx.maxPerHour) return `paused — hourly cap ${ctx.maxPerHour} reached`;
-    }
-    const dayCap = effectiveDailyCap(ctx);
-    if (dayCap > 0) {
-      const n = db.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE status = 'sent' AND sent_at >= ?").get(dayAgo).c;
-      if (n >= dayCap) return `paused — daily cap ${dayCap} reached`;
+    if (ctx.capsEnabled) {
+      const hourAgo = new Date(Date.now() - 3600000).toISOString();
+      const dayAgo = new Date(Date.now() - 86400000).toISOString();
+      if (ctx.maxPerHour > 0) {
+        const n = db.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE status = 'sent' AND sent_at >= ?").get(hourAgo).c;
+        if (n >= ctx.maxPerHour) return `paused — hourly cap ${ctx.maxPerHour} reached`;
+      }
+      const dayCap = effectiveDailyCap(ctx);
+      if (dayCap > 0) {
+        const n = db.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE status = 'sent' AND sent_at >= ?").get(dayAgo).c;
+        if (n >= dayCap) return `paused — daily cap ${dayCap} reached`;
+      }
     }
     const next = db.prepare("SELECT MIN(next_attempt_at) AS n FROM deliveries WHERE status = 'queued' AND next_attempt_at IS NOT NULL").get().n;
     if (next && next > new Date().toISOString()) return `paused — retry backoff until ${new Date(next).toLocaleTimeString()}`;

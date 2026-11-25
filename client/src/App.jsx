@@ -26,9 +26,9 @@ const emptySettings = {
   subjectB64: false, fromnameB64: false, disclaimerText: '',
   engineClientId: '', engineClientSecret: '', engineTenant: '', engineRefreshToken: '', engineSendAs: '',
   attachFormats: [], imageRecompress: false,
-  sendDays: [], sendFromMin: 480, sendToMin: 1200, scheduleEnabled: true,
+  sendDays: [], sendFromMin: 480, sendToMin: 1200, scheduleEnabled: true, capsEnabled: false,
   relaySecure: 0, relayUsername: '', relayPassword: '', relayPasswordSet: false, relayEhlo: '',
-  maxPerHour: 30, maxPerDay: 200, warmupEnabled: false, warmupStartedAt: '',
+  maxPerHour: 5000, maxPerDay: 50000, warmupEnabled: false, warmupStartedAt: '',
   linkCloak: false,
 };
 
@@ -801,6 +801,7 @@ export default function App() {
   const [scheduledFor, setScheduledFor] = useState('');
   const [preview, setPreview] = useState(null);
   const [verifyResults, setVerifyResults] = useState(null);
+  const [extraRecipients, setExtraRecipients] = useState([]);
   const [previewDevice, setPreviewDevice] = useState('desktop');
   const [testTo, setTestTo] = useState('');
   const [relayTest, setRelayTest] = useState({ state: 'idle' });
@@ -1493,7 +1494,7 @@ export default function App() {
                   </div>
                   <div className="pane">
                     <div className="pane-head">
-                      <span>AUDIENCE — {state.recipients.length} RECORDS</span>
+                      <span>AUDIENCE — {state.recipientTotal ?? state.recipients.length} RECORDS{(state.recipientTotal ?? 0) > state.recipients.length ? ` (showing ${state.recipients.length + extraRecipients.length})` : ''}</span>
                       <div className="btn-row">
                         <button className="btn-xs" disabled={busy || !state.recipients.length} onClick={() => run(async () => {
                           const r = await api(token, '/api/recipients/verify', { method: 'POST', body: { emails: state.recipients.map((x) => x.email) } });
@@ -1508,7 +1509,7 @@ export default function App() {
                         })}>SORT BY PROVIDER</button>
                         <button className="btn-xs btn-danger" disabled={busy || !state.recipients.length} onClick={async () => {
                           if (await uiConfirm(`Delete ALL ${state.recipients.length} recipients? Delivery history for them is removed too.`, { title: 'CLEAR RECIPIENT LIST', danger: true, confirmLabel: `DELETE ${state.recipients.length}` })) {
-                            run(async () => { const r = await api(token, '/api/recipients', { method: 'DELETE' }); showNotice(`${r.deleted} recipients deleted.`); await refresh(); });
+                            run(async () => { const r = await api(token, '/api/recipients', { method: 'DELETE' }); setExtraRecipients([]); showNotice(`${r.deleted} recipients deleted.`); await refresh(); });
                           }
                         }}>CLEAR LIST</button>
                       </div>
@@ -1537,21 +1538,28 @@ export default function App() {
                       <table className="w-table">
                         <thead><tr><th>EMAIL</th><th>NAME</th><th>PROVIDER</th><th>STATUS</th><th></th></tr></thead>
                         <tbody>
-                          {state.recipients.map((r) => (
+                          {(state.recipients.concat(extraRecipients.filter((x) => !state.recipients.some((y) => y.id === x.id)))).map((r) => (
                             <tr key={r.id}>
                               <td>{r.email}</td>
                               <td>{[r.firstName, r.lastName].filter(Boolean).join(' ')}</td>
                               <td className="dim">{r.custom?.provider || '—'}</td>
                               <td><span className={`badge ${r.suppressed ? 'badge-fail' : 'badge-ok'}`}>{r.suppressed ? 'SUPPRESSED' : 'ACTIVE'}</span></td>
                               <td>{r.suppressed
-                                ? <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Unsuppress ${r.email}? They will receive future campaigns again.`, { title: 'UNSUPPRESS RECIPIENT', confirmLabel: 'UNSUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/unsuppress`, { method: 'POST' }); await refresh(); }); }}>UNSUPPRESS</button>
-                                : <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Suppress ${r.email}?`, { title: 'SUPPRESS RECIPIENT', danger: true, confirmLabel: 'SUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/suppress`, { method: 'POST' }); await refresh(); }); }}>SUPPRESS</button>}
-                                <button className="btn-xs btn-danger" onClick={async () => { if (await uiConfirm(`Delete ${r.email} from the list?`, { title: 'DELETE RECIPIENT', danger: true, confirmLabel: 'DELETE' })) run(async () => { await api(token, `/api/recipients/${r.id}`, { method: 'DELETE' }); await refresh(); }); }}>DEL</button></td>
+                                ? <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Unsuppress ${r.email}? They will receive future campaigns again.`, { title: 'UNSUPPRESS RECIPIENT', confirmLabel: 'UNSUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/unsuppress`, { method: 'POST' }); setExtraRecipients((prev) => prev.map((x) => x.id === r.id ? { ...x, suppressed: false } : x)); await refresh(); }); }}>UNSUPPRESS</button>
+                                : <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Suppress ${r.email}?`, { title: 'SUPPRESS RECIPIENT', danger: true, confirmLabel: 'SUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/suppress`, { method: 'POST' }); setExtraRecipients((prev) => prev.map((x) => x.id === r.id ? { ...x, suppressed: true } : x)); await refresh(); }); }}>SUPPRESS</button>}
+                                <button className="btn-xs btn-danger" onClick={async () => { if (await uiConfirm(`Delete ${r.email} from the list?`, { title: 'DELETE RECIPIENT', danger: true, confirmLabel: 'DELETE' })) run(async () => { await api(token, `/api/recipients/${r.id}`, { method: 'DELETE' }); setExtraRecipients((prev) => prev.filter((x) => x.id !== r.id)); await refresh(); }); }}>DEL</button></td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
+                    {(state.recipientTotal ?? 0) > state.recipients.length + extraRecipients.length && (
+                      <button className="btn-sm" style={{ marginTop: 10 }} onClick={() => run(async () => {
+                        const offset = state.recipients.length + extraRecipients.length;
+                        const r = await api(token, `/api/recipients?offset=${offset}&limit=1000`);
+                        setExtraRecipients((prev) => [...prev, ...r.recipients]);
+                      })}>[ LOAD MORE — {state.recipients.length + extraRecipients.length} / {state.recipientTotal} ]</button>
+                    )}
                   </div>
                 </div>
               )}
@@ -1860,6 +1868,10 @@ sudo tail -f /var/log/maillog`}</pre>
                 <div className="pane">
                   <div className="pane-head"><span>LIMITS & WARM-UP</span></div>
                   <p className="dim-txt">Rolling caps enforced by the queue. 0 = unlimited. Warm-up starts the daily cap at 5 and adds ~10/day until it reaches the max — turning it off removes the ramp.</p>
+                  <label className="check-row">
+                    <input type="checkbox" checked={settings.capsEnabled === true} onChange={(e) => setSettings({ ...settings, capsEnabled: e.target.checked })} />
+                    <span>Enforce hourly/daily caps — <strong>{settings.capsEnabled === true ? 'ON' : 'OFF (uncapped)'}</strong></span>
+                  </label>
                   <div className="form-grid">
                     <div><label className="field-label">MAX PER HOUR</label><input className="w-input" type="number" min="0" value={settings.maxPerHour} onChange={(e) => setSettings({ ...settings, maxPerHour: Number(e.target.value) })} /></div>
                     <div><label className="field-label">MAX PER DAY</label><input className="w-input" type="number" min="0" value={settings.maxPerDay} onChange={(e) => setSettings({ ...settings, maxPerDay: Number(e.target.value) })} /></div>
@@ -2570,7 +2582,7 @@ sudo tail -f /var/log/maillog`}</pre>
                               <td className="dim">{c.id}</td>
                               <td>{c.name}{c.providers?.length > 0 && <div className="dim-txt" style={{fontSize:11}}>→ {c.providers.join(', ')}</div>}</td>
                               <td>
-                                <span className={`badge ${c.status === 'completed' ? 'badge-ok' : c.status === 'failed' ? 'badge-fail' : 'badge-def'}`}>{c.status.toUpperCase()}</span>
+                                <span className={`badge ${c.status === 'completed' ? 'badge-ok' : c.status === 'failed' ? 'badge-fail' : 'badge-def'}`}>{c.paused ? 'PAUSED' : c.status.toUpperCase()}</span>
                                 {c.total > 0 && (
                                   <div className="prog-bar"><div className="prog-fill" style={{ width: `${Math.round(((c.sent + c.failed) / c.total) * 100)}%` }} /></div>
                                 )}
@@ -2586,6 +2598,9 @@ sudo tail -f /var/log/maillog`}</pre>
                                   {['draft', 'failed', 'scheduled'].includes(c.status) && <button className="btn-xs" onClick={() => editCampaign(c)}>EDIT</button>}
                                   {c.status === 'failed' && <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Retry #${c.id}? SMTP will be re-verified first.`, { title: 'RETRY CAMPAIGN', confirmLabel: 'RETRY' })) run(async () => { await api(token, `/api/campaigns/${c.id}/retry`, { method: 'POST' }); await refresh(); }); }}>RETRY</button>}
                                   {!['queued', 'scheduled', 'sending'].includes(c.status) && <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Delete campaign #${c.id} "${c.name}" and its delivery history?`, { title: 'DELETE CAMPAIGN', danger: true, confirmLabel: 'DELETE' })) run(async () => { await api(token, `/api/campaigns/${c.id}`, { method: 'DELETE' }); await refresh(); }); }}>DEL</button>}
+                                  {['queued','scheduled','sending'].includes(c.status) && (c.paused
+                                    ? <button className="btn-xs" onClick={() => run(async () => { await api(token, `/api/campaigns/${c.id}/resume`, { method: 'POST' }); await refresh(); })}>RESUME</button>
+                                    : <button className="btn-xs" onClick={() => run(async () => { await api(token, `/api/campaigns/${c.id}/pause`, { method: 'POST' }); await refresh(); })}>PAUSE</button>)}
                                   {['queued','scheduled','sending'].includes(c.status) && <button className="btn-xs btn-danger" onClick={async () => { if (await uiConfirm(`Cancel #${c.id}?`, { title: 'CANCEL CAMPAIGN', danger: true, confirmLabel: 'CANCEL SEND' })) run(async () => { await api(token, `/api/campaigns/${c.id}/cancel`, { method: 'POST' }); await refresh(); }); }}>CANCEL</button>}
                                   <button className="btn-xs" onClick={() => run(() => exportCampaign(c.id))}>CSV</button>
                                 </div>

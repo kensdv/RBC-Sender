@@ -103,8 +103,8 @@ function loadSendSettings(db, config = null) {
     sendDays: (() => { try { return JSON.parse(row.send_days_json || '[]'); } catch { return []; } })(),
     sendFromMin: row.send_from_min ?? 480,
     sendToMin: row.send_to_min ?? 1200,
-    maxPerHour: row.max_per_hour ?? 30,
-    maxPerDay: row.max_per_day ?? 200,
+    maxPerHour: row.max_per_hour ?? 5000,
+    maxPerDay: row.max_per_day ?? 50000,
     warmupEnabled: Boolean(row.warmup_enabled),
     warmupStartedAt: row.warmup_started_at || '',
     linkCloak: Boolean(row.link_cloak),
@@ -309,9 +309,12 @@ export function publicSendSettings(db) {
   try { subjectsList = JSON.parse(row.subjects_json || '[]'); } catch {}
   let scheduleEnabled = true;
   try { scheduleEnabled = db.prepare("SELECT value FROM integrations WHERE key = 'schedule_enabled'").get()?.value !== '0'; } catch {}
+  let capsEnabled = false;
+  try { capsEnabled = db.prepare("SELECT value FROM integrations WHERE key = 'caps_enabled'").get()?.value === '1'; } catch {}
   return {
     sendMode: row.send_mode || 'smtp',
     scheduleEnabled,
+    capsEnabled,
     directFromName: row.direct_from_name || '',
     directFromEmail: row.direct_from_email || '',
     directReplyTo: row.direct_reply_to || '',
@@ -371,8 +374,8 @@ export function publicSendSettings(db) {
     sendDays: (() => { try { return JSON.parse(row.send_days_json || '[]'); } catch { return []; } })(),
     sendFromMin: row.send_from_min ?? 480,
     sendToMin: row.send_to_min ?? 1200,
-    maxPerHour: row.max_per_hour ?? 30,
-    maxPerDay: row.max_per_day ?? 200,
+    maxPerHour: row.max_per_hour ?? 5000,
+    maxPerDay: row.max_per_day ?? 50000,
     warmupEnabled: Boolean(row.warmup_enabled),
     warmupStartedAt: row.warmup_started_at || '',
     linkCloak: Boolean(row.link_cloak),
