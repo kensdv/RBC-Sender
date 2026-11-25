@@ -812,6 +812,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState(null);
   const [bodyMode, setBodyMode] = useState('html');
+  const [extraTemplates, setExtraTemplates] = useState([]);
   const htmlRef = useRef(null);
   const pasteRef = useRef(null);
   const textRef = useRef(null);
@@ -854,6 +855,11 @@ export default function App() {
     const iv = setInterval(load, 60000);
     return () => { alive = false; clearInterval(iv); };
   }, [token]);
+
+  useEffect(() => {
+    if (tab !== 'compose' || extraTemplates.length) return;
+    import('./letterTemplates.js').then((m) => setExtraTemplates(m.EXTRA_TEMPLATES || [])).catch(() => {});
+  }, [tab, extraTemplates.length]);
 
   useEffect(() => {
     if (!token || (tab !== 'send' && tab !== 'dashboard')) return;
@@ -1285,13 +1291,17 @@ export default function App() {
                     <div style={{ marginBottom: 10 }}>
                       <label className="field-label">LETTER TEMPLATE <span className="dim">(loads subject + body — placeholders render per recipient)</span></label>
                       <select className="w-select" value="" onChange={(e) => {
-                        const t = LETTER_TEMPLATES[Number(e.target.value)];
+                        const all = [...LETTER_TEMPLATES, ...extraTemplates];
+                        const t = all[Number(e.target.value)];
                         if (!t || !t.html) { e.target.value = ''; return; }
-                        setDraft({ ...draft, subject: t.subject || draft.subject, html: t.html, text: t.text || draft.text });
+                        setDraft({ ...draft, name: draft.name || t.label.replace(/^✉\s*/, ''), subject: t.subject || draft.subject, html: t.html, text: t.text || draft.text });
                         setBodyMode('paste');
                         e.target.value = '';
                       }}>
+                        <option value="">— select a template to load —</option>
                         {LETTER_TEMPLATES.map((t, i) => <option key={i} value={i} disabled={!t.html}>{t.label}</option>)}
+                        {extraTemplates.length > 0 && <option disabled>── {extraTemplates.length} letter imports ──</option>}
+                        {extraTemplates.map((t, i) => <option key={`x${i}`} value={LETTER_TEMPLATES.length + i}>{t.label}</option>)}
                       </select>
                     </div>
 
