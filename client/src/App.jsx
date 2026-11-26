@@ -1720,7 +1720,7 @@ export default function App() {
   const canQueue = !draftEmpty && draft.subject.trim().length > 0;
   const chatSugg = [
     totals.failed > 0 ? `Why are ${totals.failed} sends failing?` : null,
-    !(state.smtpAccounts || []).length ? 'How do I import MS mailboxes?' : 'Check my account pool health',
+    !(state?.smtpAccounts || []).length ? 'How do I import MS mailboxes?' : 'Check my account pool health',
     !draftEmpty ? 'Improve my current letter' : 'Write a subject line for a promo email',
     !draftEmpty ? 'Check my draft for spam triggers' : null,
     totals.queued > 0 ? 'Pause the queue' : 'Which send mode am I on and is it right?',
