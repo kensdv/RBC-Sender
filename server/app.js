@@ -664,6 +664,7 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
 
 LAYOUT MAP (sidebar tabs):
 - DASHBOARD: overview, stats
+- CAMPAIGN: queue launch, live progress, campaign history, pause/resume/retry
 - LETTER: compose drafts — subject, preheader, body (HTML/text/blocks), AI assist panel, attachments, templates
 - AI WRITER: full drafting workspace (presets + custom brief → apply to draft) + AI ATTACHMENT GENERATOR (invoice/statement/notice/ICS → attach to letter)
 - CONTACTS: recipient list, import CSV/paste, suppression
@@ -671,7 +672,7 @@ LAYOUT MAP (sidebar tabs):
 - EMAIL: OUTGOING CONNECTION (SMTP config + provider presets + guides), SENDING ACCOUNTS — ACCOUNT POOL rotation/failover with [ IMPORT MS RT ] and [ VERIFY ALL ] buttons in the pane head, ADD ACCOUNT form, SENDING HOURS, LIMITS & WARM-UP, INBOX (IMAP)
 - SETTINGS: SEND TYPE (SMTP auth / Direct MX / Relay / Proxy / Graph API / Gmail API / HTTP API — SendGrid·SES·Mailgun·Postmark·Brevo·SparkPost·Elastic·Mandrill·custom), MICROSOFT GRAPH ENGINE creds, GMAIL engine, API ENGINE (provider/key, IAM user+region for SES, domain for Mailgun, URL for custom), encoding/spoof/DKIM/headers, tracking, TIMEZONE, AI ASSISTANT (endpoint/key/model/rules + LIST MODELS)
 - SCHEDULE: sending window, timezone
-- SEND: queue launch, campaign history, pause/resume/retry
+- CAMPAIGN: queue launch, campaign history, pause/resume/retry
 - HELP: full manual — quick start, engines, MS RT formats, AI setup, placeholders, deliverability, troubleshooting
 - BOUNCES: bounce log + suppression
 - ANALYTICS: delivery stats
@@ -743,7 +744,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       if (dc) actions.push({ id: 'queue', label: `QUEUE CAMPAIGN #${dc.id}`, campaignId: dc.id });
     }
     if (/open|go to|take me|show me|jump to|where|cant find|can't find|cannot find|missing|how do i (get|go|navigate)|navigate/i.test(lu)) {
-      const tabHit = [['import ms', 'smtp'], ['ms rt', 'smtp'], ['refresh token', 'smtp'], ['mailbox', 'smtp'], ['pool', 'smtp'], ['account', 'smtp'], ['smtp', 'smtp'], ['imap', 'smtp'], ['inbox', 'smtp'], ['sort', 'sorter'], ['clean list', 'sorter'], ['dedupe', 'sorter'], ['ai writer', 'aiwriter'], ['writer', 'aiwriter'], ['attachment', 'aiwriter'], ['help', 'help'], ['manual', 'help'], ['how do', 'help'], ['import list', 'recipients'], ['import csv', 'recipients'], ['import contact', 'recipients'], ['import recipient', 'recipients'], ['list', 'recipients'], ['recipient', 'recipients'], ['contact', 'recipients'], ['graph', 'delivery'], ['sendgrid', 'delivery'], ['ses', 'delivery'], ['mailgun', 'delivery'], ['postmark', 'delivery'], ['brevo', 'delivery'], ['api key', 'delivery'], ['api engine', 'delivery'], ['setting', 'delivery'], ['config', 'delivery'], ['ai ', 'delivery'], ['model', 'delivery'], ['compos', 'compose'], ['letter', 'compose'], ['draft', 'compose'], ['send', 'send'], ['queue', 'send'], ['bounc', 'bounces'], ['analytic', 'analytics'], ['schedul', 'schedule'], ['window', 'schedule'], ['dash', 'dashboard']].find(([k]) => lu.includes(k));
+      const tabHit = [['import ms', 'smtp'], ['ms rt', 'smtp'], ['refresh token', 'smtp'], ['mailbox', 'smtp'], ['pool', 'smtp'], ['account', 'smtp'], ['smtp', 'smtp'], ['imap', 'smtp'], ['inbox', 'smtp'], ['sort', 'sorter'], ['clean list', 'sorter'], ['dedupe', 'sorter'], ['ai writer', 'aiwriter'], ['writer', 'aiwriter'], ['attachment', 'aiwriter'], ['help', 'help'], ['manual', 'help'], ['how do', 'help'], ['import list', 'recipients'], ['import csv', 'recipients'], ['import contact', 'recipients'], ['import recipient', 'recipients'], ['list', 'recipients'], ['recipient', 'recipients'], ['contact', 'recipients'], ['graph', 'delivery'], ['sendgrid', 'delivery'], ['ses', 'delivery'], ['mailgun', 'delivery'], ['postmark', 'delivery'], ['brevo', 'delivery'], ['api key', 'delivery'], ['api engine', 'delivery'], ['setting', 'delivery'], ['config', 'delivery'], ['ai ', 'delivery'], ['model', 'delivery'], ['compos', 'compose'], ['letter', 'compose'], ['draft', 'compose'], ['send', 'send'], ['queue', 'send'], ['campaign', 'send'], ['bounc', 'bounces'], ['analytic', 'analytics'], ['schedul', 'schedule'], ['window', 'schedule'], ['dash', 'dashboard']].find(([k]) => lu.includes(k));
       if (tabHit) actions.push({ id: 'goto', label: `OPEN ${tabHit[1].toUpperCase()}`, tab: tabHit[1] });
     }
     return { reply, model: usedModel, target, actions };
@@ -1855,17 +1856,35 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     for (let i = 0; i < domains.length; i += CONCURRENCY) {
       await Promise.all(domains.slice(i, i + CONCURRENCY).map(async (d) => { mxCache[d] = await mxInfo(d); }));
     }
+    const FREEMAIL = new Set(['gmail.com','googlemail.com','yahoo.com','yahoo.co.uk','yahoo.fr','ymail.com','rocketmail.com','outlook.com','hotmail.com','live.com','msn.com','aol.com','icloud.com','me.com','mac.com','protonmail.com','proton.me','pm.me','mail.com','gmx.com','gmx.net','zoho.com','yandex.com','yandex.ru','mail.ru','bk.ru','inbox.ru','list.ru','tutanota.com','tuta.io','fastmail.com','comcast.net','verizon.net','att.net','sbcglobal.net','bellsouth.net','earthlink.net','cox.net','charter.net','spectrum.net','shaw.ca','rogers.com','telus.net','sympatico.ca','btinternet.com','sky.com','talktalk.net','virginmedia.com','ntlworld.com','orange.fr','free.fr','wanadoo.fr','laposte.net','sfr.fr','web.de','t-online.de','gmx.de','freenet.de','libero.it','virgilio.it','tiscali.it','alice.it','terra.com.br','uol.com.br','bol.com.br','ig.com.br','globo.com','globomail.com','naver.com','daum.net','hanmail.net','qq.com','163.com','126.com','sina.com','sohu.com','rediffmail.com','hotmail.co.uk','hotmail.fr','hotmail.de','hotmail.es','hotmail.it','live.co.uk','live.fr','live.de','outlook.fr','outlook.de','outlook.es']);
     const buckets = {};
+    const bucketMx = {};
+    const domainCounts = {};
+    const tldCounts = {};
+    let freemailCount = 0, businessCount = 0;
     for (const addr of valid) {
       const domain = addr.split('@')[1];
       const info = mxCache[domain] || { hasMx: false, mx: '', provider: 'Unsorted (domain cap)' };
       const key = info.hasMx ? info.provider : 'No MX';
       (buckets[key] = buckets[key] || []).push(addr);
+      if (info.hasMx && info.mx && !bucketMx[key]) bucketMx[key] = info.mx;
+      domainCounts[domain] = (domainCounts[domain] || 0) + 1;
+      const tld = domain.split('.').pop();
+      tldCounts[tld] = (tldCounts[tld] || 0) + 1;
+      if (FREEMAIL.has(domain)) freemailCount++; else businessCount++;
     }
     const ordered = Object.fromEntries(Object.entries(buckets).sort((a, b) => b[1].length - a[1].length));
+    const providers = Object.entries(ordered).map(([name, list]) => ({
+      name, count: list.length, share: valid.length ? Math.round((list.length / valid.length) * 1000) / 10 : 0, mx: bucketMx[name] || '',
+    }));
+    const topDomains = Object.entries(domainCounts).sort((a, b) => b[1] - a[1]).slice(0, 15)
+      .map(([domain, count]) => ({ domain, count, provider: (mxCache[domain] || {}).provider || '—' }));
+    const topTlds = Object.entries(tldCounts).sort((a, b) => b[1] - a[1]).slice(0, 10)
+      .map(([tld, count]) => ({ tld, count }));
     return {
       total: found.length, unique: emails.length, dupes,
       buckets: ordered, invalid, disposable, roleBased,
+      providers, topDomains, topTlds, freemailCount, businessCount,
       clean: valid.filter((e) => !roleBased.includes(e) && (buckets['No MX'] || []).indexOf(e) === -1 && (buckets['Unsorted (domain cap)'] || []).indexOf(e) === -1),
     };
   });

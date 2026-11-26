@@ -212,7 +212,7 @@ function RbcLogo({ size = 44 }) {
     <svg width={size} height={size} viewBox="0 0 48 48" fill="none" aria-hidden="true">
       <defs>
         <linearGradient id="rbcg" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#00ff41" /><stop offset="1" stopColor="#00ffff" />
+          <stop stopColor="#2fe06b" /><stop offset="1" stopColor="#00ffff" />
         </linearGradient>
       </defs>
       <path d="M24 2 42 12v24L24 46 6 36V12L24 2Z" fill="url(#rbcg)" opacity="0.14" stroke="url(#rbcg)" strokeWidth="2" />
@@ -807,6 +807,7 @@ const PLACEHOLDER_GROUPS = [
 
 const NAV_ITEMS = [
   { id: 'dashboard',  label: 'DASHBOARD',   icon: '◈' },
+  { id: 'send',       label: 'CAMPAIGN',    icon: '▶' },
   { id: 'compose',    label: 'LETTER',      icon: '✉' },
   { id: 'aiwriter',   label: 'AI WRITER',   icon: '✦' },
   { id: 'recipients', label: 'CONTACTS',    icon: '@' },
@@ -815,7 +816,6 @@ const NAV_ITEMS = [
   { id: 'delivery',   label: 'SETTINGS',    icon: '⚡' },
   { id: 'schedule',   label: 'SCHEDULE',    icon: '◷' },
   { id: 'bounces',    label: 'BOUNCES',     icon: '⚠' },
-  { id: 'send',       label: 'SEND',        icon: '▶' },
   { id: 'analytics',  label: 'ANALYTICS',   icon: '▤' },
   { id: 'help',       label: 'HELP',        icon: '?' },
 ];
@@ -882,7 +882,7 @@ function VisualEditor({ draft, updateDraft, token, assets, setAssets }) {
         case 'header': return `<div style="${styles.header}color:${b.color || '#333'};text-align:${b.align || 'left'};font-size:${b.size || 24}px">${escapeHtml(b.text || '')}</div>`;
         case 'image': return `<img src="${b.url || ''}" alt="${escapeHtml(b.alt || '')}" style="${styles.image}border-radius:${b.radius || 0}px" />`;
         case 'text': return `<div style="${styles.text}color:${b.color || '#333'};text-align:${b.align || 'left'};font-size:${b.size || 14}px;line-height:${b.lineHeight || 1.6}">${escapeHtml(b.text || '')}</div>`;
-        case 'button': return `<a href="${b.url || '#'}" style="${styles.button}background:${b.bgColor || '#00ff41'};color:${b.color || '#000'};padding:${b.padding || '12px 24px'};border-radius:${b.radius || 4}px;font-size:${b.size || 14}px">${escapeHtml(b.text || 'Click here')}</a>`;
+        case 'button': return `<a href="${b.url || '#'}" style="${styles.button}background:${b.bgColor || '#2fe06b'};color:${b.color || '#000'};padding:${b.padding || '12px 24px'};border-radius:${b.radius || 4}px;font-size:${b.size || 14}px">${escapeHtml(b.text || 'Click here')}</a>`;
         case 'divider': return `<hr style="${styles.divider}border-top-color:${b.color || '#ddd'};margin:${b.margin || '20px 0'}" />`;
         case 'social': return `<div style="${styles.social}justify-content:${b.align || 'left'}">${(b.icons || []).map(i => `<a href="${i.url || '#'}" style="display:inline-block;width:32px;height:32px;background:${i.bgColor || '#333'};color:#fff;text-align:center;line-height:32px;border-radius:50%;text-decoration:none;font-size:16px">${i.icon || 'S'}</a>`).join('')}</div>`;
         case 'footer': return `<div style="${styles.footer}text-align:${b.align || 'center'};font-size:${b.size || 12}px">${escapeHtml(b.text || '')}</div>`;
@@ -898,7 +898,7 @@ function VisualEditor({ draft, updateDraft, token, assets, setAssets }) {
 
   function addBlock(type) {
     const newBlock = { id: Date.now(), type, text: 'New ' + type, color: '#333', align: 'left', size: type === 'header' ? 24 : 14 };
-    if (type === 'button') newBlock.url = '#'; newBlock.bgColor = '#00ff41'; newBlock.color = '#000'; newBlock.radius = 4; newBlock.padding = '12px 24px';
+    if (type === 'button') newBlock.url = '#'; newBlock.bgColor = '#2fe06b'; newBlock.color = '#000'; newBlock.radius = 4; newBlock.padding = '12px 24px';
     if (type === 'image') newBlock.url = ''; newBlock.alt = 'Image'; newBlock.radius = 0;
     if (type === 'social') newBlock.icons = [{ icon: 'T', url: '#', bgColor: '#1DA1F2' }, { icon: 'F', url: '#', bgColor: '#4267B2' }, { icon: 'I', url: '#', bgColor: '#E1306C' }, { icon: 'L', url: '#', bgColor: '#0077B5' }];
     if (type === 'footer') newBlock.text = 'You received this email because you subscribed. Unsubscribe | Privacy | Contact';
@@ -1026,7 +1026,7 @@ function VisualEditor({ draft, updateDraft, token, assets, setAssets }) {
                   <label className="field-label">URL</label>
                   <input className="w-input" value={selectedBlock.url || ''} onChange={(e) => updateBlock(selectedId, 'url', e.target.value)} />
                   <label className="field-label">BG COLOR</label>
-                  <input className="w-input" type="color" value={selectedBlock.bgColor || '#00ff41'} onChange={(e) => updateBlock(selectedId, 'bgColor', e.target.value)} />
+                  <input className="w-input" type="color" value={selectedBlock.bgColor || '#2fe06b'} onChange={(e) => updateBlock(selectedId, 'bgColor', e.target.value)} />
                   <label className="field-label">TEXT COLOR</label>
                   <input className="w-input" type="color" value={selectedBlock.color || '#000'} onChange={(e) => updateBlock(selectedId, 'color', e.target.value)} />
                   <label className="field-label">RADIUS</label>
@@ -1215,7 +1215,12 @@ export default function App() {
   const [awPrompt, setAwPrompt] = useState('');
   const [awBusy, setAwBusy] = useState(false);
   const [awResult, setAwResult] = useState(null);
+  const [awTone, setAwTone] = useState('');
+  const [awLength, setAwLength] = useState('');
+  const [awAudience, setAwAudience] = useState('');
   const [awDocPrompt, setAwDocPrompt] = useState('');
+  const [awDocType, setAwDocType] = useState('PDF');
+  const [awDocName, setAwDocName] = useState('');
   const [awDocBusy, setAwDocBusy] = useState(false);
   const [awAttachment, setAwAttachment] = useState(null);
   const [sorterInput, setSorterInput] = useState('');
@@ -2331,30 +2336,73 @@ export default function App() {
                     <div className="pane-head"><span>AI EMAIL WRITER</span></div>
                     <p className="dim-txt">Describe the letter — the AI drafts it against your current compose content, then apply straight into the draft. Pick a preset or write your own brief.</p>
                     <div className="ai-presets">
-                      <button className="btn-sm" onClick={() => setAwPrompt('Write a cold outreach email — short, professional, one clear call to action.')}>COLD OUTREACH</button>
-                      <button className="btn-sm" onClick={() => setAwPrompt('Write a follow-up email referencing the previous message — polite nudge, same thread feel.')}>FOLLOW-UP</button>
-                      <button className="btn-sm" onClick={() => setAwPrompt('Write an urgent account notification email — security alert tone, action required, no fear-mongering.')}>URGENT NOTICE</button>
-                      <button className="btn-sm" onClick={() => setAwPrompt('Write a promotional email — punchy benefit-led copy, single offer, strong CTA button text.')}>PROMO BLAST</button>
-                      <button className="btn-sm" onClick={() => setAwPrompt('Write a newsletter-style update email — scannable sections, friendly expert voice.')}>NEWSLETTER</button>
-                      <button className="btn-sm" onClick={() => setAwPrompt('Write a payment/invoice reminder email — firm but professional, deadline and amount placeholders.')}>PAYMENT REMINDER</button>
+                      {[['COLD OUTREACH', 'Write a cold outreach email — short, professional, one clear call to action.'],
+                        ['FOLLOW-UP', 'Write a follow-up email referencing the previous message — polite nudge, same thread feel.'],
+                        ['URGENT NOTICE', 'Write an urgent account notification email — security alert tone, action required, no fear-mongering.'],
+                        ['PROMO BLAST', 'Write a promotional email — punchy benefit-led copy, single offer, strong CTA button text.'],
+                        ['NEWSLETTER', 'Write a newsletter-style update email — scannable sections, friendly expert voice.'],
+                        ['PAYMENT REMINDER', 'Write a payment/invoice reminder email — firm but professional, deadline and amount placeholders.'],
+                        ['WELCOME', 'Write a welcome/onboarding email — warm, sets expectations, first steps + one CTA.'],
+                        ['RE-ENGAGE', 'Write a win-back email to an inactive subscriber — acknowledge the gap, give one reason to return.'],
+                        ['DELIVERY NOTICE', 'Write a package-delivery notification — shipment status, tracking placeholder, clean logistics tone.'],
+                        ['SECURITY ALERT', 'Write an account-security notification — sign-in detected, verify-or-secure CTA, calm authority.'],
+                      ].map(([label, prompt]) => (
+                        <button key={label} className="btn-sm" onClick={() => setAwPrompt(prompt)}>{label}</button>
+                      ))}
+                    </div>
+                    <div className="aw-controls">
+                      <div className="aw-ctl">
+                        <span className="aw-lbl">TONE</span>
+                        <div className="aw-chips">
+                          {['', 'professional', 'friendly', 'urgent', 'formal', 'persuasive'].map((t) => (
+                            <button key={t || 'none'} className={`btn-xs ${awTone === t ? 'btn-solid' : ''}`} onClick={() => setAwTone(t)}>{t ? t.toUpperCase() : 'AUTO'}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="aw-ctl">
+                        <span className="aw-lbl">LENGTH</span>
+                        <div className="aw-chips">
+                          {[['', 'AUTO'], ['under 80 words', 'SHORT'], ['about 150 words', 'MEDIUM'], ['about 300 words', 'LONG']].map(([v, l]) => (
+                            <button key={l} className={`btn-xs ${awLength === v ? 'btn-solid' : ''}`} onClick={() => setAwLength(v)}>{l}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="aw-ctl">
+                        <span className="aw-lbl">AUDIENCE</span>
+                        <input className="w-input" style={{ flex: 1, minWidth: 140 }} value={awAudience} onChange={(e) => setAwAudience(e.target.value)} placeholder="e.g. small-business owners, IT admins…" />
+                      </div>
                     </div>
                     <textarea className="ai-prompt-input" rows={4} value={awPrompt} onChange={(e) => setAwPrompt(e.target.value)}
                       placeholder="Brief the writer… e.g. 'Notice that the client's mailbox storage is 90% full, offer the upgrade link, keep it under 120 words, use ++rbc_*++ placeholders where a link goes'" />
-                    <button className="btn-primary" disabled={awBusy || !awPrompt.trim()} onClick={async () => {
-                      setAwBusy(true); setAwResult(null);
-                      try {
-                        const res = await api(token, '/api/ai/assist', {
-                          method: 'POST',
-                          body: { prompt: awPrompt, subject: draft.subject, html: draft.html, text: draft.text },
-                        });
-                        setAwResult({ text: res.result || '', target: res.target || 'html' });
-                      } catch (err) { setAwResult({ text: `Error: ${err.message}`, target: 'none' }); }
-                      finally { setAwBusy(false); }
-                    }}>{awBusy ? '[ WRITING... ]' : '[ WRITE ]'}</button>
+                    <div className="btn-row" style={{ marginTop: 8 }}>
+                      <button className="btn-primary" disabled={awBusy || !awPrompt.trim()} onClick={async () => {
+                        setAwBusy(true); setAwResult(null);
+                        const shaped = [awPrompt, awTone && `Tone: ${awTone}.`, awLength && `Length: ${awLength}.`, awAudience.trim() && `Audience: ${awAudience.trim()}.`].filter(Boolean).join(' ');
+                        try {
+                          const res = await api(token, '/api/ai/assist', {
+                            method: 'POST',
+                            body: { prompt: shaped, subject: draft.subject, html: draft.html, text: draft.text },
+                          });
+                          setAwResult({ text: res.result || '', target: res.target || 'html' });
+                        } catch (err) { setAwResult({ text: `Error: ${err.message}`, target: 'none' }); }
+                        finally { setAwBusy(false); }
+                      }}>{awBusy ? '[ WRITING... ]' : '[ WRITE ]'}</button>
+                      <button className="btn-sm" disabled={awBusy} onClick={async () => {
+                        setAwBusy(true); setAwResult(null);
+                        try {
+                          const res = await api(token, '/api/ai/assist', {
+                            method: 'POST',
+                            body: { prompt: `Generate 6 alternative subject lines for this email${awTone ? ` in a ${awTone} tone` : ''}. Output ONLY the 6 lines, one per line, no numbering, no commentary.${awAudience.trim() ? ` Audience: ${awAudience.trim()}.` : ''}`, subject: draft.subject, html: draft.html, text: draft.text },
+                          });
+                          setAwResult({ text: res.result || '', target: 'subject' });
+                        } catch (err) { setAwResult({ text: `Error: ${err.message}`, target: 'none' }); }
+                        finally { setAwBusy(false); }
+                      }}>[ ✦ 6 SUBJECT LINES ]</button>
+                    </div>
                     {awResult && (
                       <div className="ai-response-area">
                         <div className="ai-response-head">
-                          <span>DRAFT <span className="dim" style={{ fontSize: 10 }}>→ {awResult.target}</span></span>
+                          <span>DRAFT <span className="dim" style={{ fontSize: 10 }}>→ {awResult.target} · {awResult.text.trim().split(/\s+/).filter(Boolean).length} words</span></span>
                           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                             {['subject', 'preheader', 'html', 'text'].map((f) => (
                               <button key={f} className={`btn-xs ${awResult.target === f || (awResult.target === 'body' && f === 'html') ? 'btn-solid' : ''}`}
@@ -2362,21 +2410,47 @@ export default function App() {
                                 → {f === 'html' ? 'BODY' : f.toUpperCase()}
                               </button>
                             ))}
+                            <button className="btn-xs" onClick={() => { navigator.clipboard.writeText(awResult.text); showNotice('Copied.'); }}>COPY</button>
                           </div>
                         </div>
                         <pre className="ai-response-text">{awResult.text}</pre>
+                        {awResult.target === 'subject' && (
+                          <div className="aw-subjects">
+                            {awResult.text.split('\n').map((l) => l.replace(/^[\d\.\-\*\s]+/, '').trim()).filter(Boolean).map((line, i) => (
+                              <button key={i} className="btn-sm aw-subject-line" onClick={() => { updateDraft('subject', line); showNotice('Subject applied.'); }}>{line}</button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
 
                   <div className="pane narrow-pane">
                     <div className="pane-head"><span>AI ATTACHMENT GENERATOR</span></div>
-                    <p className="dim-txt">Describe the document — the AI generates a real file (PDF/ICS/etc.) and attaches it to the current letter.</p>
+                    <p className="dim-txt">Describe the document — the AI generates a real file (PDF/ICS/CSV/etc.) and attaches it to the current letter.</p>
+                    <div className="aw-controls">
+                      <div className="aw-ctl">
+                        <span className="aw-lbl">FORMAT</span>
+                        <div className="aw-chips">
+                          {['PDF', 'TXT', 'CSV', 'ICS', 'HTML'].map((f) => (
+                            <button key={f} className={`btn-xs ${awDocType === f ? 'btn-solid' : ''}`} onClick={() => setAwDocType(f)}>{f}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="aw-ctl">
+                        <span className="aw-lbl">FILENAME</span>
+                        <input className="w-input" style={{ flex: 1, minWidth: 140 }} value={awDocName} onChange={(e) => setAwDocName(e.target.value)} placeholder="e.g. Invoice-2025-1184.pdf" />
+                      </div>
+                    </div>
                     <div className="ai-presets">
-                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a professional invoice PDF — clean table layout, placeholder amounts that match the letter.')}>INVOICE</button>
-                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate an account statement PDF — summary box + transaction table, realistic but generic.')}>STATEMENT</button>
-                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a formal notice PDF — letterhead look, reference number, one-page.')}>NOTICE</button>
-                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a calendar invite (ICS) — meeting that fits the letter subject, 30 minutes.')}>CALENDAR INVITE</button>
+                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a professional invoice — clean table layout, line items, placeholder amounts that match the letter.')}>INVOICE</button>
+                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate an account statement — summary box + transaction table, realistic but generic.')}>STATEMENT</button>
+                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a formal notice — letterhead look, reference number, one page.')}>NOTICE</button>
+                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a renewal quote — itemized pricing table, validity date, terms footer.')}>QUOTE</button>
+                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a payment receipt — confirmation header, transaction details, thank-you line.')}>RECEIPT</button>
+                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a service agreement summary — numbered clauses, signature block, effective date.')}>AGREEMENT</button>
+                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a monthly report — KPI summary section, bullet findings, one chart-described table.')}>REPORT</button>
+                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a calendar invite — meeting that fits the letter subject, 30 minutes.')}>CALENDAR</button>
                     </div>
                     <textarea className="ai-prompt-input" rows={3} value={awDocPrompt} onChange={(e) => setAwDocPrompt(e.target.value)}
                       placeholder="Describe the attachment… e.g. 'Renewal quote PDF for a 12-month mailbox plan, company header, total line'" />
@@ -2385,7 +2459,7 @@ export default function App() {
                       try {
                         const res = await api(token, '/api/ai/assist', {
                           method: 'POST',
-                          body: { prompt: `Generate a file attachment document: ${awDocPrompt}`, subject: draft.subject, html: draft.html, text: draft.text },
+                          body: { prompt: `Generate a ${awDocType} file attachment document${awDocName.trim() ? ` named "${awDocName.trim()}"` : ''}: ${awDocPrompt}`, subject: draft.subject, html: draft.html, text: draft.text },
                         });
                         if (res.attachment) setAwAttachment(res.attachment);
                         else setAwResult({ text: res.result || '(no file generated — describe the document type more explicitly)', target: 'none' });
@@ -2569,16 +2643,43 @@ export default function App() {
                   {sorterResult && (
                     <>
                       <div className="kpi-row">
-                        {[['EXTRACTED', sorterResult.total, 'var(--txt)'], ['UNIQUE', sorterResult.unique, 'var(--cyan)'], ['DUPES', sorterResult.dupes, 'var(--yellow)'], ['CLEAN', (sorterResult.clean || []).length, 'var(--green)']].map(([l, v, c]) => (
+                        {[['EXTRACTED', sorterResult.total, 'var(--txt)'], ['UNIQUE', sorterResult.unique, 'var(--cyan)'], ['DUPES', sorterResult.dupes, 'var(--yellow)'], ['INVALID', (sorterResult.invalid || []).length, 'var(--red)'], ['DISPOSABLE', (sorterResult.disposable || []).length, 'var(--orange)'], ['ROLE', (sorterResult.roleBased || []).length, 'var(--purple)'], ['FREEMAIL', `${sorterResult.freemailCount ?? 0}`, 'var(--txt-dim)'], ['BUSINESS', `${sorterResult.businessCount ?? 0}`, 'var(--txt-dim)'], ['CLEAN', (sorterResult.clean || []).length, 'var(--green)']].map(([l, v, c]) => (
                           <div key={l} className="kpi-card"><div className="kpi-val" style={{ color: c }}>{v}</div><div className="kpi-lbl">{l}</div></div>
                         ))}
                       </div>
 
                       <div className="pane">
                         <div className="pane-head">
-                          <span>PROVIDER BUCKETS</span>
-                          <button className="btn-xs" onClick={() => { navigator.clipboard.writeText((sorterResult.clean || []).join('\n')); showNotice(`Copied ${(sorterResult.clean || []).length} clean emails.`); }}>[ COPY CLEAN LIST ]</button>
+                          <span>PROVIDER SHARE</span>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button className="btn-xs" onClick={() => {
+                              const csv = ['provider,email'].concat(Object.entries(sorterResult.buckets || {}).flatMap(([p, list]) => list.map((e) => `${p},${e}`))).join('\n');
+                              const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'sorted-list.csv'; a.click();
+                              showNotice('Downloaded sorted-list.csv');
+                            }}>[ CSV ↓ ]</button>
+                            <button className="btn-xs" onClick={() => { navigator.clipboard.writeText((sorterResult.clean || []).join('\n')); showNotice(`Copied ${(sorterResult.clean || []).length} clean emails.`); }}>[ COPY CLEAN ]</button>
+                            <button className="btn-xs btn-solid" onClick={async () => {
+                              const clean = sorterResult.clean || [];
+                              if (!clean.length) return;
+                              try {
+                                const res = await api(token, '/api/recipients/import', { method: 'POST', body: { csv: 'email\n' + clean.join('\n'), consentConfirmed: true } });
+                                showNotice(`Imported ${res.imported ?? clean.length} contacts.`, 'ok');
+                                refresh();
+                              } catch (err) { showNotice(`Import failed: ${err.message}`, 'err'); }
+                            }}>[ IMPORT CLEAN → CONTACTS ]</button>
+                          </div>
                         </div>
+                        {(sorterResult.providers || []).map((p) => (
+                          <div key={p.name} className="share-row">
+                            <span className="share-name">{p.name.toUpperCase()}</span>
+                            <span className="share-bar"><span className="share-fill" style={{ width: `${p.share}%` }} /></span>
+                            <span className="share-num">{p.count} · {p.share}%</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="pane">
+                        <div className="pane-head"><span>PROVIDER BUCKETS</span></div>
                         <div className="sorter-buckets">
                           {Object.entries(sorterResult.buckets || {}).map(([provider, list]) => (
                             <div key={provider} className="sorter-bucket">
@@ -2586,10 +2687,32 @@ export default function App() {
                                 <span>{provider.toUpperCase()} <span className="dim">({list.length})</span></span>
                                 <button className="btn-xs" onClick={() => { navigator.clipboard.writeText(list.join('\n')); showNotice(`Copied ${list.length} ${provider} emails.`); }}>COPY</button>
                               </div>
+                              {(sorterResult.providers || []).find((p) => p.name === provider)?.mx && (
+                                <div className="sorter-mx dim">MX → {(sorterResult.providers || []).find((p) => p.name === provider).mx}</div>
+                              )}
                               <pre className="sorter-bucket-list">{list.slice(0, 30).join('\n')}{list.length > 30 ? `\n… +${list.length - 30} more` : ''}</pre>
                             </div>
                           ))}
                         </div>
+                      </div>
+
+                      <div className="two-col">
+                        {!!(sorterResult.topDomains || []).length && (
+                          <div className="pane">
+                            <div className="pane-head"><span>TOP DOMAINS</span></div>
+                            <table className="w-table"><thead><tr><th>DOMAIN</th><th>#</th><th>MX</th></tr></thead><tbody>
+                              {sorterResult.topDomains.map((d) => <tr key={d.domain}><td>{d.domain}</td><td className="cyan-txt">{d.count}</td><td className="dim">{d.provider}</td></tr>)}
+                            </tbody></table>
+                          </div>
+                        )}
+                        {!!(sorterResult.topTlds || []).length && (
+                          <div className="pane">
+                            <div className="pane-head"><span>TLD BREAKDOWN</span></div>
+                            <table className="w-table"><thead><tr><th>TLD</th><th>#</th></tr></thead><tbody>
+                              {sorterResult.topTlds.map((t) => <tr key={t.tld}><td>.{t.tld}</td><td className="cyan-txt">{t.count}</td></tr>)}
+                            </tbody></table>
+                          </div>
+                        )}
                       </div>
 
                       <div className="two-col">
@@ -3818,7 +3941,7 @@ sudo tail -f /var/log/maillog`}</pre>
                   </div>
                   <div className="pane send-pane">
                     <div>
-                      <div className="pane-head"><span>SEND NOW</span></div>
+                      <div className="pane-head"><span>LAUNCH CAMPAIGN</span></div>
                       <p className="dim-txt">Mode: <strong className="green-txt">{sendMode.toUpperCase()}</strong> — {state.confirmed} active recipients</p>
                       <p className="dim-txt">Window: <strong>{settings.scheduleEnabled === false ? '24/7 — always on' : `${(settings.sendDays || []).length ? (settings.sendDays || []).map((d) => DAY_LABELS[d] || d).join('/') : 'daily'} ${fmtMin(settings.sendFromMin)}–${fmtMin(settings.sendToMin)} ${settings.timezone || 'UTC'}`}</strong>{' '}
                         {settings.scheduleEnabled === false
@@ -3981,7 +4104,7 @@ sudo tail -f /var/log/maillog`}</pre>
                         <li><strong>Engine:</strong> SETTINGS → SEND TYPE — pick SMTP / DIRECT MX / RELAY / PROXY / GRAPH / GMAIL / HTTP API and fill its block. The EMAIL tab also holds the OUTGOING CONNECTION presets.</li>
                         <li><strong>List:</strong> CONTACTS → paste or import CSV (<code>email, first_name, last_name, company</code>), confirm consent, import. SORTER pre-cleans any raw list first.</li>
                         <li><strong>Letter:</strong> LETTER tab — subject, preheader, body (HTML / text / blocks / paste), attachments, live preview. AI WRITER drafts it for you.</li>
-                        <li><strong>Send:</strong> SEND tab → queue it. Pause/resume/retry from CAMPAIGN HISTORY. SCHEDULE sets the window; caps + warm-up live on EMAIL.</li>
+                        <li><strong>Queue:</strong> CAMPAIGN tab → queue it. Pause/resume/retry from CAMPAIGN HISTORY. SCHEDULE sets the window; caps + warm-up live on EMAIL.</li>
                       </ol>
                     </div>
 
@@ -4043,6 +4166,38 @@ client_id:secret:tenant            app creds (no RT)
                     </div>
 
                     <div className="help-sec">
+                      <h3>[ RBC HELPER — COMMANDS THAT WORK ]</h3>
+                      <table className="w-table help-table"><thead><tr><th>ASK</th><th>WHAT HAPPENS</th></tr></thead><tbody>
+                        <tr><td>"verify my accounts" / "test the pool"</td><td>⚡ VERIFY ALL — handshakes every pool account, reports per-account errors</td></tr>
+                        <tr><td>"send a test to me@x.com"</td><td>⚡ SEND TEST — fires the live draft as a single test send</td></tr>
+                        <tr><td>"check my spam score"</td><td>⚡ RUN SPAM CHECK — scores the current draft, lists the issues</td></tr>
+                        <tr><td>"pause / resume / retry the queue"</td><td>⚡ campaign controls — acts on the running campaign</td></tr>
+                        <tr><td>"reset quota for info@x.com"</td><td>⚡ RESET QUOTA — per-mailbox or all</td></tr>
+                        <tr><td>"disable info@x.com" / "enable #3"</td><td>⚡ toggles a pool account by email, label, or number</td></tr>
+                        <tr><td>"where is the import button"</td><td>⚡ OPEN &lt;TAB&gt; — navigates to the right pane</td></tr>
+                        <tr><td>"write a subject about…"</td><td>generates content + → apply buttons write it into the draft</td></tr>
+                        <tr><td>"why are my sends failing"</td><td>reads live failure stats, names the actual errors</td></tr>
+                      </tbody></table>
+                    </div>
+
+                    <div className="help-sec">
+                      <h3>[ API REFERENCE ]</h3>
+                      <p className="help-p">Every route is token-gated: <code>Authorization: Bearer &lt;DASHBOARD_TOKEN&gt;</code>. Content-type <code>application/json</code>.</p>
+                      <table className="w-table help-table"><thead><tr><th>ENDPOINT</th><th>DOES</th></tr></thead><tbody>
+                        <tr><td>GET /api/state</td><td>Full dashboard snapshot — settings, counts, pool, drafts (secrets masked)</td></tr>
+                        <tr><td>POST /api/recipients/import</td><td>Import contacts — <code>{"{csv, consentConfirmed:true}"}</code></td></tr>
+                        <tr><td>POST /api/sorter</td><td>Sort raw email text → provider buckets + flags + TLD/domain stats</td></tr>
+                        <tr><td>POST /api/queue</td><td>Launch the campaign (engine-validated, error tells you what's missing)</td></tr>
+                        <tr><td>POST /api/campaigns/:id/pause|resume|retry</td><td>Campaign controls</td></tr>
+                        <tr><td>POST /api/test-send</td><td>Send the current draft to one address</td></tr>
+                        <tr><td>POST /api/accounts/verify-all</td><td>Handshake-test every pool account</td></tr>
+                        <tr><td>POST /api/ai/chat · /api/ai/assist · /api/ai/models</td><td>Helper chat / content assist / live model list</td></tr>
+                        <tr><td>GET /api/dns-check · /api/spam-check</td><td>SPF/DKIM/DMARC verification · draft spam scoring</td></tr>
+                        <tr><td>GET /api/analytics · /api/bounces</td><td>Opens/clicks/domains report · suppression log</td></tr>
+                      </tbody></table>
+                    </div>
+
+                    <div className="help-sec">
                       <h3>[ TROUBLESHOOTING ]</h3>
                       <table className="w-table help-table"><thead><tr><th>SYMPTOM</th><th>FIX</th></tr></thead><tbody>
                         <tr><td>AI 401 / "not working"</td><td>Key got wiped or is wrong — re-enter it in SETTINGS → AI ASSISTANT, save, retry. LIST MODELS confirms the key works.</td></tr>
@@ -4050,7 +4205,7 @@ client_id:secret:tenant            app creds (no RT)
                         <tr><td>Pool account in COOLDOWN</td><td>It failed recently — wait it out or VERIFY ALL to retest now. Check last_error in the pool table.</td></tr>
                         <tr><td>GRAPH sends but pool mailboxes idle</td><td>Normal if pool is empty — import MS RT creds. Single-engine creds only run when the pool has zero MS accounts.</td></tr>
                         <tr><td>API mode "Configure a from/direct email"</td><td>HTTP API sends via DIRECT CONFIG fields — fill FROM NAME + FROM EMAIL in SETTINGS.</td></tr>
-                        <tr><td>Queue won't start</td><td>SEND tab tells you why — missing engine creds, empty list, or send-window closed (see SCHEDULE).</td></tr>
+                        <tr><td>Queue won't start</td><td>CAMPAIGN tab tells you why — missing engine creds, empty list, or send-window closed (see SCHEDULE).</td></tr>
                       </tbody></table>
                     </div>
                   </div>
