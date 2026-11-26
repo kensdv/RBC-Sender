@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { resolveMx } from 'node:dns/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
@@ -400,8 +400,11 @@ let smtpCursor = 0;
 
 function loadSmtpPool(db, config) {
   const now = new Date().toISOString();
+  const today = now.slice(0, 10);
   const rows = db.prepare('SELECT * FROM smtp_accounts WHERE enabled = 1').all()
-    .filter((r) => !r.cooldown_until || r.cooldown_until <= now);
+    .filter((r) => !r.cooldown_until || r.cooldown_until <= now)
+    // daily quota: enforced when the counter belongs to today; a stale date resets on next send
+    .filter((r) => !(r.daily_quota > 0 && r.sent_date === today && (r.sent_today || 0) >= r.daily_quota));
   if (rows.length) {
     return rows.map((r) => ({
       id: r.id,
@@ -409,6 +412,11 @@ function loadSmtpPool(db, config) {
       username: r.username,
       password: decryptSecret(r.password_encrypted, config.credentialKey),
       fromName: r.from_name, fromEmail: r.from_email, replyTo: r.reply_to,
+      authType: r.auth_type || 'password',
+      msClientId: r.ms_client_id || '',
+      msRt: r.ms_rt_encrypted ? decryptSecret(r.ms_rt_encrypted, config.credentialKey) : '',
+      msTenant: r.ms_tenant || 'common',
+      dailyQuota: r.daily_quota || 0,
       ratePerMinute: 60,
     }));
   }
@@ -419,7 +427,10 @@ function loadSmtpPool(db, config) {
 function markAccountResult(db, accountId, ok) {
   if (!accountId) return;
   if (ok) {
-    db.prepare('UPDATE smtp_accounts SET fails = 0, cooldown_until = NULL WHERE id = ?').run(accountId);
+    const today = new Date().toISOString().slice(0, 10);
+    db.prepare(`UPDATE smtp_accounts SET fails = 0, cooldown_until = NULL,
+      sent_today = CASE WHEN sent_date = ? THEN sent_today + 1 ELSE 1 END, sent_date = ? WHERE id = ?`)
+      .run(today, today, accountId);
   } else {
     db.prepare(`UPDATE smtp_accounts SET fails = fails + 1,
       cooldown_until = ? WHERE id = ?`).run(new Date(Date.now() + 5 * 60000).toISOString(), accountId);
@@ -505,6 +516,83 @@ async function gmailAccessToken(settings) {
   if (!res.ok) throw new Error(`Gmail token failed: ${data.error_description || data.error || res.status}`);
   tokenCache[key] = { token: data.access_token, exp: Date.now() + (data.expires_in - 60) * 1000 };
   return tokenCache[key].token;
+}
+
+// ── Per-mailbox MS refresh-token auth (imported RT mailboxes) ──────
+async function msRtAccessToken(clientId, refreshToken, tenant = 'common') {
+  const key = `msrt:${clientId}:${createHash('sha256').update(refreshToken).digest('hex').slice(0, 16)}`;
+  if (tokenCache[key]?.exp > Date.now()) return tokenCache[key].token;
+  const body = {
+    client_id: clientId,
+    refresh_token: refreshToken,
+    grant_type: 'refresh_token',
+    scope: 'https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/User.Read offline_access',
+  };
+  const post = () => fetch(`https://login.microsoftonline.com/${encodeURIComponent(tenant || 'common')}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(body),
+  });
+  let res = await post();
+  let data = await res.json().catch(() => ({}));
+  // Imported RTs carry their own consented scope set — retry without scope on scope errors
+  if (!res.ok && /scope/i.test(data.error_description || data.error || '')) {
+    delete body.scope;
+    res = await post();
+    data = await res.json().catch(() => ({}));
+  }
+  if (!res.ok) throw new Error(`MS RT token failed: ${data.error_description || data.error || res.status}`);
+  tokenCache[key] = { token: data.access_token, exp: Date.now() + (Number(data.expires_in) - 60) * 1000 };
+  return tokenCache[key].token;
+}
+
+export async function msRtMailboxInfo(clientId, refreshToken, tenant = 'common') {
+  const token = await msRtAccessToken(clientId, refreshToken, tenant);
+  const res = await fetch('https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName,displayName', {
+    headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(15000),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`MS RT mailbox lookup failed ${res.status}: ${data.error?.message || res.statusText}`);
+  const email = data.mail || data.userPrincipalName || '';
+  return { email, displayName: data.displayName || email, token };
+}
+
+export async function msRtSendMail({ token, sender, message, recipient, fromName, replyTo, attachments, settings }) {
+  const toName = [recipient.firstName, recipient.lastName].filter(Boolean).join(' ');
+  const addr = { emailAddress: { name: toName, address: recipient.email } };
+  const fromAddr = { emailAddress: { name: fromName, address: sender } };
+  const payload = { message: { subject: message.subject } };
+  if (message.html) payload.message.body = { contentType: 'HTML', content: message.html };
+  else payload.message.body = { contentType: 'Text', content: message.text || '' };
+  const sendType = settings.sendType || 'to';
+  if (sendType === 'cc') { payload.message.toRecipients = [fromAddr]; payload.message.ccRecipients = [addr]; }
+  else if (sendType === 'bcc') { payload.message.toRecipients = [fromAddr]; payload.message.bccRecipients = [addr]; }
+  else payload.message.toRecipients = [addr];
+  if (replyTo) payload.message.replyTo = [{ emailAddress: { address: replyTo } }];
+  const headers = Object.entries(message.extraHeaders || {})
+    .filter(([k]) => !GRAPH_BLOCKED_HEADERS.has(k.toLowerCase()))
+    .slice(0, 20)
+    .map(([name, value]) => ({ name, value: String(value).slice(0, 500) }));
+  if (headers.length) payload.message.internetMessageHeaders = headers;
+  if (attachments.length) {
+    payload.message.attachments = attachments.map((a) => ({
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: a.filename,
+      contentType: a.contentType || 'application/octet-stream',
+      contentBytes: (a.content || readFileSync(a.path)).toString('base64'),
+    }));
+  }
+  const res = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sender)}/sendMail`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(`Graph sendMail failed ${res.status}: ${data.error?.message || res.statusText}`);
+  }
+  return { messageId: '', response: 'msrt-sendMail' };
 }
 
 const GRAPH_BLOCKED_HEADERS = new Set(['from', 'to', 'cc', 'bcc', 'subject', 'mime-version', 'content-type', 'content-transfer-encoding', 'date', 'message-id', 'return-path', 'received', 'reply-to']);
@@ -940,6 +1028,20 @@ export function createMailer({ db, config }) {
       const results = [];
       for (const r of rows) {
         const label = r.label || r.username || `account ${r.id}`;
+        // MS RT mailbox: verify = token exchange + mailbox identity lookup
+        if (r.auth_type === 'ms_rt') {
+          try {
+            const rt = decryptSecret(r.ms_rt_encrypted, config.credentialKey);
+            const info = await msRtMailboxInfo(r.ms_client_id, rt, r.ms_tenant || 'common');
+            if (r.id) db.prepare("UPDATE smtp_accounts SET fails = 0, cooldown_until = NULL, last_check = ?, last_error = '' WHERE id = ?").run(now, r.id);
+            results.push({ id: r.id, label: `${label} → ${info.email}`, host: 'graph.microsoft.com', ok: true, error: '' });
+          } catch (err) {
+            const msg = String(err.message || err).slice(0, 300);
+            if (r.id) db.prepare('UPDATE smtp_accounts SET fails = fails + 1, cooldown_until = ?, last_check = ?, last_error = ? WHERE id = ?').run(deadUntil, now, msg, r.id);
+            results.push({ id: r.id, label, host: 'graph.microsoft.com', ok: false, error: msg });
+          }
+          continue;
+        }
         let transporter = null;
         try {
           transporter = transportFor({
@@ -1094,6 +1196,18 @@ export function createMailer({ db, config }) {
       for (const acct of order) {
         try {
           const { fromName, fromEmail, replyTo } = buildFrom(settings, acct);
+          // ── Imported MS RT mailbox: delegated Graph sendMail ──
+          if (acct?.authType === 'ms_rt') {
+            const sender = fromEmail || acct.username;
+            if (!sender) throw new Error(`MS RT mailbox #${acct.id}: no sender address`);
+            const token = await msRtAccessToken(acct.msClientId, acct.msRt, acct.msTenant);
+            const info = await msRtSendMail({
+              token, sender, recipient, fromName, replyTo, attachments, settings,
+              message: { ...message, extraHeaders: buildHeaders(sender) },
+            });
+            markAccountResult(db, acct.id, true);
+            return info;
+          }
           if (!fromEmail) throw new Error(`No from email configured for mode: ${mode}`);
           const mailOpts = buildMailOpts({ fromName, fromEmail, replyTo });
           const transporter = await getTransport(settings, acct, recipient.email, dkim);

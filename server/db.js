@@ -270,6 +270,13 @@ export function openDatabase(path) {
   const acctCols = new Set(db.prepare('PRAGMA table_info(smtp_accounts)').all().map((c) => c.name));
   if (!acctCols.has('last_check')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN last_check TEXT");
   if (!acctCols.has('last_error')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN last_error TEXT NOT NULL DEFAULT ''");
+  if (!acctCols.has('auth_type')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN auth_type TEXT NOT NULL DEFAULT 'password'");
+  if (!acctCols.has('ms_client_id')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN ms_client_id TEXT NOT NULL DEFAULT ''");
+  if (!acctCols.has('ms_rt_encrypted')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN ms_rt_encrypted TEXT NOT NULL DEFAULT ''");
+  if (!acctCols.has('ms_tenant')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN ms_tenant TEXT NOT NULL DEFAULT 'common'");
+  if (!acctCols.has('daily_quota')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN daily_quota INTEGER NOT NULL DEFAULT 0");
+  if (!acctCols.has('sent_today')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN sent_today INTEGER NOT NULL DEFAULT 0");
+  if (!acctCols.has('sent_date')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN sent_date TEXT NOT NULL DEFAULT ''");
   const bounceCols = new Set(db.prepare('PRAGMA table_info(bounces)').all().map((c) => c.name));
   if (!bounceCols.has('classification')) db.exec("ALTER TABLE bounces ADD COLUMN classification TEXT NOT NULL DEFAULT ''");
   if (!bounceCols.has('suppression_action')) db.exec("ALTER TABLE bounces ADD COLUMN suppression_action TEXT NOT NULL DEFAULT ''");

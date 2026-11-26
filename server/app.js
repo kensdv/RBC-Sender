@@ -9,7 +9,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { decryptSecret, encryptSecret, tokensEqual, unsubscribeToken } from './crypto.js';
 import { parseRecipientsCsv, parseLooseEmails } from './csv.js';
-import { publicSmtp, publicSendSettings, getGraphAccessToken } from './mailer.js';
+import { publicSmtp, publicSendSettings, getGraphAccessToken, msRtMailboxInfo } from './mailer.js';
 import { escapeHtml } from './placeholders.js';
 import { transaction } from './db.js';
 import { DEFAULT_AI_RULES } from './default-ai-rules.js';
@@ -1115,6 +1115,8 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
       fromName: row.from_name, fromEmail: row.from_email, replyTo: row.reply_to,
       enabled: Boolean(row.enabled), weight: row.weight, fails: row.fails,
       cooldownUntil: row.cooldown_until, lastCheck: row.last_check || null, lastError: row.last_error || '', createdAt: row.created_at,
+      authType: row.auth_type || 'password', msClientId: row.ms_client_id || '', hasMsRt: Boolean(row.ms_rt_encrypted),
+      dailyQuota: row.daily_quota || 0, sentToday: row.sent_today || 0, sentDate: row.sent_date || '',
     };
   }
 
@@ -1170,12 +1172,74 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
     if (!Number.isInteger(a.port) || a.port < 1 || a.port > 65535) fail('Port is invalid');
     db.prepare(`UPDATE smtp_accounts SET label=?, host=?, port=?, secure=?, username=?, password_encrypted=?, from_name=?, from_email=?, reply_to=?, enabled=?, weight=?, updated_at=? WHERE id=?`)
       .run(a.label, a.host, a.port, a.secure, a.username, a.passwordEncrypted, a.fromName, a.fromEmail, a.replyTo, a.enabled, a.weight, new Date().toISOString(), id);
+    if (request.body?.dailyQuota !== undefined) {
+      db.prepare('UPDATE smtp_accounts SET daily_quota = ? WHERE id = ?').run(Math.min(1000000, Math.max(0, Number(request.body.dailyQuota) || 0)), id);
+    }
     return { ok: true };
   });
 
   app.delete('/api/smtp/accounts/:id', async (request) => {
     db.prepare('DELETE FROM smtp_accounts WHERE id = ?').run(Number(request.params.id));
     return { ok: true };
+  });
+
+  app.post('/api/smtp/accounts/:id/reset-quota', async (request) => {
+    db.prepare("UPDATE smtp_accounts SET sent_today = 0, sent_date = '' WHERE id = ?").run(Number(request.params.id));
+    return { ok: true };
+  });
+
+  // ── MS refresh-token mailbox import ──
+  // Accepts one or many lines: JSON {client_id, refresh_token, tenant?, email?},
+  // or delimited strings where the client_id is the GUID and the refresh_token is
+  // the longest remaining segment (covers client_id:rt, email:cid:rt, cid|rt, etc).
+  const MS_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  function parseMsRtLine(line) {
+    line = String(line || '').trim();
+    if (!line) return null;
+    if (line.startsWith('{')) {
+      try {
+        const j = JSON.parse(line);
+        const clientId = j.client_id || j.clientId || '';
+        const rt = j.refresh_token || j.refreshToken || '';
+        if (clientId && rt) return { clientId, rt, tenant: j.tenant || 'common', email: j.email || j.mail || '' };
+      } catch {}
+      return null;
+    }
+    const parts = line.split(/[:\t|,;]+/).map((p) => p.trim()).filter(Boolean);
+    const clientId = parts.find((p) => MS_GUID.test(p)) || '';
+    const rest = parts.filter((p) => p !== clientId && !p.includes('@'));
+    const rt = rest.sort((a, b) => b.length - a.length)[0] || '';
+    const emailPart = parts.find((p) => p.includes('@')) || '';
+    if (!clientId || !rt || rt.length < 20) return null;
+    return { clientId, rt, tenant: 'common', email: emailPart };
+  }
+
+  app.post('/api/smtp/accounts/import-ms', async (request) => {
+    const body = request.body || {};
+    const quota = Math.min(100000, Math.max(0, Number(body.quota) || 10000));
+    const lines = String(body.data || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    if (!lines.length) fail('Nothing to import — paste client_id:refresh_token lines or JSON');
+    if (lines.length > 200) fail('Max 200 mailboxes per import');
+    const results = [];
+    const now = new Date().toISOString();
+    for (const line of lines) {
+      const parsed = parseMsRtLine(line);
+      if (!parsed) { results.push({ ok: false, error: 'unparseable line', line: line.slice(0, 60) }); continue; }
+      try {
+        const info = await msRtMailboxInfo(parsed.clientId, parsed.rt, parsed.tenant);
+        const sender = parsed.email || info.email;
+        if (!sender) { results.push({ ok: false, error: 'mailbox email not resolvable', line: parsed.clientId }); continue; }
+        const dup = db.prepare("SELECT id FROM smtp_accounts WHERE auth_type = 'ms_rt' AND ms_client_id = ? AND username = ?").get(parsed.clientId, sender);
+        if (dup) { results.push({ ok: false, error: `already imported (account #${dup.id})`, email: sender }); continue; }
+        const r = db.prepare(`INSERT INTO smtp_accounts (label, host, port, secure, username, password_encrypted, from_name, from_email, reply_to, enabled, weight, auth_type, ms_client_id, ms_rt_encrypted, ms_tenant, daily_quota, created_at, updated_at)
+          VALUES (?, 'graph.microsoft.com', 443, 1, ?, '', ?, ?, '', 1, 1, 'ms_rt', ?, ?, ?, ?, ?, ?)`)
+          .run(info.displayName || sender, sender, info.displayName || '', sender, parsed.clientId, encryptSecret(parsed.rt, config.credentialKey), parsed.tenant, quota, now, now);
+        results.push({ ok: true, id: Number(r.lastInsertRowid), email: sender, name: info.displayName });
+      } catch (err) {
+        results.push({ ok: false, error: String(err.message || err).slice(0, 200), line: parsed.clientId });
+      }
+    }
+    return { imported: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results };
   });
 
   // Send settings (delivery config)

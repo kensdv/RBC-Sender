@@ -86,7 +86,7 @@ const emptyDraft = {
   attachments: [],
 };
 const emptySmtp = { host: '', port: 587, secure: false, username: '', password: '', fromName: '', fromEmail: '', replyTo: '', ratePerMinute: 30 };
-const emptyAccount = { label: '', host: '', port: 587, secure: false, username: '', password: '', fromName: '', fromEmail: '', replyTo: '', weight: 1 };
+const emptyAccount = { label: '', host: '', port: 587, secure: false, username: '', password: '', fromName: '', fromEmail: '', replyTo: '', weight: 1, dailyQuota: 0 };
 const emptySettings = {
   sendMode: 'smtp',
   directFromName: '', directFromEmail: '', directReplyTo: '', directRatePerMinute: 10,
@@ -1147,6 +1147,10 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [smtp, setSmtp] = useState(emptySmtp);
   const [acctForm, setAcctForm] = useState(emptyAccount);
+  const [msRtImportOpen, setMsRtImportOpen] = useState(false);
+  const [msRtData, setMsRtData] = useState('');
+  const [msRtQuota, setMsRtQuota] = useState(10000);
+  const [msRtResults, setMsRtResults] = useState(null);
   const [editingAcct, setEditingAcct] = useState(null);
   const [settings, setSettings] = useState(emptySettings);
   const [aiModelList, setAiModelList] = useState(null);
@@ -2454,25 +2458,55 @@ sudo tail -f /var/log/maillog`}</pre>
                 {/* SMTP ACCOUNT POOL */}
                 <div className="pane">
                   <div className="pane-head"><span>ACCOUNT POOL — ROTATION & FAILOVER</span>
-                    <button className="btn-sm" disabled={busy} onClick={() => run(async () => {
-                      const r = await api(token, '/api/smtp/verify-all', { method: 'POST' });
-                      const dead = (r.results || []).filter((x) => !x.ok);
-                      showNotice(dead.length ? `${r.live}/${r.total} live — ${dead.length} dead cooled 6h.` : `All ${r.total} accounts verified live.`);
-                      await refresh();
-                    })}>[ VERIFY ALL ]</button>
+                    <div style={{display:'flex',gap:6}}>
+                      <button className="btn-sm" onClick={() => setMsRtImportOpen(!msRtImportOpen)}>[ IMPORT MS RT ]</button>
+                      <button className="btn-sm" disabled={busy} onClick={() => run(async () => {
+                        const r = await api(token, '/api/smtp/verify-all', { method: 'POST' });
+                        const dead = (r.results || []).filter((x) => !x.ok);
+                        showNotice(dead.length ? `${r.live}/${r.total} live — ${dead.length} dead cooled 6h.` : `All ${r.total} accounts verified live.`);
+                        await refresh();
+                      })}>[ VERIFY ALL ]</button>
+                    </div>
                   </div>
+                  {msRtImportOpen && (
+                    <div className="cfg-block" style={{marginBottom:12}}>
+                      <div className="cfg-block-title">[ IMPORT MS REFRESH-TOKEN MAILBOXES ]</div>
+                      <p className="dim-txt">One per line — <code>client_id:refresh_token</code>, <code>email:client_id:rt</code>, pipe/tab-delimited, or JSON <code>{'{"client_id":"…","refresh_token":"…"}'}</code>. Each line is validated live against Microsoft; the mailbox address is resolved automatically. Mailboxes send via Graph sendMail inside the normal rotation.</p>
+                      <textarea className="w-textarea code-ta" rows={5} value={msRtData} onChange={(e) => setMsRtData(e.target.value)} placeholder="9e5f94bc-e8b4-4d4e-8c0a-… : M.C540_BAY…" />
+                      <div style={{display:'flex',alignItems:'center',gap:10,marginTop:8,flexWrap:'wrap'}}>
+                        <label className="field-label" style={{margin:0}}>DAILY QUOTA / MAILBOX</label>
+                        <input className="w-input" type="number" min="0" max="100000" style={{width:110}} value={msRtQuota} onChange={(e) => setMsRtQuota(Number(e.target.value))} />
+                        <button className="btn-sm" disabled={busy || !msRtData.trim()} onClick={() => run(async () => {
+                          const r = await api(token, '/api/smtp/accounts/import-ms', { method: 'POST', body: { data: msRtData, quota: msRtQuota } });
+                          setMsRtResults(r.results || []);
+                          showNotice(`Imported ${r.imported} mailbox(es) — ${r.failed} failed.`);
+                          if (r.imported) setMsRtData('');
+                          await refresh();
+                        })}>[ IMPORT ]</button>
+                      </div>
+                      {msRtResults && (
+                        <div style={{marginTop:8,maxHeight:140,overflowY:'auto',fontSize:11}}>
+                          {msRtResults.map((r, i) => (
+                            <div key={i} className={r.ok ? 'dim-txt' : 'red-txt'}>{r.ok ? `✓ #${r.id} ${r.email} (${r.name})` : `✗ ${r.error}${r.email ? ' — ' + r.email : ''}${r.line ? ' — ' + r.line : ''}`}</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <p className="dim-txt">Sends rotate across enabled accounts; failures cool an account down and fail over to the next. VERIFY ALL handshakes every account — dead ones drop out of rotation for 6h. The legacy config above acts as fallback when the pool is empty.</p>
                   <div className="tbl-wrap" style={{maxHeight:240}}>
                     <table className="w-table">
-                      <thead><tr><th>LABEL</th><th>HOST</th><th>USER</th><th>FROM</th><th>W</th><th>STATE</th><th></th></tr></thead>
+                      <thead><tr><th>LABEL</th><th>TYPE</th><th>HOST</th><th>USER</th><th>FROM</th><th>W</th><th>QUOTA</th><th>STATE</th><th></th></tr></thead>
                       <tbody>
                         {(state.smtpAccounts || []).map((a) => (
                           <tr key={a.id}>
                             <td>{a.label || '—'}</td>
+                            <td><span className={`badge ${a.authType === 'ms_rt' ? 'badge-ok' : 'badge-def'}`}>{a.authType === 'ms_rt' ? 'MS RT' : 'SMTP'}</span></td>
                             <td className="dim">{a.host}:{a.port}</td>
                             <td className="dim">{a.username}</td>
                             <td className="dim">{a.fromEmail}</td>
                             <td>{a.weight}</td>
+                            <td className="dim" style={{whiteSpace:'nowrap'}}>{a.dailyQuota ? `${a.sentToday}/${a.dailyQuota}` : '∞'}{a.sentToday > 0 ? <button className="btn-xs" style={{marginLeft:6}} title="Reset daily counter" onClick={() => run(async () => { await api(token, `/api/smtp/accounts/${a.id}/reset-quota`, { method: 'POST' }); await refresh(); })}>↺</button> : null}</td>
                             <td><span className={`badge ${a.enabled ? 'badge-ok' : 'badge-def'}`}>{a.cooldownUntil && a.cooldownUntil > new Date().toISOString() ? 'COOLDOWN' : a.enabled ? 'ACTIVE' : 'OFF'}</span>{a.fails ? <span className="dim"> ({a.fails}f)</span> : null}
                               {a.lastError ? <div className="red-txt" style={{fontSize:11}} title={a.lastError}>{a.lastError.slice(0, 60)}</div>
                                 : a.lastCheck ? <div className="dim-txt" style={{fontSize:11}}>ok {new Date(a.lastCheck).toLocaleTimeString()}</div> : null}</td>
@@ -2480,7 +2514,7 @@ sudo tail -f /var/log/maillog`}</pre>
                               <div className="act-row">
                                 <button className="btn-xs" onClick={() => {
                                   setEditingAcct(a.id);
-                                  setAcctForm({ label: a.label, host: a.host, port: a.port, secure: a.secure, username: a.username, password: '', fromName: a.fromName, fromEmail: a.fromEmail, replyTo: a.replyTo, weight: a.weight });
+                                  setAcctForm({ label: a.label, host: a.host, port: a.port, secure: a.secure, username: a.username, password: '', fromName: a.fromName, fromEmail: a.fromEmail, replyTo: a.replyTo, weight: a.weight, dailyQuota: a.dailyQuota });
                                 }}>EDIT</button>
                                 <button className="btn-xs" onClick={() => run(async () => { await api(token, `/api/smtp/accounts/${a.id}`, { method: 'PUT', body: { label: a.label, host: a.host, port: a.port, secure: a.secure, username: a.username, fromName: a.fromName, fromEmail: a.fromEmail, replyTo: a.replyTo, weight: a.weight, enabled: !a.enabled } }); await refresh(); })}>{a.enabled ? 'DISABLE' : 'ENABLE'}</button>
                                 <button className="btn-xs btn-danger" onClick={async () => { if (await uiConfirm(`Delete account ${a.label || a.username}?`, { title: 'DELETE SMTP ACCOUNT', danger: true, confirmLabel: 'DELETE' })) run(async () => { await api(token, `/api/smtp/accounts/${a.id}`, { method: 'DELETE' }); await refresh(); }); }}>DEL</button>
@@ -2488,7 +2522,7 @@ sudo tail -f /var/log/maillog`}</pre>
                             </td>
                           </tr>
                         ))}
-                        {!(state.smtpAccounts || []).length && <tr><td colSpan={7} className="dim" style={{textAlign:'center'}}>No pool accounts — legacy SMTP config is used.</td></tr>}
+                        {!(state.smtpAccounts || []).length && <tr><td colSpan={9} className="dim" style={{textAlign:'center'}}>No pool accounts — legacy SMTP config is used.</td></tr>}
                       </tbody>
                     </table>
                   </div>
@@ -2504,6 +2538,7 @@ sudo tail -f /var/log/maillog`}</pre>
                       <div><label className="field-label">FROM NAME</label><input className="w-input" value={acctForm.fromName} onChange={(e) => setAcctForm({ ...acctForm, fromName: e.target.value })} /></div>
                       <div><label className="field-label">REPLY-TO</label><input className="w-input" type="email" value={acctForm.replyTo} onChange={(e) => setAcctForm({ ...acctForm, replyTo: e.target.value })} /></div>
                       <div><label className="field-label">WEIGHT</label><input className="w-input" type="number" min="1" max="100" value={acctForm.weight} onChange={(e) => setAcctForm({ ...acctForm, weight: Number(e.target.value) })} /></div>
+                      <div><label className="field-label">DAILY QUOTA <span className="dim">(0 = unlimited)</span></label><input className="w-input" type="number" min="0" max="1000000" value={acctForm.dailyQuota ?? 0} onChange={(e) => setAcctForm({ ...acctForm, dailyQuota: Number(e.target.value) })} /></div>
                     </div>
                     <label className="check-row"><input type="checkbox" checked={acctForm.secure} onChange={(e) => setAcctForm({ ...acctForm, secure: e.target.checked })} /><span>Implicit TLS (465)</span></label>
                     <div className="btn-row">
