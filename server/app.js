@@ -405,6 +405,36 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     return { imported: unique.length, duplicates: contacts.length - unique.length, errors: [], total: contacts.length };
   });
 
+  // ── AI Assistant for Letter Panel ──
+  app.post('/api/ai/assist', async (request) => {
+    const body = request.body || {};
+    const { prompt, subject, html, text } = body;
+    if (!prompt) fail('Prompt is required');
+    const row = db.prepare('SELECT ai_endpoint, ai_key_encrypted, ai_model FROM send_settings WHERE id = 1').get() || {};
+    const endpoint = row.ai_endpoint || '';
+    const aiKey = row.ai_key_encrypted && config ? decryptSecret(row.ai_key_encrypted, config.credentialKey) : '';
+    const model = row.ai_model || '';
+    if (!endpoint || !aiKey) fail('AI endpoint and key must be configured in SETTINGS');
+    const systemPrompt = `You are an email copywriting assistant specializing in deliverability, personalization, and inbox placement. Your job is to improve email content while preserving placeholders like [Firstname], [Lastname], [Company], ++rbc_*++, etc. Return only the improved content — no explanations, no meta commentary. The user will tell you what to do via the prompt field.`;
+    const userPrompt = `Current draft:\n\nSubject: ${subject || '(none)'}\n\nHTML body:\n${html || '(none)'}\n\nText body:\n${text || '(none)'}\n\nTask: ${prompt}`;
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${aiKey}`,
+        },
+        body: JSON.stringify({ model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }] }),
+      });
+      if (!res.ok) fail(`AI request failed: ${res.status}`);
+      const data = await res.json().catch(() => ({}));
+      const content = data.choices?.[0]?.message?.content || data.message?.content || '';
+      return { result: content || '' };
+    } catch (err) {
+      fail(`AI error: ${err.message || err}`);
+    }
+  });
+
   // ── SMTP account pool ──
   function accountView(row) {
     return {
@@ -523,6 +553,12 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       ? encryptSecret(String(body.dkimPrivateKey), config.credentialKey)
       : (currentDkim?.dkim_key_encrypted || '');
 
+    // AI key: keep existing if blank, encrypt new if provided
+    const currentAi = db.prepare('SELECT ai_key_encrypted FROM send_settings WHERE id = 1').get();
+    const aiKeyEncrypted = body.aiKey
+      ? encryptSecret(String(body.aiKey), config.credentialKey)
+      : (currentAi?.ai_key_encrypted || '');
+
     db.prepare(`
       INSERT INTO send_settings (id, send_mode, direct_from_name, direct_from_email, direct_reply_to, direct_rate_per_minute,
         relay_host, relay_port, socks5_proxy, encoding, priority, send_type, sleep_ms,
@@ -536,6 +572,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
         engine_send_as, attach_formats_json, image_recompress,
         send_days_json, send_from_min, send_to_min, max_per_hour, max_per_day,
         warmup_enabled, warmup_started_at, link_cloak, cloak_base,
+        ai_endpoint, ai_key_encrypted, ai_model,
         relay_secure, relay_username, relay_password_encrypted, relay_ehlo,
         updated_at)
       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

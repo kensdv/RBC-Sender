@@ -111,6 +111,9 @@ function loadSendSettings(db, config = null) {
     warmupStartedAt: row.warmup_started_at || '',
     linkCloak: Boolean(row.link_cloak),
     cloakBase: row.cloak_base || '',
+    aiEndpoint: row.ai_endpoint || '',
+    aiKey: Boolean(row.ai_key_encrypted),
+    aiModel: row.ai_model || '',
   };
 }
 
@@ -384,6 +387,9 @@ export function publicSendSettings(db) {
     warmupStartedAt: row.warmup_started_at || '',
     linkCloak: Boolean(row.link_cloak),
     cloakBase: row.cloak_base || '',
+    aiEndpoint: row.ai_endpoint || '',
+    aiKey: Boolean(row.ai_key_encrypted),
+    aiModel: row.ai_model || '',
   };
 }
 
