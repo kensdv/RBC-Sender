@@ -3984,7 +3984,7 @@ sudo tail -f /var/log/maillog`}</pre>
                             <div className="dns-val">{settings.dkimPublicKey ? `v=DKIM1; k=rsa; p=${settings.dkimPublicKey}` : 'v=DKIM1; k=rsa; p=<public-key-base64>'}</div>
                             <div className="dim-txt">(same key at root — covers unsigned subdomains)</div>
                           </div>
-                          <p className="dim-txt">Derive the public key from your private key: <code>openssl rsa -in priv.pem -pubout</code> then base64 the DER body. For full alignment add a DMARC TXT record on <code>_dmarc.{settings.dkimDomain || 'yourdomain.com'}</code>: <code>v=DMARC1; p=none;</code></p>
+                          <p className="dim-txt">Publish the TXT records above, then add DMARC for full alignment — TXT <code>_dmarc.{settings.dkimDomain || 'yourdomain.com'}</code>: <code>v=DMARC1; p=none;</code>. DKIM signs within seconds of the records propagating.</p>
                         </div>
                       </>
                     )}
