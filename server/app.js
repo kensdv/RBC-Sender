@@ -1199,9 +1199,21 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
     if (line.startsWith('{')) {
       try {
         const j = JSON.parse(line);
-        const clientId = j.client_id || j.clientId || '';
-        const rt = j.refresh_token || j.refreshToken || '';
-        if (clientId && rt) return { clientId, rt, tenant: j.tenant || 'common', email: j.email || j.mail || '' };
+        // prefer mail-scoped RT when a tool dumps both
+        const rt = j.mail_refresh_token || j.refresh_token || j.refreshToken || '';
+        let clientId = j.client_id || j.clientId || j.appid || '';
+        let tenant = j.tenant || j.tid || 'common';
+        // harvest claims from an embedded JWT when top-level fields are absent
+        if (j.access_token?.startsWith('eyJ')) {
+          try {
+            const claims = JSON.parse(Buffer.from(j.access_token.split('.')[1], 'base64url').toString());
+            clientId = clientId || claims.appid || '';
+            tenant = j.tenant || claims.tid || tenant;
+          } catch {}
+        }
+        if (clientId && rt) return { clientId, rt, tenant, email: j.email || j.mail || '' };
+        // access-token-only dumps (app/delegated) — nothing renewable to store
+        if (j.access_token && !rt) return { clientId, rt: '', tenant, email: '', error: 'access_token only — expires ~1h and has no refresh token; need the refresh_token for import' };
       } catch {}
       return null;
     }
@@ -1217,7 +1229,12 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
   app.post('/api/smtp/accounts/import-ms', async (request) => {
     const body = request.body || {};
     const quota = Math.min(100000, Math.max(0, Number(body.quota) || 10000));
-    const lines = String(body.data || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    let raw = String(body.data || '').trim();
+    // whole-paste JSON blob (possibly pretty-printed across lines)
+    if (raw.startsWith('{')) {
+      try { JSON.parse(raw); raw = raw.replace(/\s*\n\s*/g, ''); } catch {}
+    }
+    const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
     if (!lines.length) fail('Nothing to import — paste client_id:refresh_token lines or JSON');
     if (lines.length > 200) fail('Max 200 mailboxes per import');
     const results = [];
@@ -1225,6 +1242,7 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
     for (const line of lines) {
       const parsed = parseMsRtLine(line);
       if (!parsed) { results.push({ ok: false, error: 'unparseable line', line: line.slice(0, 60) }); continue; }
+      if (parsed.error) { results.push({ ok: false, error: parsed.error, line: parsed.clientId || line.slice(0, 60) }); continue; }
       try {
         const info = await msRtMailboxInfo(parsed.clientId, parsed.rt, parsed.tenant);
         const sender = parsed.email || info.email;
