@@ -235,6 +235,7 @@ export function openDatabase(path) {
   ensureColumn('ai_endpoint', "ai_endpoint TEXT NOT NULL DEFAULT ''");
   ensureColumn('ai_key_encrypted', "ai_key_encrypted TEXT NOT NULL DEFAULT ''");
   ensureColumn('ai_model', "ai_model TEXT NOT NULL DEFAULT ''");
+  ensureColumn('ai_rules', "ai_rules TEXT NOT NULL DEFAULT ''");
   const campaignCols = new Set(db.prepare('PRAGMA table_info(campaigns)').all().map((c) => c.name));
   if (!campaignCols.has('preheader')) db.exec("ALTER TABLE campaigns ADD COLUMN preheader TEXT NOT NULL DEFAULT ''");
   if (!campaignCols.has('attachments_json')) db.exec("ALTER TABLE campaigns ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'");

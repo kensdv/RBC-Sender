@@ -114,6 +114,7 @@ function loadSendSettings(db, config = null) {
     aiEndpoint: row.ai_endpoint || '',
     aiKey: Boolean(row.ai_key_encrypted),
     aiModel: row.ai_model || '',
+    aiRules: row.ai_rules || '',
   };
 }
 
@@ -390,6 +391,7 @@ export function publicSendSettings(db) {
     aiEndpoint: row.ai_endpoint || '',
     aiKey: Boolean(row.ai_key_encrypted),
     aiModel: row.ai_model || '',
+    aiRules: row.ai_rules || '',
   };
 }
 

@@ -105,7 +105,7 @@ const emptySettings = {
   engineClientId: '', engineClientSecret: '', engineTenant: '', engineRefreshToken: '', engineSendAs: '',
   engineMsRefreshToken: false, engineMsSendAs: '',
   attachFormats: [], imageRecompress: false,
-  aiEndpoint: '', aiKey: '', aiModel: '',
+  aiEndpoint: '', aiKey: '', aiModel: '', aiRules: '',
   sendDays: [], sendFromMin: 480, sendToMin: 1200, scheduleEnabled: true, capsEnabled: false,
   relaySecure: 0, relayUsername: '', relayPassword: '', relayPasswordSet: false, relayEhlo: '',
   maxPerHour: 5000, maxPerDay: 50000, warmupEnabled: false, warmupStartedAt: '',
@@ -2884,6 +2884,14 @@ sudo tail -f /var/log/maillog`}</pre>
                         <input className="w-input" type="password" value={typeof settings.aiKey === 'string' ? settings.aiKey : ''} onChange={(e) => updateSettings('aiKey', e.target.value)} placeholder={settings.aiKey === true ? '(unchanged)' : 'sk-...'} />
                       </div>
                     </div>
+                    <label className="field-label" style={{ marginTop: 8 }}>STANDING RULES <span className="dim">(the AI follows these on every generation)</span></label>
+                    <textarea
+                      className="w-textarea code-ta"
+                      rows={4}
+                      value={settings.aiRules}
+                      onChange={(e) => updateSettings('aiRules', e.target.value)}
+                      placeholder={'e.g. Always write in a professional B2B tone.\nNever use the words free, guarantee, or urgent.\nKeep paragraphs under 3 sentences.\nAlways end with a single clear CTA.'}
+                    />
                     <details style={{ border: '1px solid rgba(0,255,65,.15)', borderRadius: 8, padding: '10px 14px', background: 'rgba(0,255,65,.03)', marginTop: 10 }}>
                       <summary style={{ cursor: 'pointer', fontWeight: 700, letterSpacing: '.08em', color: 'var(--green)' }}>[ FREE PROVIDER SETUP — CLICK A PROVIDER TO AUTOFILL ]</summary>
                       <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>

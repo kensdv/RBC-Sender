@@ -416,12 +416,13 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const body = request.body || {};
     const { prompt, subject, html, text } = body;
     if (!prompt) fail('Prompt is required');
-    const row = db.prepare('SELECT ai_endpoint, ai_key_encrypted, ai_model FROM send_settings WHERE id = 1').get() || {};
+    const row = db.prepare('SELECT ai_endpoint, ai_key_encrypted, ai_model, ai_rules FROM send_settings WHERE id = 1').get() || {};
     const endpoint = row.ai_endpoint || '';
     const aiKey = row.ai_key_encrypted && config ? decryptSecret(row.ai_key_encrypted, config.credentialKey) : '';
     const model = row.ai_model || '';
+    const rules = row.ai_rules || '';
     if (!endpoint || !aiKey) fail('AI endpoint and key must be configured in SETTINGS');
-    const systemPrompt = `You are an email copywriting assistant specializing in deliverability, personalization, and inbox placement. Your job is to improve email content while preserving placeholders like [Firstname], [Lastname], [Company], ++rbc_*++, etc. Return only the improved content — no explanations, no meta commentary. The user will tell you what to do via the prompt field.`;
+    const systemPrompt = `You are an email copywriting assistant specializing in deliverability, personalization, and inbox placement. Your job is to improve email content while preserving placeholders like [Firstname], [Lastname], [Company], ++rbc_*++, etc. Return only the improved content — no explanations, no meta commentary. The user will tell you what to do via the prompt field.${rules ? `\n\nSTANDING RULES set by the operator — follow these in every output, always:\n${rules}` : ''}`;
     const userPrompt = `Current draft:\n\nSubject: ${subject || '(none)'}\n\nHTML body:\n${html || '(none)'}\n\nText body:\n${text || '(none)'}\n\nTask: ${prompt}`;
     try {
       const res = await fetch(endpoint, {
@@ -1136,10 +1137,10 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
         engine_send_as, attach_formats_json, image_recompress,
         send_days_json, send_from_min, send_to_min, max_per_hour, max_per_day,
         warmup_enabled, warmup_started_at, link_cloak, cloak_base,
-        ai_endpoint, ai_key_encrypted, ai_model,
+        ai_endpoint, ai_key_encrypted, ai_model, ai_rules,
         relay_secure, relay_username, relay_password_encrypted, relay_ehlo,
         updated_at)
-      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         send_mode=excluded.send_mode, direct_from_name=excluded.direct_from_name, direct_from_email=excluded.direct_from_email,
         direct_reply_to=excluded.direct_reply_to, direct_rate_per_minute=excluded.direct_rate_per_minute,
@@ -1171,6 +1172,8 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
         max_per_day=excluded.max_per_day, warmup_enabled=excluded.warmup_enabled,
         warmup_started_at=excluded.warmup_started_at, link_cloak=excluded.link_cloak,
         cloak_base=excluded.cloak_base,
+        ai_endpoint=excluded.ai_endpoint, ai_key_encrypted=excluded.ai_key_encrypted,
+        ai_model=excluded.ai_model, ai_rules=excluded.ai_rules,
         relay_secure=excluded.relay_secure, relay_username=excluded.relay_username,
         relay_password_encrypted=excluded.relay_password_encrypted, relay_ehlo=excluded.relay_ehlo, updated_at=excluded.updated_at
     `).run(
@@ -1236,6 +1239,10 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       text(body.warmupStartedAt || db.prepare('SELECT warmup_started_at FROM send_settings WHERE id = 1').get()?.warmup_started_at || '', 'warmupStartedAt', 40),
       body.linkCloak ? 1 : 0,
       text(body.cloakBase || '', 'cloakBase', 500),
+      text(body.aiEndpoint || '', 'aiEndpoint', 1000),
+      aiKeyEncrypted,
+      text(body.aiModel || '', 'aiModel', 200),
+      text(body.aiRules || '', 'aiRules', 4000),
       [0, 1, 2].includes(Number(body.relaySecure)) ? Number(body.relaySecure) : 0,
       text(body.relayUsername || '', 'relayUsername', 320),
       typeof body.relayPassword === 'string' && body.relayPassword.trim() ? encryptSecret(body.relayPassword.trim(), config.credentialKey) : (db.prepare('SELECT relay_password_encrypted FROM send_settings WHERE id = 1').get()?.relay_password_encrypted || ''),
