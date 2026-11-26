@@ -5,7 +5,7 @@ import { createPublicKey, generateKeyPairSync, randomBytes, randomUUID } from 'n
 import { execSync } from 'node:child_process';
 import { gunzipSync } from 'node:zlib';
 import net from 'node:net';
-import { resolveMx } from 'node:dns/promises';
+import { resolveMx, Resolver } from 'node:dns/promises';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { decryptSecret, encryptSecret, tokensEqual, unsubscribeToken } from './crypto.js';
@@ -2154,24 +2154,31 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       `https://${domain}/owa/`,
       `https://${domain}/`,
     ];
-    for (const t of targets) {
-      const hit = judge(await tryFetch(t));
-      if (hit) return hit;
-    }
-    return null;
+    const results = await Promise.all(targets.map((t) => tryFetch(t, 1800).then(judge)));
+    return results.find(Boolean) || null;
   }
 
+  const mxResolver = new Resolver({ timeout: 1500, tries: 1 });
+  const mxGlobalCache = new Map(); // domain -> { info, at } — repeat verify/sort runs skip resolved domains for 1h
+  const MX_CACHE_TTL = 60 * 60 * 1000;
+
   async function mxInfo(domain) {
+    const hit = mxGlobalCache.get(domain);
+    if (hit && Date.now() - hit.at < MX_CACHE_TTL) return hit.info;
+    let info;
     try {
-      const records = await resolveMx(domain);
+      const records = await mxResolver.resolveMx(domain);
       records.sort((a, b) => a.priority - b.priority);
       const exchange = records[0]?.exchange || '';
       let provider = MX_PROVIDERS.find(([re]) => re.test(exchange))?.[1] || 'Other/Custom';
       if (provider === 'Other/Custom') provider = (await probeWebmail(domain)) || provider;
-      return { hasMx: true, mx: exchange, provider };
+      info = { hasMx: true, mx: exchange, provider };
     } catch {
-      return { hasMx: false, mx: '', provider: 'No MX' };
+      info = { hasMx: false, mx: '', provider: 'No MX' };
     }
+    if (mxGlobalCache.size > 60000) mxGlobalCache.clear();
+    mxGlobalCache.set(domain, { info, at: Date.now() });
+    return info;
   }
 
   app.get('/api/recipients', async (request) => {
@@ -2201,12 +2208,12 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     emit('sorter', { message: `verify started — ${emails.length} addresses` });
     const domains = [...new Set(emails.map((e) => String(e).split('@')[1]?.toLowerCase()).filter(Boolean))];
     const mxCache = {};
-    const CONCURRENCY = 10;
+    const CONCURRENCY = 64;
     let done = 0;
     for (let i = 0; i < domains.length; i += CONCURRENCY) {
       await Promise.all(domains.slice(i, i + CONCURRENCY).map(async (d) => { mxCache[d] = await mxInfo(d); }));
       done += Math.min(CONCURRENCY, domains.length - i);
-      emit('sorter', { message: `verify ${done}/${domains.length} domains resolved` });
+      if (done % 320 < CONCURRENCY || done === domains.length) emit('sorter', { message: `verify ${done}/${domains.length} domains resolved` });
     }
     const results = emails.map((raw) => {
       const addr = String(raw).toLowerCase();
@@ -2255,7 +2262,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     const domains = [...new Set(valid.map((e) => e.split('@')[1]))].slice(0, 600);
     emit('sorter', { message: `flagged ${invalid.length} invalid · ${disposable.length} disposable · ${roleBased.length} role — resolving ${domains.length} domains` });
     const mxCache = {};
-    const CONCURRENCY = 10;
+    const CONCURRENCY = 64;
     for (let i = 0; i < domains.length; i += CONCURRENCY) {
       await Promise.all(domains.slice(i, i + CONCURRENCY).map(async (d) => {
         mxCache[d] = await mxInfo(d);
@@ -2308,7 +2315,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     const rows = db.prepare('SELECT id, email FROM recipients').all();
     const domains = [...new Set(rows.map((r) => r.email.split('@')[1]?.toLowerCase()).filter(Boolean))];
     const mxCache = {};
-    const CONCURRENCY = 10;
+    const CONCURRENCY = 64;
     for (let i = 0; i < domains.length; i += CONCURRENCY) {
       await Promise.all(domains.slice(i, i + CONCURRENCY).map(async (d) => { mxCache[d] = await mxInfo(d); }));
     }
