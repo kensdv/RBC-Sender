@@ -2993,12 +2993,18 @@ export default function App() {
                         </div>
                       </div>
                       <div className="ops-lines">
-                        {opsLog.slice(-30).map((l, i) => (
-                          <div key={i} className={`ops-line ${l.type === 'err' ? 'ops-err' : ''}`}>
-                            <span className="dim">{l.at.toLocaleTimeString()}</span> {l.type === 'err' ? '✗' : '✓'} {l.msg}
-                          </div>
-                        ))}
-                        {!opsLog.length && <div className="ops-line dim">No actions yet — VERIFY DNS, SORT, PULL or IMPORT logs here live.</div>}
+                        {(() => {
+                          const feed = [
+                            ...opsLog.map((l, i) => ({ t: l.at.getTime(), txt: `${l.type === 'err' ? '✗' : '✓'} ${l.msg}`, err: l.type === 'err', k: `n${i}` })),
+                            ...(state.events || []).map((e, i) => ({ t: e.ts || 0, txt: eventLine(e), err: false, k: `e${i}` })),
+                          ].sort((a, b) => a.t - b.t).slice(-40);
+                          if (!feed.length) return <div className="ops-line dim">No actions yet — VERIFY DNS, SORT, PULL or IMPORT logs here live.</div>;
+                          return feed.map((l) => (
+                            <div key={l.k} className={`ops-line ${l.err ? 'ops-err' : ''}`}>
+                              <span className="dim">{new Date(l.t).toLocaleTimeString()}</span> {l.txt}
+                            </div>
+                          ));
+                        })()}
                       </div>
                     </div>
                     <div className="filter-row">
