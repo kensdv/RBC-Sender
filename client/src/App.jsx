@@ -2383,11 +2383,16 @@ export default function App() {
                               </div>
                             </>
                           )}
-                          {!!(state.smtpAccounts || []).length && (
+                          {(() => {
+                            const mode = settings.sendMode;
+                            const poolRelevant = mode === 'smtp' || mode === 'graph';
+                            const sendable = (state.smtpAccounts || []).filter((a) => a.enabled && (mode === 'smtp' || (a.authType || '').startsWith('ms_')));
+                            if (!poolRelevant || !sendable.length) return null;
+                            return (
                             <>
-                              <label className="field-label" style={{ marginTop: 10 }}>SEND ACCOUNTS <span className="dim">(blank = all enabled senders)</span></label>
+                              <label className="field-label" style={{ marginTop: 10 }}>SEND ACCOUNTS <span className="dim">(blank = all enabled {mode === 'graph' ? 'MS mailboxes' : 'senders'})</span></label>
                               <div className="provider-chips">
-                                {state.smtpAccounts.filter((a) => a.enabled).map((a) => (
+                                {sendable.map((a) => (
                                   <button
                                     key={a.id}
                                     type="button"
@@ -2409,7 +2414,8 @@ export default function App() {
                                 )}
                               </div>
                             </>
-                          )}
+                            );
+                          })()}
                           <label className="field-label" style={{ marginTop: 10 }}>ENGAGEMENT TIERS <span className="dim">(blank = every tier)</span></label>
                           <div className="provider-chips">
                             {[['hot', 'HOT 70+'], ['warm', 'WARM 31-69'], ['cold', 'COLD 0-30']].map(([t, l]) => (
