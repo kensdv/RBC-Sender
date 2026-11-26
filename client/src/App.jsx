@@ -1746,7 +1746,7 @@ export default function App() {
                     <button className="btn-primary" disabled={busy} onClick={() => run(async () => { await api(token, '/api/smtp', { method: 'PUT', body: smtp }); showNotice('SMTP saved.'); await refresh(); })}>[ SAVE SMTP ]</button>
                     <button className="btn-sm" disabled={busy || !smtp.configured} onClick={() => run(async () => { await api(token, '/api/smtp/verify', { method: 'POST' }); showNotice('Connection verified.'); })}>[ TEST ]</button>
                     <input className="w-input" style={{ maxWidth: 220 }} type="email" placeholder="test send to…" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
-                    <button className="btn-sm" disabled={busy || !testTo.includes('@')} onClick={() => run(async () => { const r = await api(token, '/api/test-send', { method: 'POST', body: { to: testTo, subject: draft.subject, html: draft.html, text: draft.text, attachments: draft.attachments } }); showNotice(`Test sent (${r.messageId || 'ok'}).`); setTestTo(''); })}>[ SEND TEST ]</button>
+                    <button className="btn-sm" disabled={busy || !testTo.includes('@')} onClick={() => run(async () => { const r = await api(token, '/api/test-send', { method: 'POST', body: { to: testTo, subject: draft.subject, html: draft.html, text: draft.text } }); showNotice(`Test sent (${r.messageId || 'ok'}).`); setTestTo(''); })}>[ SEND TEST ]</button>
                   </div>
                 </div>
 
