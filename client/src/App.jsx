@@ -1236,6 +1236,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState(null);
   const [bodyMode, setBodyMode] = useState('html');
+  const [toolbarOpen, setToolbarOpen] = useState(false);
   const [extraTemplates, setExtraTemplates] = useState([]);
   const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
@@ -2333,7 +2334,13 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* EDITOR TOOLBAR — all body modes */}
+                    {/* EDITOR TOOLBAR — paste/blocks only, expands on demand */}
+                    {(bodyMode === 'paste' || bodyMode === 'blocks') && (
+                    <div className="tb-wrap">
+                      <button type="button" className={`tb-toggle ${toolbarOpen ? 'tb-toggle-on' : ''}`} onClick={() => setToolbarOpen(!toolbarOpen)} aria-expanded={toolbarOpen}>
+                        ✎ FORMAT {toolbarOpen ? '▾' : '▸'}
+                      </button>
+                      {toolbarOpen && (
                     <div className="editor-toolbar" onMouseDown={(e) => e.preventDefault()}>
                       <button type="button" className="tb-btn" title="Bold" onClick={() => execEdit('bold')}><b>B</b></button>
                       <button type="button" className="tb-btn" title="Italic" onClick={() => execEdit('italic')}><i>I</i></button>
@@ -2377,6 +2384,9 @@ export default function App() {
                         <option value="7">XL</option>
                       </select>
                     </div>
+                      )}
+                    </div>
+                    )}
 
                     {bodyMode === 'html' && (
                       <>

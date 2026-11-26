@@ -409,6 +409,15 @@ code {
 .dkim-dns-guide code { color: #6ee7a8; }
 
 /* ── EDITOR TOOLBAR ── */
+.tb-wrap { margin: 8px 0 10px; }
+.tb-toggle {
+  background: rgba(47,224,107,0.05); border: 1px solid rgba(47,224,107,0.2);
+  color: var(--txt-dim); font: inherit; font-size: 12px; font-weight: 800;
+  letter-spacing: .12em; padding: 6px 14px; cursor: pointer; border-radius: 3px;
+  transition: all .12s;
+}
+.tb-toggle:hover, .tb-toggle-on { color: var(--green); border-color: var(--green); background: rgba(47,224,107,0.1); }
+.tb-wrap .editor-toolbar { margin-top: 8px; }
 .editor-toolbar {
   display: flex; align-items: center; gap: 3px; flex-wrap: wrap;
   background: rgba(0,8,0,0.6);

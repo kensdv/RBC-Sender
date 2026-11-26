@@ -255,7 +255,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const bounces = db.prepare('SELECT id, email, kind, reason, classification, suppression_action, created_at AS createdAt FROM bounces ORDER BY id DESC LIMIT 500').all();
     const confirmed = db.prepare('SELECT COUNT(*) AS count FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0').get().count;
     const last30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const deliv30 = db.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE created_at > ?").get(last30).c || 1;
+    const deliv30 = db.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE sent_at > ?").get(last30).c || 1;
     const rates = {
       bounceRate: Math.round((db.prepare("SELECT COUNT(*) AS c FROM bounces WHERE created_at > ?").get(last30).c / deliv30) * 1000) / 10,
       complaintRate: Math.round((db.prepare("SELECT COUNT(*) AS c FROM bounces WHERE classification = 'spam_complaint' AND created_at > ?").get(last30).c / deliv30) * 1000) / 10,
