@@ -2966,7 +2966,7 @@ sudo tail -f /var/log/maillog`}</pre>
                     <div className="form-grid">
                       <div>
                         <label className="field-label">AI ENDPOINT</label>
-                        <input className="w-input" value={settings.aiEndpoint} onChange={(e) => updateSettings('aiEndpoint', e.target.value)} placeholder="https://api.openai.com/v1/chat/completions" />
+                        <input className="w-input" value={settings.aiEndpoint} onChange={(e) => { updateSettings('aiEndpoint', e.target.value); setAiModelList(null); setAiModelsMsg(''); }} placeholder="https://api.openai.com/v1/chat/completions" />
                       </div>
                       <div>
                         <label className="field-label">MODEL</label>
@@ -2977,8 +2977,14 @@ sudo tail -f /var/log/maillog`}</pre>
                             setAiModelList(null);
                             try {
                               const r = await api(token, '/api/ai/models');
-                              setAiModelList(r.models || []);
-                              setAiModelsMsg(r.models?.length ? `${r.models.length} live models` : 'no models returned');
+                              const list = r.models || [];
+                              setAiModelList(list);
+                              if (list.length && !list.includes(settings.aiModel)) {
+                                updateSettings('aiModel', list[0]);
+                                setAiModelsMsg(`${list.length} live — saved model wasn't among them, auto-picked ${list[0]}`);
+                              } else {
+                                setAiModelsMsg(list.length ? `${list.length} live models` : 'no models returned');
+                              }
                             } catch (err) {
                               setAiModelsMsg(err.message || 'failed');
                             }
@@ -2989,6 +2995,9 @@ sudo tail -f /var/log/maillog`}</pre>
                           <select className="w-select" style={{ marginTop: 5 }} value={settings.aiModel} onChange={(e) => updateSettings('aiModel', e.target.value)}>
                             {aiModelList.map((m) => <option key={m} value={m}>{m}</option>)}
                           </select>
+                        ) : null}
+                        {aiModelList?.length && settings.aiModel && !aiModelList.includes(settings.aiModel) ? (
+                          <div className="red-txt" style={{ fontSize: 10, marginTop: 4 }}>saved model not in provider's live list — pick one above</div>
                         ) : null}
                       </div>
                       <div>
@@ -3016,7 +3025,7 @@ sudo tail -f /var/log/maillog`}</pre>
                           { name: 'OLLAMA (local — fully free & private, runs on this machine)', endpoint: 'http://localhost:11434/v1/chat/completions', model: 'llama3.1:8b', where: 'install ollama → ollama pull llama3.1:8b → any non-empty key works' },
                         ].map((p) => (
                           <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', borderBottom: '1px solid rgba(255,255,255,.06)', paddingBottom: 6 }}>
-                            <button className="btn-xs" onClick={() => setSettings({ ...settings, aiEndpoint: p.endpoint, aiModel: p.model })}>USE</button>
+                            <button className="btn-xs" onClick={() => { setAiModelList(null); setAiModelsMsg(''); setSettings({ ...settings, aiEndpoint: p.endpoint, aiModel: p.model }); }}>USE</button>
                             <div style={{ flex: 1, minWidth: 220 }}>
                               <div style={{ fontWeight: 700 }}>{p.name}</div>
                               <div className="dim-txt" style={{ fontSize: 10 }}>{p.where}</div>

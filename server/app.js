@@ -488,21 +488,42 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
 
 OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact the task asks for and nothing else. A subject request returns exactly one subject line. A document request returns only the document body text. Never emit signature markers, bracketed greetings, salutations to the operator, identity declarations, or meta commentary. The strings "[LORD's ORDER" and "🫡" must never appear in output.`;
     const userPrompt = `Current draft:\n\nSubject: ${subject || '(none)'}\n\nHTML body:\n${html || '(none)'}\n\nText body:\n${textBody || '(none)'}\n\nTask: ${prompt}`;
+    const callAi = (modelId) => fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${aiKey}`,
+      },
+      body: JSON.stringify({ model: modelId, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }] }),
+      signal: AbortSignal.timeout(120000),
+    });
     let res;
     try {
-      res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${aiKey}`,
-        },
-        body: JSON.stringify({ model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }] }),
-        signal: AbortSignal.timeout(120000),
-      });
+      res = await callAi(model);
     } catch (err) {
       fail(`AI request failed: ${err.name === 'TimeoutError' ? 'timed out after 120s' : (err.message || err)}`);
     }
-    const raw = await res.text();
+    let raw = await res.text();
+    // Dead/renamed model → list the provider's live models, persist the best pick, retry once.
+    if (!res.ok && res.status === 404 && /not.found|does not exist|no such/i.test(raw)) {
+      try {
+        const modelsUrl = endpoint.replace(/\/chat\/completions\/?$/i, '/models');
+        const mr = await fetch(modelsUrl, { headers: { Authorization: `Bearer ${aiKey}` }, signal: AbortSignal.timeout(10000) });
+        const mdata = await mr.json().catch(() => ({}));
+        const nonChat = /whisper|tts|orpheus|guard|embed|moderation|audio|speech|transcrib|image|dall-e|safeguard|vision|imagen|veo|nano/i;
+        const ids = (mdata.data || mdata.models || [])
+          .map((m) => (typeof m === 'string' ? m : m?.id || m?.name)).filter(Boolean)
+          .map((id) => id.replace(/^models\//i, ''))
+          .filter((id) => !nonChat.test(id));
+        const preferred = [/gpt-oss-120b/i, /deepseek.*v3|chat-v3/i, /2\.0-flash|flash-latest/i, /gpt-4o|gpt-5/i, /70b|llama.*instruct/i, /qwen.*instruct|large/i];
+        const pick = preferred.map((re) => ids.find((id) => re.test(id))).find(Boolean) || ids[0];
+        if (pick) {
+          db.prepare('UPDATE send_settings SET ai_model = ? WHERE id = 1').run(pick);
+          res = await callAi(pick);
+          raw = await res.text();
+        }
+      } catch {}
+    }
     if (!res.ok) fail(`AI request failed: ${res.status} — ${raw.slice(0, 300)}`);
     let data = {};
     try { data = JSON.parse(raw); } catch { return { result: raw.slice(0, 50000) }; }
@@ -542,9 +563,10 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
     if (!res.ok) fail(`Model list failed: ${res.status} — ${raw.slice(0, 300)}`);
     let data = {};
     try { data = JSON.parse(raw); } catch { fail('Provider returned a non-JSON model list'); }
-    const nonChat = /whisper|tts|orpheus|guard|embed|moderation|audio|speech|transcrib|image|dall-e|safeguard/i;
+    const nonChat = /whisper|tts|orpheus|guard|embed|moderation|audio|speech|transcrib|image|dall-e|safeguard|vision|imagen|veo|nano/i;
     const models = (data.data || data.models || [])
       .map((m) => (typeof m === 'string' ? m : m?.id || m?.name)).filter(Boolean)
+      .map((id) => id.replace(/^models\//i, ''))
       .filter((id) => !nonChat.test(id)).sort();
     return { models };
   });
