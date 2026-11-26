@@ -488,13 +488,13 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     return [preferredModel, ...ranked, ...others].filter(Boolean);
   }
 
-  async function aiChatRequest({ endpoint, aiKey, model, messages }) {
+  async function aiChatRequest({ endpoint, aiKey, model, messages, timeoutMs = 120000 }) {
     if (!model) fail('AI model must be configured in SETTINGS');
     const call = (modelId) => fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiKey}` },
       body: JSON.stringify({ model: modelId, messages }),
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     // candidate order: chosen model (up to 2 tries) → preferred live models (up to 3)
     let candidates = [model];
@@ -505,7 +505,17 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       tries++;
       let res;
       try { res = await call(modelId); }
-      catch (err) { fail(`AI request failed: ${err.name === 'TimeoutError' ? 'timed out after 120s' : (err.message || err)}`); }
+      catch (err) {
+        // hang/timeout/network blip — retry once on the chosen model, else move on
+        lastErr = `${err.name === 'TimeoutError' || err.name === 'AbortError' ? `timed out after ${timeoutMs / 1000}s` : (err.message || err)} [${modelId}]`;
+        if (i === 0 && tries === 1) { await new Promise((r) => setTimeout(r, 1200)); continue; }
+        i++;
+        if (i >= candidates.length && candidates.length === 1) {
+          try { candidates = aiPickOrder(await aiListModels(endpoint, aiKey), model); } catch {}
+          if (candidates.length <= 1) break;
+        }
+        continue;
+      }
       const raw = await res.text();
       if (res.ok) {
         let data = {};
@@ -656,7 +666,7 @@ LIVE STATE OF THIS SENDER:
 ${stateLines}
 ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RULES set by the operator — follow these in every output, always:\n${rules}` : ''}`;
     const { content, model: usedModel } = await aiChatRequest({
-      endpoint, aiKey, model,
+      endpoint, aiKey, model, timeoutMs: 60000,
       messages: [{ role: 'system', content: systemPrompt }, ...history],
     });
     return { reply: cleanAiOutput(String(content)).slice(0, 50000), model: usedModel };

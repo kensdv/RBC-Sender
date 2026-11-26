@@ -1284,12 +1284,15 @@ export default function App() {
 
   useEffect(() => {
     if (!chatOpen || !token) return;
-    if (!chatModel && settings.aiModel) setChatModel(settings.aiModel);
+    const saved = settings.aiModel || '';
+    if (!chatModel && saved) setChatModel(saved);
     if (chatModels === null) {
       api(token, '/api/ai/models').then((r) => {
-        setChatModels(r.models || []);
-        if ((r.models || []).length && !(r.models || []).includes(chatModel || settings.aiModel)) setChatModel(r.models[0]);
-      }).catch(() => setChatModels([]));
+        const list = r.models || [];
+        setChatModels(list);
+        const cur = chatModel || saved;
+        setChatModel(list.includes(cur) ? cur : (list[0] || cur));
+      }).catch(() => {}); // leave null — retries on next open
     }
   }, [chatOpen, token]);
 
@@ -1420,13 +1423,16 @@ export default function App() {
     setChatInput('');
     setChatBusy(true);
     try {
-      const r = await api(token, '/api/ai/chat', {
-        method: 'POST',
-        body: {
-          messages: msgs, model: chatModel,
-          context: { tab, subject: draft.subject, html: draft.html, text: draft.text },
-        },
-      });
+      const r = await Promise.race([
+        api(token, '/api/ai/chat', {
+          method: 'POST',
+          body: {
+            messages: msgs, model: chatModel,
+            context: { tab, subject: draft.subject, html: draft.html, text: draft.text },
+          },
+        }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('RBC Helper timed out — provider not responding')), 150000)),
+      ]);
       setChatMsgs([...msgs, { role: 'assistant', content: r.reply || '(empty reply)' }]);
       if (r.model && r.model !== chatModel) setChatModel(r.model);
     } catch (err) {
@@ -3785,7 +3791,7 @@ sudo tail -f /var/log/maillog`}</pre>
       {chatOpen && (
         <div className="chat-panel">
           <div className="chat-head">
-            <span>RBC HELPER</span>
+            <span>RBC HELPER AI</span>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               {chatModels?.length ? (
                 <select className="chat-model-sel" value={chatModel} onChange={(e) => setChatModel(e.target.value)}>
