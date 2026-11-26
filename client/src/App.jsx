@@ -39,8 +39,9 @@ function ChromosomeBackground() {
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Deep dark base
-      ctx.fillStyle = '#020402';
+      // Base — deep phosphor, or deep aurora under the liquid-glass theme
+      const glass = document.documentElement.dataset.theme === 'glass';
+      ctx.fillStyle = glass ? '#0b1220' : '#020402';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       // Nebula clouds — slow pulsing radial gradients
@@ -812,7 +813,7 @@ const NAV_ITEMS = [
   { id: 'aiwriter',   label: 'AI WRITER',   icon: '✦' },
   { id: 'recipients', label: 'CONTACTS',    icon: '@' },
   { id: 'sorter',     label: 'SORTER',      icon: '⇅' },
-  { id: 'smtp',       label: 'EMAIL',       icon: '⚙' },
+  { id: 'smtp',       label: 'SMTP',        icon: '⚙' },
   { id: 'delivery',   label: 'SETTINGS',    icon: '⚡' },
   { id: 'schedule',   label: 'SCHEDULE',    icon: '◷' },
   { id: 'bounces',    label: 'BOUNCES',     icon: '⚠' },
@@ -1186,6 +1187,11 @@ export default function App() {
   const [updating, setUpdating] = useState(false);
   const [testTo, setTestTo] = useState('');
   const [relayTest, setRelayTest] = useState({ state: 'idle' });
+  const [theme, setTheme] = useState(() => localStorage.getItem('rbc_theme') || 'phosphor');
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('rbc_theme', theme);
+  }, [theme]);
   const [showIntro, setShowIntro] = useState(() => !localStorage.getItem('rbc_intro_seen'));
   const [introStep, setIntroStep] = useState(0);
   const [notice, setNotice] = useState('');
@@ -1787,6 +1793,9 @@ export default function App() {
           ))}
         </nav>
 
+        <button className="nav-item theme-toggle" onClick={() => setTheme((t) => (t === 'glass' ? 'phosphor' : 'glass'))}>
+          {theme === 'glass' ? '◑ PHOSPHOR' : '◐ LIQUID GLASS'}
+        </button>
         <button className="nav-item logout-btn" onClick={logout}>✕ LOGOUT</button>
 
         <div className="sb-net">
@@ -4156,7 +4165,7 @@ sudo tail -f /var/log/maillog`}</pre>
                     <div className="help-sec">
                       <h3>[ QUICK START ]</h3>
                       <ol className="help-list">
-                        <li><strong>Engine:</strong> SETTINGS → SEND TYPE — pick SMTP / DIRECT MX / RELAY / PROXY / GRAPH / GMAIL / HTTP API and fill its block. The EMAIL tab also holds the OUTGOING CONNECTION presets.</li>
+                        <li><strong>Engine:</strong> SETTINGS → SEND TYPE — pick SMTP / DIRECT MX / RELAY / PROXY / GRAPH / GMAIL / HTTP API and fill its block. The SMTP tab also holds the OUTGOING CONNECTION presets.</li>
                         <li><strong>List:</strong> CONTACTS → paste or import CSV (<code>email, first_name, last_name, company</code>), confirm consent, import. SORTER pre-cleans any raw list first.</li>
                         <li><strong>Letter:</strong> LETTER tab — subject, preheader, body (HTML / text / blocks / paste), attachments, live preview. AI WRITER drafts it for you.</li>
                         <li><strong>Queue:</strong> CAMPAIGN tab → queue it. Pause/resume/retry from CAMPAIGN HISTORY. SCHEDULE sets the window; caps + warm-up live on EMAIL.</li>
@@ -4178,7 +4187,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                     <div className="help-sec">
                       <h3>[ MAILBOX POOL / MS RT IMPORT ]</h3>
-                      <p className="help-p">EMAIL tab → ACCOUNT POOL → <code>[ IMPORT MS RT ]</code> — one account per line, up to 200 at once. Accepted formats:</p>
+                      <p className="help-p">SMTP tab → ACCOUNT POOL → <code>[ IMPORT MS RT ]</code> — one account per line, up to 200 at once. Accepted formats:</p>
                       <pre className="help-pre">{`email@x.com:client_id:M.C5...rt      email:cid:rt
 client_id:M.C5...rt                cid:rt
 email|cid|rt · email,cid,rt · email;cid;rt

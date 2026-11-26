@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs';
-import { resolve, basename } from 'node:path';
+import { resolve, basename, dirname, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { execSync } from 'node:child_process';
@@ -679,14 +679,14 @@ LAYOUT MAP (sidebar tabs):
 - AI WRITER: full drafting workspace (presets + custom brief → apply to draft) + AI ATTACHMENT GENERATOR (invoice/statement/notice/ICS → attach to letter)
 - CONTACTS: recipient list, import CSV/paste, suppression
 - SORTER: raw email list → extract/dedupe/flag/bucket-by-MX-provider, copy clean or per-provider lists (no import)
-- EMAIL: OUTGOING CONNECTION (SMTP config + provider presets + guides), SENDING ACCOUNTS — ACCOUNT POOL rotation/failover with [ IMPORT MS RT ] and [ VERIFY ALL ] buttons in the pane head, ADD ACCOUNT form, SENDING HOURS, LIMITS & WARM-UP, INBOX (IMAP)
+- SMTP: OUTGOING CONNECTION (SMTP config + provider presets + guides), SENDING ACCOUNTS — ACCOUNT POOL rotation/failover with [ IMPORT MS RT ] and [ VERIFY ALL ] buttons in the pane head, ADD ACCOUNT form, SENDING HOURS, LIMITS & WARM-UP, INBOX (IMAP)
 - SETTINGS: SEND TYPE (SMTP auth / Direct MX / Relay / Proxy / Graph API / Gmail API / HTTP API — SendGrid·SES·Mailgun·Postmark·Brevo·SparkPost·Elastic·Mandrill·custom), MICROSOFT GRAPH ENGINE creds, GMAIL engine, API ENGINE (provider/key, IAM user+region for SES, domain for Mailgun, URL for custom), encoding/spoof/DKIM/headers, tracking, TIMEZONE, AI ASSISTANT (endpoint/key/model/rules + LIST MODELS)
 - SCHEDULE: sending window, timezone
 - CAMPAIGN: queue launch, campaign history, pause/resume/retry
 - HELP: full manual — quick start, engines, MS RT formats, AI setup, placeholders, deliverability, troubleshooting
 - BOUNCES: bounce log + suppression
 - ANALYTICS: delivery stats
-NOTE: the [ IMPORT MS RT ] button is on the EMAIL tab inside ACCOUNT POOL — accepts client_id:refresh_token, email:cid:rt, cid:secret:tenant, or JSON, one per line.
+NOTE: the [ IMPORT MS RT ] button is on the SMTP tab inside ACCOUNT POOL — accepts client_id:refresh_token, email:cid:rt, cid:secret:tenant, or JSON, one per line.
 
 LIVE STATE OF THIS SENDER:
 ${stateLines}
@@ -2272,9 +2272,15 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     reply.send({ ok: true, message: 'Update started — the server will restart automatically.' });
     setTimeout(() => {
       const log = [];
+      // PM2/systemd service envs often lack the node dir on PATH — resolve npm
+      // relative to the running node binary and prepend it so bare `npm` works too.
+      const nodeDir = dirname(process.execPath);
+      const npmBin = existsSync(resolve(nodeDir, 'npm.cmd')) ? `"${resolve(nodeDir, 'npm.cmd')}"`
+        : existsSync(resolve(nodeDir, 'npm')) ? `"${resolve(nodeDir, 'npm')}"` : 'npm';
+      const childEnv = { ...process.env, PATH: `${nodeDir}${delimiter}${process.env.PATH || ''}` };
       const runSilent = (cmd) => {
         log.push(`$ ${cmd}`);
-        const out = execSync(cmd, { cwd: APP_ROOT, stdio: 'pipe', shell: true, windowsHide: true, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+        const out = execSync(cmd, { cwd: APP_ROOT, stdio: 'pipe', shell: true, windowsHide: true, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env: childEnv });
         log.push(String(out || '').trim().slice(-3000));
       };
       const save = () => { try { writeFileSync(UPDATE_LOG, log.join('\n')); } catch {} };
@@ -2284,8 +2290,8 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
         // always wants upstream, data/ is untracked and untouched.
         try { runSilent('git pull --rebase --autostash'); }
         catch { runSilent('git checkout -- .'); runSilent('git pull --rebase'); }
-        runSilent('npm install');
-        runSilent('npm run build');
+        runSilent(`${npmBin} install`);
+        runSilent(`${npmBin} run build`);
         log.push(`[update] OK ${new Date().toISOString()}`);
         save();
         process.exit(0);

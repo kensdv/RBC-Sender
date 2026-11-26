@@ -1277,3 +1277,83 @@ code {
 /* Update dialog changelog */
 .update-changes { margin: 8px 0 0 18px; font-size: 11px; line-height: 1.8; color: var(--txt-dim); }
 .update-changes li::marker { color: var(--green); }
+
+/* ═══════ LIQUID GLASS THEME (iPhone-style frosted aurora) ═══════ */
+:root[data-theme='glass'] {
+  --bg:        #0b1220;
+  --bg2:       #0e1828;
+  --panel:     rgba(255, 255, 255, 0.045);
+  --panel2:    rgba(255, 255, 255, 0.07);
+  --border:    rgba(255, 255, 255, 0.1);
+  --border2:   rgba(255, 255, 255, 0.2);
+  --green:     #4ef08b;
+  --green2:    #8ff5b6;
+  --txt:       #f0f7f3;
+  --txt-dim:   #9fb3ab;
+  --glass-bg:   rgba(255, 255, 255, 0.05);
+  --glass-border: 1px solid rgba(255, 255, 255, 0.13);
+  --glass-blur: blur(32px) saturate(190%);
+  --glass-shadow: 0 10px 40px rgba(3, 8, 18, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+:root[data-theme='glass'] .w-input,
+:root[data-theme='glass'] .w-select,
+:root[data-theme='glass'] .w-textarea,
+:root[data-theme='glass'] .code-ta {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--txt);
+}
+:root[data-theme='glass'] .w-input:focus,
+:root[data-theme='glass'] .w-select:focus,
+:root[data-theme='glass'] .w-textarea:focus {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: var(--green);
+  box-shadow: 0 0 16px rgba(78, 240, 139, 0.15), inset 0 1px 0 rgba(255,255,255,0.1);
+}
+:root[data-theme='glass'] .btn-sm,
+:root[data-theme='glass'] .btn-xs {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+:root[data-theme='glass'] .btn-sm:hover,
+:root[data-theme='glass'] .btn-xs:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--green);
+}
+:root[data-theme='glass'] .btn-xs.btn-solid {
+  background: var(--green); color: #051508; border-color: var(--green);
+}
+:root[data-theme='glass'] .btn-primary {
+  box-shadow: 0 4px 24px rgba(78, 240, 139, 0.3), inset 0 1px 0 rgba(255,255,255,0.25);
+}
+:root[data-theme='glass'] .nav-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-left-color: rgba(255, 255, 255, 0.3);
+}
+:root[data-theme='glass'] .nav-item.active {
+  background: rgba(78, 240, 139, 0.12);
+}
+:root[data-theme='glass'] .kpi-card,
+:root[data-theme='glass'] .sorter-bucket,
+:root[data-theme='glass'] .help-pre,
+:root[data-theme='glass'] .ai-response-area,
+:root[data-theme='glass'] .aw-file-card,
+:root[data-theme='glass'] .preview-device-wrap {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+:root[data-theme='glass'] .w-table th,
+:root[data-theme='glass'] .w-table td {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+:root[data-theme='glass'] .w-table th {
+  background: rgba(255, 255, 255, 0.05);
+}
+:root[data-theme='glass'] .chat-panel {
+  background: rgba(11, 18, 32, 0.55);
+  border-left-color: rgba(255, 255, 255, 0.12);
+}
+:root[data-theme='glass'] .share-bar { background: rgba(255, 255, 255, 0.08); }
+:root[data-theme='glass'] .share-row { border-bottom-color: rgba(255, 255, 255, 0.07); }
+:root[data-theme='glass'] .theme-toggle { color: var(--cyan) !important; }
