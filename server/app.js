@@ -222,8 +222,9 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
   });
 
   app.get('/api/state', async () => {
-    const recipients = db.prepare('SELECT * FROM recipients ORDER BY id DESC').all().map(recipientView);
     const recipientTotal = db.prepare('SELECT COUNT(*) AS c FROM recipients').get().c;
+    const providerCounts = {};
+    for (const row of db.prepare(`SELECT COALESCE(NULLIF(TRIM(json_extract(custom_json,'$.provider')),''), 'Unclassified') AS p, COUNT(*) AS c FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0 GROUP BY p`).all()) providerCounts[row.p] = row.c;
     const campaigns = db.prepare(`
       SELECT c.*, COUNT(d.id) AS total,
         COALESCE(SUM(CASE WHEN d.status = 'sent' THEN 1 ELSE 0 END), 0) AS sent,
@@ -239,7 +240,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const reputationAlerts = db.prepare('SELECT target, source, listed_at AS listedAt FROM reputation_alerts WHERE resolved_at IS NULL ORDER BY listed_at DESC').all();
     seedPoolFromLegacy();
     const smtpAccounts = db.prepare('SELECT * FROM smtp_accounts ORDER BY id').all().map(accountView);
-    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db), recipients, recipientTotal, campaigns, bounces, confirmed, publicBaseUrl: config.publicBaseUrl, events: listEvents(120), telegram: telegramStatus(db, config), reputationAlerts };
+    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db), recipientTotal, providerCounts, campaigns, bounces, confirmed, publicBaseUrl: config.publicBaseUrl, events: listEvents(120), telegram: telegramStatus(db, config), reputationAlerts };
   });
 
   app.put('/api/smtp', async (request) => {
@@ -1887,13 +1888,24 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
   app.get('/api/recipients', async (request) => {
     const offset = Math.max(0, Number(request.query.offset) || 0);
     const limit = Math.min(2000, Math.max(1, Number(request.query.limit) || 1000));
-    const total = db.prepare('SELECT COUNT(*) AS c FROM recipients').get().c;
-    const rows = db.prepare('SELECT * FROM recipients ORDER BY id DESC LIMIT ? OFFSET ?').all(limit, offset).map(recipientView);
+    const tier = String(request.query.tier || 'all');
+    const lookup = String(request.query.email || '').trim().toLowerCase();
+    const where = ['1=1'];
+    const params = [];
+    if (lookup) { where.push('LOWER(email) = ?'); params.push(lookup); }
+    if (tier === 'hot') where.push('engagement_score >= 70');
+    else if (tier === 'warm') where.push('engagement_score BETWEEN 31 AND 69');
+    else if (tier === 'cold') where.push('engagement_score < 31');
+    const cond = where.join(' AND ');
+    const total = db.prepare(`SELECT COUNT(*) AS c FROM recipients WHERE ${cond}`).get(...params).c;
+    const rows = db.prepare(`SELECT * FROM recipients WHERE ${cond} ORDER BY id DESC LIMIT ? OFFSET ?`).all(...params, limit, offset).map(recipientView);
     return { recipients: rows, total, offset, limit };
   });
 
   app.post('/api/recipients/verify', async (request) => {
-    const emails = Array.isArray(request.body?.emails) ? request.body.emails.slice(0, 500) : [];
+    let emails = Array.isArray(request.body?.emails) ? request.body.emails : [];
+    if (request.body?.all === true) emails = db.prepare('SELECT email FROM recipients ORDER BY id DESC LIMIT 500').all().map((r) => r.email);
+    emails = emails.slice(0, 500);
     const domains = [...new Set(emails.map((e) => String(e).split('@')[1]?.toLowerCase()).filter(Boolean))];
     const mxCache = {};
     await Promise.all(domains.map(async (d) => { mxCache[d] = await mxInfo(d); }));

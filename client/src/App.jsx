@@ -1275,6 +1275,9 @@ export default function App() {
   const [newVariantSubject, setNewVariantSubject] = useState('');
   const [engagementTier, setEngagementTier] = useState('all');
   const [recipPage, setRecipPage] = useState(1);
+  const [recipRows, setRecipRows] = useState([]);
+  const [recipTotal, setRecipTotal] = useState(0);
+  const [recipVersion, setRecipVersion] = useState(0);
   const [bouncePage, setBouncePage] = useState(1);
   const [histPage, setHistPage] = useState(1);
   const [campFilter, setCampFilter] = useState('all');
@@ -1300,7 +1303,15 @@ export default function App() {
     setTemplates(templatesRes || []);
     const assetsRes = await api(activeToken, '/api/assets');
     setAssets(assetsRes || []);
+    setRecipVersion((v) => v + 1);
   }
+
+  useEffect(() => {
+    if (!token) return;
+    api(token, `/api/recipients?offset=${(recipPage - 1) * pageSize}&limit=${pageSize}&tier=${engagementTier}`)
+      .then((r) => { setRecipRows(r.recipients || []); setRecipTotal(r.total || 0); })
+      .catch(() => {});
+  }, [token, recipPage, pageSize, engagementTier, recipVersion]);
 
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
@@ -1772,9 +1783,7 @@ export default function App() {
   }
 
   const sendMode = settings.sendMode || 'smtp';
-  const allRecip = state?.recipients || [];
-  const filteredRecip = engagementTier === 'all' ? allRecip : allRecip.filter((r) => { const s = r.engagement_score || 0; return (s >= 70 ? 'hot' : s >= 31 ? 'warm' : 'cold') === engagementTier; });
-  const pagedRecip = filteredRecip.slice((recipPage - 1) * pageSize, recipPage * pageSize);
+  const pagedRecip = recipRows;
   const pagedBounces = (state?.bounces || []).slice((bouncePage - 1) * pageSize, bouncePage * pageSize);
   const filteredCampaigns = (state?.campaigns || []).filter((c) => {
     if (campFilter === 'active' && !['queued', 'sending', 'scheduled'].includes(c.status)) return false;
@@ -2140,12 +2149,7 @@ export default function App() {
 
                     {/* AUDIENCE TARGETING */}
                     {(() => {
-                      const counts = {};
-                      for (const r of state.recipients) {
-                        if (!r.consentConfirmed || r.suppressed) continue;
-                        const p = r.custom?.provider || 'Unclassified';
-                        counts[p] = (counts[p] || 0) + 1;
-                      }
+                      const counts = state.providerCounts || {};
                       const providers = Object.keys(counts).sort();
                       const selected = draft.providers || [];
                       const eligible = providers.filter((p) => !selected.length || selected.includes(p)).reduce((n, p) => n + counts[p], 0);
@@ -2155,7 +2159,7 @@ export default function App() {
                       };
                       return (
                         <div className="audience-block">
-                          <label className="field-label">AUDIENCE <span className="dim">({eligible} of {state.recipients.length} eligible — blank = all providers)</span></label>
+                          <label className="field-label">AUDIENCE <span className="dim">({eligible} of {state.recipientTotal || 0} eligible — blank = all providers)</span></label>
                           <div className="provider-chips">
                             {providers.length === 0 && <span className="dim">no classified recipients — run SORT BY PROVIDER in RECIPIENTS</span>}
                             {providers.map((p) => (
@@ -2624,15 +2628,15 @@ export default function App() {
                   </div>
                   <div className="pane">
                     <div className="pane-head">
-                      <span>AUDIENCE — {state.recipients.length} RECORDS</span>
+                      <span>AUDIENCE — {state.recipientTotal || 0} RECORDS</span>
                       <div className="btn-row">
-                        <button className="btn-xs" disabled={busy || !state.recipients.length} onClick={() => run(async () => {
-                          const r = await api(token, '/api/recipients/verify', { method: 'POST', body: { emails: state.recipients.map((x) => x.email) } });
+                        <button className="btn-xs" disabled={busy || !state.recipientTotal} onClick={() => run(async () => {
+                          const r = await api(token, '/api/recipients/verify', { method: 'POST', body: { all: true } });
                           const bad = r.results.filter((x) => !x.hasMx || x.disposable || x.roleBased);
                           setVerifyResults(r.results);
                           showNotice(`Verified ${r.results.length} — ${bad.length} flagged (no-MX/disposable/role).`);
                         })}>VERIFY DNS</button>
-                        <button className="btn-xs" disabled={busy || !state.recipients.length} onClick={() => run(async () => {
+                        <button className="btn-xs" disabled={busy || !state.recipientTotal} onClick={() => run(async () => {
                           const r = await api(token, '/api/recipients/classify', { method: 'POST', body: {} });
                           showNotice(`Classified ${r.classified}: ${Object.entries(r.counts).map(([k, v]) => `${k}=${v}`).join(', ')}`);
                           await refresh();
@@ -2673,9 +2677,9 @@ export default function App() {
                             await refresh();
                           })}>PULL MS CONTACTS</button>
                         )}
-                        <button className="btn-xs btn-danger" disabled={busy || !state.recipients.length} onClick={async () => {
-                          if (await uiConfirm(`Delete ALL ${state.recipients.length} recipients? Delivery history for them is removed too.`, { title: 'CLEAR RECIPIENT LIST', danger: true, confirmLabel: `DELETE ${state.recipients.length}` })) {
-                            run(async () => { const r = await api(token, '/api/recipients', { method: 'DELETE' }); setExtraRecipients([]); showNotice(`${r.deleted} recipients deleted.`); await refresh(); });
+                        <button className="btn-xs btn-danger" disabled={busy || !state.recipientTotal} onClick={async () => {
+                          if (await uiConfirm(`Delete ALL ${state.recipientTotal} recipients? Delivery history for them is removed too.`, { title: 'CLEAR RECIPIENT LIST', danger: true, confirmLabel: `DELETE ${state.recipientTotal}` })) {
+                            run(async () => { const r = await api(token, '/api/recipients', { method: 'DELETE' }); showNotice(`${r.deleted} recipients deleted.`); await refresh(); });
                           }
                         }}>CLEAR LIST</button>
                       </div>
@@ -2726,16 +2730,16 @@ export default function App() {
                                 </td>
                                 <td><span className={`badge ${r.suppressed ? 'badge-fail' : r.validSyntax === false ? 'badge-def' : 'badge-ok'}`}>{r.suppressed ? 'SUPPRESSED' : r.validSyntax === false ? 'INVALID' : 'ACTIVE'}</span></td>
                                 <td>{r.suppressed
-                                  ? <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Unsuppress ${r.email}? They will receive future campaigns again.`, { title: 'UNSUPPRESS RECIPIENT', confirmLabel: 'UNSUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/unsuppress`, { method: 'POST' }); setExtraRecipients((prev) => prev.map((x) => x.id === r.id ? { ...x, suppressed: false } : x)); await refresh(); }); }}>UNSUPPRESS</button>
-                                  : <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Suppress ${r.email}?`, { title: 'SUPPRESS RECIPIENT', danger: true, confirmLabel: 'SUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/suppress`, { method: 'POST' }); setExtraRecipients((prev) => prev.map((x) => x.id === r.id ? { ...x, suppressed: true } : x)); await refresh(); }); }}>SUPPRESS</button>}
-                                  <button className="btn-xs btn-danger" onClick={async () => { if (await uiConfirm(`Delete ${r.email} from the list?`, { title: 'DELETE RECIPIENT', danger: true, confirmLabel: 'DELETE' })) run(async () => { await api(token, `/api/recipients/${r.id}`, { method: 'DELETE' }); setExtraRecipients((prev) => prev.filter((x) => x.id !== r.id)); await refresh(); }); }}>DEL</button></td>
+                                  ? <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Unsuppress ${r.email}? They will receive future campaigns again.`, { title: 'UNSUPPRESS RECIPIENT', confirmLabel: 'UNSUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/unsuppress`, { method: 'POST' }); await refresh(); }); }}>UNSUPPRESS</button>
+                                  : <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Suppress ${r.email}?`, { title: 'SUPPRESS RECIPIENT', danger: true, confirmLabel: 'SUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/suppress`, { method: 'POST' }); await refresh(); }); }}>SUPPRESS</button>}
+                                  <button className="btn-xs btn-danger" onClick={async () => { if (await uiConfirm(`Delete ${r.email} from the list?`, { title: 'DELETE RECIPIENT', danger: true, confirmLabel: 'DELETE' })) run(async () => { await api(token, `/api/recipients/${r.id}`, { method: 'DELETE' }); await refresh(); }); }}>DEL</button></td>
                               </tr>
                             );
                           })}
                         </tbody>
                       </table>
                     </div>
-                    <Pager total={filteredRecip.length} page={recipPage} setPage={setRecipPage} size={pageSize} setSize={setPageSize} />
+                    <Pager total={recipTotal} page={recipPage} setPage={setRecipPage} size={pageSize} setSize={setPageSize} />
                   </div>
                 </div>
               )}
@@ -3943,11 +3947,13 @@ sudo tail -f /var/log/maillog`}</pre>
                             <td className="dim">{b.reason}</td>
                             <td className="dim">{new Date(b.createdAt).toLocaleString()}</td>
                             <td>{b.classification === 'soft' && (() => {
-                              const rec = state.recipients.find((r) => r.email.toLowerCase() === b.email.toLowerCase());
-                              return rec ? <button className="btn-xs" onClick={() => run(async () => {
+                              <button className="btn-xs" onClick={() => run(async () => {
+                                const q = await api(token, `/api/recipients?email=${encodeURIComponent(b.email)}&limit=1`);
+                                const rec = q.recipients?.[0];
+                                if (!rec) return showNotice('Recipient not found on the list.', 'err');
                                 const r = await api(token, `/api/recipients/${rec.id}/retry-soft-bounce`, { method: 'POST', body: {} });
                                 showNotice(r.rescheduled ? `${r.rescheduled} deliveries rescheduled (+${r.backoffMinutes}m backoff).` : 'No failed deliveries to retry.');
-                              })}>RETRY</button> : null;
+                              })}>RETRY</button>;
                             })()}</td>
                           </tr>
                         ))}
