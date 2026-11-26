@@ -2182,11 +2182,18 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
 
   app.post('/api/recipients/verify', async (request) => {
     let emails = Array.isArray(request.body?.emails) ? request.body.emails : [];
-    if (request.body?.all === true) emails = db.prepare('SELECT email FROM recipients ORDER BY id DESC LIMIT 500').all().map((r) => r.email);
-    emails = emails.slice(0, 500);
+    if (request.body?.all === true) emails = db.prepare('SELECT email FROM recipients').all().map((r) => r.email);
+    emails = emails.slice(0, 200000);
+    emit('sorter', { message: `verify started — ${emails.length} addresses` });
     const domains = [...new Set(emails.map((e) => String(e).split('@')[1]?.toLowerCase()).filter(Boolean))];
     const mxCache = {};
-    await Promise.all(domains.map(async (d) => { mxCache[d] = await mxInfo(d); }));
+    const CONCURRENCY = 10;
+    let done = 0;
+    for (let i = 0; i < domains.length; i += CONCURRENCY) {
+      await Promise.all(domains.slice(i, i + CONCURRENCY).map(async (d) => { mxCache[d] = await mxInfo(d); }));
+      done += Math.min(CONCURRENCY, domains.length - i);
+      emit('sorter', { message: `verify ${done}/${domains.length} domains resolved` });
+    }
     const results = emails.map((raw) => {
       const addr = String(raw).toLowerCase();
       const [local, domain] = addr.split('@');
@@ -2201,7 +2208,9 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
         roleBased: ROLE_LOCALS.has(local),
       };
     });
-    return { results };
+    const flagged = results.filter((r) => !r.hasMx || r.disposable || r.roleBased || !r.valid).length;
+    emit('sorter', { message: `verify done — ${results.length} checked, ${flagged} flagged` });
+    return { results, total: results.length, flagged };
   });
 
   // Standalone sorter — paste raw emails, get provider buckets + flags. Does not touch the contacts table.
