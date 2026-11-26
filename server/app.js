@@ -465,6 +465,71 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     return { imported: unique.length, duplicates: contacts.length - unique.length, errors: [], total: contacts.length };
   });
 
+  // ── Shared AI call: retry on transient errors, walk live models on dead/overloaded ones ──
+  const AI_NONCHAT = /whisper|tts|orpheus|guard|embed|moderation|audio|speech|transcrib|image|dall-e|safeguard|vision|imagen|veo|nano/i;
+  const AI_PREFERRED = [/gpt-oss-120b/i, /deepseek.*v3|chat-v3/i, /2\.0-flash|flash-latest/i, /gpt-4o|gpt-5|claude/i, /70b|llama.*instruct/i, /qwen.*instruct|large|mistral/i];
+
+  async function aiListModels(endpoint, aiKey) {
+    const modelsUrl = endpoint.replace(/\/chat\/completions\/?$/i, '/models');
+    if (modelsUrl === endpoint) return [];
+    const res = await fetch(modelsUrl, { headers: { Authorization: `Bearer ${aiKey}` }, signal: AbortSignal.timeout(10000) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return [];
+    return (data.data || data.models || [])
+      .map((m) => (typeof m === 'string' ? m : m?.id || m?.name)).filter(Boolean)
+      .map((id) => id.replace(/^models\//i, ''))
+      .filter((id) => !AI_NONCHAT.test(id));
+  }
+
+  function aiPickOrder(ids, preferredModel) {
+    const rest = ids.filter((id) => id !== preferredModel);
+    const ranked = AI_PREFERRED.map((re) => rest.find((id) => re.test(id))).filter(Boolean);
+    const others = rest.filter((id) => !ranked.includes(id));
+    return [preferredModel, ...ranked, ...others].filter(Boolean);
+  }
+
+  async function aiChatRequest({ endpoint, aiKey, model, messages }) {
+    if (!model) fail('AI model must be configured in SETTINGS');
+    const call = (modelId) => fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiKey}` },
+      body: JSON.stringify({ model: modelId, messages }),
+      signal: AbortSignal.timeout(120000),
+    });
+    // candidate order: chosen model (up to 2 tries) → preferred live models (up to 3)
+    let candidates = [model];
+    let lastErr = '';
+    let i = 0, tries = 0;
+    while (i < candidates.length && tries < 6) {
+      const modelId = candidates[i];
+      tries++;
+      let res;
+      try { res = await call(modelId); }
+      catch (err) { fail(`AI request failed: ${err.name === 'TimeoutError' ? 'timed out after 120s' : (err.message || err)}`); }
+      const raw = await res.text();
+      if (res.ok) {
+        let data = {};
+        try { data = JSON.parse(raw); } catch { return { content: raw.slice(0, 50000), model: modelId }; }
+        let content = data.choices?.[0]?.message?.content
+          ?? data.message?.content ?? data.content?.[0]?.text ?? data.response ?? '';
+        if (Array.isArray(content)) content = content.map((c) => (typeof c === 'string' ? c : c?.text || '')).join('');
+        if (modelId !== model) db.prepare('UPDATE send_settings SET ai_model = ? WHERE id = 1').run(modelId);
+        return { content: String(content), model: modelId };
+      }
+      lastErr = `${res.status} — ${raw.slice(0, 300)}`;
+      const retryable = [500, 502, 503, 429].includes(res.status);
+      const deadModel = res.status === 404 && /not.found|does not exist|no such/i.test(raw);
+      if (!retryable && !deadModel) fail(`AI request failed: ${lastErr}`);
+      if (retryable && i === 0 && tries === 1) { await new Promise((r) => setTimeout(r, 2000)); continue; }
+      i++;
+      if (i >= candidates.length && candidates.length === 1) {
+        try { candidates = aiPickOrder(await aiListModels(endpoint, aiKey), model); } catch {}
+        if (candidates.length <= 1) break;
+      }
+    }
+    fail(`AI request failed: ${lastErr || 'all provider models unavailable'}`);
+  }
+
   // ── AI Assistant for Letter Panel ──
   app.post('/api/ai/assist', async (request) => {
     const body = request.body || {};
@@ -476,10 +541,8 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const row = db.prepare('SELECT ai_endpoint, ai_key_encrypted, ai_model, ai_rules FROM send_settings WHERE id = 1').get() || {};
     const endpoint = row.ai_endpoint || '';
     const aiKey = row.ai_key_encrypted && config ? decryptSecret(row.ai_key_encrypted, config.credentialKey) : '';
-    const model = row.ai_model || '';
     const rules = row.ai_rules || DEFAULT_AI_RULES;
     if (!endpoint || !aiKey) fail('AI endpoint and key must be configured in SETTINGS');
-    if (!model) fail('AI model must be configured in SETTINGS');
     const wantsAttachment = /\bpdf\b|\battach(?:ment|ed)?\b|\bdoc(?:ument)?\s*(file|attach)|\bfile\s*attach|invoice pdf|brochure|\bstatement\s*(pdf|file)/i.test(prompt);
     const wantsPreheader = !wantsAttachment && /preheader|pre-header|preview (text|line|snippet)|inbox preview/i.test(prompt);
     const wantsSubject = !wantsAttachment && !wantsPreheader && /subject|headline|title line/i.test(prompt);
@@ -488,51 +551,9 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
 
 OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact the task asks for and nothing else. A subject request returns exactly one subject line. A document request returns only the document body text. Never emit signature markers, bracketed greetings, salutations to the operator, identity declarations, or meta commentary. The strings "[LORD's ORDER" and "🫡" must never appear in output.`;
     const userPrompt = `Current draft:\n\nSubject: ${subject || '(none)'}\n\nHTML body:\n${html || '(none)'}\n\nText body:\n${textBody || '(none)'}\n\nTask: ${prompt}`;
-    const callAi = (modelId) => fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${aiKey}`,
-      },
-      body: JSON.stringify({ model: modelId, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }] }),
-      signal: AbortSignal.timeout(120000),
-    });
-    let res;
-    try {
-      res = await callAi(model);
-    } catch (err) {
-      fail(`AI request failed: ${err.name === 'TimeoutError' ? 'timed out after 120s' : (err.message || err)}`);
-    }
-    let raw = await res.text();
-    // Dead/renamed model → list the provider's live models, persist the best pick, retry once.
-    if (!res.ok && res.status === 404 && /not.found|does not exist|no such/i.test(raw)) {
-      try {
-        const modelsUrl = endpoint.replace(/\/chat\/completions\/?$/i, '/models');
-        const mr = await fetch(modelsUrl, { headers: { Authorization: `Bearer ${aiKey}` }, signal: AbortSignal.timeout(10000) });
-        const mdata = await mr.json().catch(() => ({}));
-        const nonChat = /whisper|tts|orpheus|guard|embed|moderation|audio|speech|transcrib|image|dall-e|safeguard|vision|imagen|veo|nano/i;
-        const ids = (mdata.data || mdata.models || [])
-          .map((m) => (typeof m === 'string' ? m : m?.id || m?.name)).filter(Boolean)
-          .map((id) => id.replace(/^models\//i, ''))
-          .filter((id) => !nonChat.test(id));
-        const preferred = [/gpt-oss-120b/i, /deepseek.*v3|chat-v3/i, /2\.0-flash|flash-latest/i, /gpt-4o|gpt-5/i, /70b|llama.*instruct/i, /qwen.*instruct|large/i];
-        const pick = preferred.map((re) => ids.find((id) => re.test(id))).find(Boolean) || ids[0];
-        if (pick) {
-          db.prepare('UPDATE send_settings SET ai_model = ? WHERE id = 1').run(pick);
-          res = await callAi(pick);
-          raw = await res.text();
-        }
-      } catch {}
-    }
-    if (!res.ok) fail(`AI request failed: ${res.status} — ${raw.slice(0, 300)}`);
-    let data = {};
-    try { data = JSON.parse(raw); } catch { return { result: raw.slice(0, 50000) }; }
-    let content = data.choices?.[0]?.message?.content
-      ?? data.message?.content
-      ?? data.content?.[0]?.text
-      ?? data.response
-      ?? '';
-    if (Array.isArray(content)) content = content.map((c) => (typeof c === 'string' ? c : c?.text || '')).join('');
+    const messages = [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }];
+    const model = text(body.model || '', 'model', 200) || row.ai_model;
+    const { content, model: usedModel } = await aiChatRequest({ endpoint, aiKey, model, messages });
     let result = cleanAiOutput(String(content).slice(0, 50000), target);
     if (target === 'attachment') {
       const b64pdf = result.match(/JVBERi[A-Za-z0-9+/=]{200,}/)?.[0];
@@ -540,9 +561,9 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
       const attachment = b64pdf || pdfBytes
         ? { filename: 'ai-document.pdf', contentType: 'application/pdf', data: b64pdf || Buffer.from(pdfBytes).toString('base64') }
         : { filename: 'ai-document.txt', contentType: 'text/plain', data: Buffer.from(result).toString('base64') };
-      return { result, target, attachment };
+      return { result, target, attachment, model: usedModel };
     }
-    return { result, target };
+    return { result, target, model: usedModel };
   });
 
   // Live model list from the provider — keeps model choice current when providers retire IDs.
@@ -569,6 +590,30 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
       .map((id) => id.replace(/^models\//i, ''))
       .filter((id) => !nonChat.test(id)).sort();
     return { models };
+  });
+
+  // Multi-turn chat for the RHS bot — client keeps history, server stays stateless.
+  app.post('/api/ai/chat', async (request) => {
+    const body = request.body || {};
+    const row = db.prepare('SELECT ai_endpoint, ai_key_encrypted, ai_model, ai_rules FROM send_settings WHERE id = 1').get() || {};
+    const endpoint = row.ai_endpoint || '';
+    const aiKey = row.ai_key_encrypted && config ? decryptSecret(row.ai_key_encrypted, config.credentialKey) : '';
+    const rules = row.ai_rules || DEFAULT_AI_RULES;
+    if (!endpoint || !aiKey) fail('AI endpoint and key must be configured in SETTINGS');
+    const model = text(body.model || '', 'model', 200) || row.ai_model;
+    const allowed = new Set(['user', 'assistant', 'system']);
+    const history = (Array.isArray(body.messages) ? body.messages : [])
+      .filter((m) => allowed.has(m?.role))
+      .slice(-30)
+      .map((m) => ({ role: m.role, content: String(m.content || '').slice(0, 8000) }))
+      .filter((m) => m.content);
+    if (!history.length || history[history.length - 1].role !== 'user') fail('messages must end with a user turn');
+    const systemPrompt = `You are a helpful assistant inside an email-sending control panel. Answer directly and concisely.${rules ? `\n\nSTANDING RULES set by the operator — follow these in every output, always:\n${rules}` : ''}`;
+    const { content, model: usedModel } = await aiChatRequest({
+      endpoint, aiKey, model,
+      messages: [{ role: 'system', content: systemPrompt }, ...history],
+    });
+    return { reply: String(content).slice(0, 50000), model: usedModel };
   });
 
   // ── Spam Score Checker ──

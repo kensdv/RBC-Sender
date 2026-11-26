@@ -1055,3 +1055,94 @@ code {
 
 /* ── OVERFLOW FIX ── */
 .overflow-hidden-x { overflow-x: hidden; }
+
+/* ── RHS AI CHATBOT ── */
+.chat-fab {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 900;
+  background: #001500;
+  border: 1px solid var(--green);
+  color: var(--green);
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 1px;
+  padding: 10px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: 0 0 14px rgba(0, 255, 65, 0.35);
+}
+.chat-fab:hover { background: rgba(0, 255, 65, 0.12); }
+.chat-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 340px;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  background: #000d02;
+  border-left: 1px solid rgba(0, 255, 65, 0.4);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.6);
+}
+.chat-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(0, 255, 65, 0.25);
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--green);
+  flex-shrink: 0;
+}
+.chat-model-sel {
+  background: #001500;
+  border: 1px solid rgba(0, 255, 65, 0.3);
+  color: var(--green);
+  font-family: inherit;
+  font-size: 10px;
+  max-width: 150px;
+  padding: 3px 4px;
+  border-radius: 3px;
+}
+.chat-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chat-msg { max-width: 88%; }
+.chat-msg-text {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.chat-user { align-self: flex-end; }
+.chat-user .chat-msg-text {
+  background: rgba(0, 255, 65, 0.15);
+  border: 1px solid rgba(0, 255, 65, 0.3);
+  color: #c9ffd8;
+}
+.chat-ai { align-self: flex-start; }
+.chat-ai .chat-msg-text {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(0, 255, 65, 0.12);
+  color: #d7ffe0;
+}
+.chat-msg-text.dim { color: var(--txt-dim); }
+.chat-foot {
+  display: flex;
+  gap: 6px;
+  padding: 10px;
+  border-top: 1px solid rgba(0, 255, 65, 0.25);
+  flex-shrink: 0;
+}

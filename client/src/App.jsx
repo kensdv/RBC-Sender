@@ -1181,6 +1181,12 @@ export default function App() {
   const [aiTarget, setAiTarget] = useState('body');
   const [aiAttachment, setAiAttachment] = useState(null);
   const [aiStreaming, setAiStreaming] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMsgs, setChatMsgs] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatModel, setChatModel] = useState('');
+  const [chatModels, setChatModels] = useState(null);
+  const [chatBusy, setChatBusy] = useState(false);
   const [spamCheckOpen, setSpamCheckOpen] = useState(false);
   const [spamScore, setSpamScore] = useState(null);
   const [spamIssues, setSpamIssues] = useState([]);
@@ -1275,6 +1281,17 @@ export default function App() {
     const iv = setInterval(check, 15 * 60 * 1000);
     return () => { alive = false; clearInterval(iv); };
   }, [token]);
+
+  useEffect(() => {
+    if (!chatOpen || !token) return;
+    if (!chatModel && settings.aiModel) setChatModel(settings.aiModel);
+    if (chatModels === null) {
+      api(token, '/api/ai/models').then((r) => {
+        setChatModels(r.models || []);
+        if ((r.models || []).length && !(r.models || []).includes(chatModel || settings.aiModel)) setChatModel(r.models[0]);
+      }).catch(() => setChatModels([]));
+    }
+  }, [chatOpen, token]);
 
   useEffect(() => {
     if (tab !== 'compose' || extraTemplates.length) return;
@@ -1392,6 +1409,24 @@ export default function App() {
     } catch (err) {
       setUpdating(false);
       showNotice(`Update failed: ${err.message}`, 'err');
+    }
+  }
+
+  async function sendChat() {
+    const text = chatInput.trim();
+    if (!text || chatBusy) return;
+    const msgs = [...chatMsgs, { role: 'user', content: text }];
+    setChatMsgs(msgs);
+    setChatInput('');
+    setChatBusy(true);
+    try {
+      const r = await api(token, '/api/ai/chat', { method: 'POST', body: { messages: msgs, model: chatModel } });
+      setChatMsgs([...msgs, { role: 'assistant', content: r.reply || '(empty reply)' }]);
+      if (r.model && r.model !== chatModel) setChatModel(r.model);
+    } catch (err) {
+      setChatMsgs([...msgs, { role: 'assistant', content: `⚠ ${err.message || 'chat failed'}` }]);
+    } finally {
+      setChatBusy(false);
     }
   }
 
@@ -3733,6 +3768,48 @@ sudo tail -f /var/log/maillog`}</pre>
               <button className="btn-sm" onClick={() => setUpdateInfo(null)}>LATER</button>
               <button className="btn-primary" onClick={applyUpdate}>[ YES — UPDATE ]</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── RHS AI CHATBOT ── */}
+      {!chatOpen && (
+        <button className="chat-fab" title="AI chat" onClick={() => setChatOpen(true)}>✦ AI</button>
+      )}
+      {chatOpen && (
+        <div className="chat-panel">
+          <div className="chat-head">
+            <span>AI CHAT</span>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              {chatModels?.length ? (
+                <select className="chat-model-sel" value={chatModel} onChange={(e) => setChatModel(e.target.value)}>
+                  {chatModels.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              ) : null}
+              <button className="btn-sm" onClick={() => { setChatMsgs([]); }} title="Clear">↺</button>
+              <button className="btn-sm" onClick={() => setChatOpen(false)}>[ × ]</button>
+            </div>
+          </div>
+          <div className="chat-body">
+            {!chatMsgs.length && <div className="dim-txt" style={{ padding: 10 }}>Ask anything — rewrites, subject lines, deliverability, provider questions.</div>}
+            {chatMsgs.map((m, i) => (
+              <div key={i} className={`chat-msg ${m.role === 'user' ? 'chat-user' : 'chat-ai'}`}>
+                <div className="chat-msg-text">{m.content}</div>
+              </div>
+            ))}
+            {chatBusy && <div className="chat-msg chat-ai"><div className="chat-msg-text dim">thinking…</div></div>}
+            <div ref={(el) => el?.scrollIntoView({ behavior: 'smooth', block: 'end' })} />
+          </div>
+          <div className="chat-foot">
+            <input
+              className="w-input"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
+              placeholder={chatModel ? `message ${chatModel}` : 'message…'}
+              disabled={chatBusy}
+            />
+            <button className="btn-sm" disabled={chatBusy || !chatInput.trim()} onClick={sendChat}>➤</button>
           </div>
         </div>
       )}
