@@ -750,5 +750,50 @@ code {
   color: var(--txt-dim);
 }
 
+/* ── A/B TEST DIALOG ── */
+.dlg-large {
+  max-width: 600px;
+  width: 90vw;
+}
+.ab-test-input-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.ab-variants-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.ab-variant {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(0, 255, 65, 0.15);
+  border-radius: 4px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ab-winner {
+  border-color: var(--green);
+  background: rgba(0, 255, 65, 0.08);
+}
+.ab-variant-subject {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--green);
+}
+.ab-variant-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 10px;
+}
+.ab-variant-actions {
+  display: flex;
+  gap: 6px;
+}
+
 /* ── OVERFLOW FIX ── */
 .overflow-hidden-x { overflow-x: hidden; }

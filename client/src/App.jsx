@@ -110,7 +110,6 @@ const emptySettings = {
   relaySecure: 0, relayUsername: '', relayPassword: '', relayPasswordSet: false, relayEhlo: '',
   maxPerHour: 5000, maxPerDay: 50000, warmupEnabled: false, warmupStartedAt: '',
   linkCloak: false,
-  aiEndpoint: '', aiKey: '', aiModel: '',
 };
 
 const INTRO_STEPS = [
@@ -905,6 +904,10 @@ export default function App() {
   const [spamScore, setSpamScore] = useState(null);
   const [spamIssues, setSpamIssues] = useState([]);
   const [spamChecking, setSpamChecking] = useState(false);
+  const [abTestOpen, setAbTestOpen] = useState(false);
+  const [abTestCampaignId, setAbTestCampaignId] = useState(null);
+  const [subjectVariants, setSubjectVariants] = useState([]);
+  const [newVariantSubject, setNewVariantSubject] = useState('');
   const htmlRef = useRef(null);
   const pasteRef = useRef(null);
   const textRef = useRef(null);
@@ -2941,6 +2944,12 @@ sudo tail -f /var/log/maillog`}</pre>
                                     : <button className="btn-xs" onClick={() => run(async () => { await api(token, `/api/campaigns/${c.id}/pause`, { method: 'POST' }); await refresh(); })}>PAUSE</button>)}
                                   {['queued','scheduled','sending'].includes(c.status) && <button className="btn-xs btn-danger" onClick={async () => { if (await uiConfirm(`Cancel #${c.id}?`, { title: 'CANCEL CAMPAIGN', danger: true, confirmLabel: 'CANCEL SEND' })) run(async () => { await api(token, `/api/campaigns/${c.id}/cancel`, { method: 'POST' }); await refresh(); }); }}>CANCEL</button>}
                                   <button className="btn-xs" onClick={() => run(() => exportCampaign(c.id))}>CSV</button>
+                                  <button className="btn-xs" onClick={async () => {
+                                    setAbTestCampaignId(c.id);
+                                    setAbTestOpen(true);
+                                    const r = await api(token, `/api/campaigns/${c.id}/subject-variants`);
+                                    setSubjectVariants(r || []);
+                                  }}>AB TEST</button>
                                 </div>
                               </td>
                             </tr>
@@ -2998,6 +3007,82 @@ sudo tail -f /var/log/maillog`}</pre>
                 className={`btn-primary ${dialog.danger ? 'btn-danger-solid' : ''}`}
                 onClick={() => settleDialog(dialog.kind === 'prompt' ? dialog.value.trim() !== '' : true)}
               >{dialog.confirmLabel}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── A/B TEST DIALOG ── */}
+      {abTestOpen && (
+        <div className="dlg-overlay">
+          <div className="dlg-card dlg-large" onClick={(e) => e.stopPropagation()}>
+            <div className="dlg-title">SUBJECT A/B TEST</div>
+            <div className="dlg-msg">
+              <p className="dim-txt">Campaign #{abTestCampaignId} — spin multiple subject variants, split-test across recipients, track open/click rates.</p>
+              <div className="ab-test-input-row">
+                <input
+                  className="w-input"
+                  placeholder="New subject variant..."
+                  value={newVariantSubject}
+                  onChange={(e) => setNewVariantSubject(e.target.value)}
+                />
+                <button
+                  className="btn-sm"
+                  disabled={!newVariantSubject.trim()}
+                  onClick={async () => {
+                    await api(token, `/api/campaigns/${abTestCampaignId}/subject-variants`, {
+                      method: 'POST',
+                      body: { subjects: [...subjectVariants.map(v => v.subject), newVariantSubject.trim()] },
+                    });
+                    setNewVariantSubject('');
+                    const r = await api(token, `/api/campaigns/${abTestCampaignId}/subject-variants`);
+                    setSubjectVariants(r || []);
+                  }}
+                >
+                  [ ADD ]
+                </button>
+              </div>
+              {subjectVariants.length > 0 && (
+                <div className="ab-variants-list">
+                  {subjectVariants.map((v) => (
+                    <div key={v.id} className={`ab-variant ${v.isWinner ? 'ab-winner' : ''}`}>
+                      <div className="ab-variant-subject">{v.subject}</div>
+                      <div className="ab-variant-stats">
+                        <span className="dim">sent: {v.sent}</span>
+                        <span className="dim">opens: {v.opens} ({v.openRate}%)</span>
+                        <span className="dim">clicks: {v.clicks} ({v.clickRate}%)</span>
+                      </div>
+                      <div className="ab-variant-actions">
+                        {!v.isWinner && (
+                          <button
+                            className="btn-xs"
+                            onClick={async () => {
+                              await api(token, `/api/campaigns/${abTestCampaignId}/subject-variants/${v.id}/winner`, { method: 'POST' });
+                              const r = await api(token, `/api/campaigns/${abTestCampaignId}/subject-variants`);
+                              setSubjectVariants(r || []);
+                            }}
+                          >
+                            [ SET WINNER ]
+                          </button>
+                        )}
+                        <button
+                          className="btn-xs"
+                          onClick={async () => {
+                            await api(token, `/api/campaigns/${abTestCampaignId}/subject-variants/${v.id}`, { method: 'DELETE' });
+                            const r = await api(token, `/api/campaigns/${abTestCampaignId}/subject-variants`);
+                            setSubjectVariants(r || []);
+                          }}
+                        >
+                          [ DELETE ]
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="dlg-actions">
+              <button className="btn-sm" onClick={() => { setAbTestOpen(false); setAbTestCampaignId(null); setSubjectVariants([]); setNewVariantSubject(''); }}>CLOSE</button>
             </div>
           </div>
         </div>

@@ -67,6 +67,17 @@ export function openDatabase(path) {
       reason TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS subject_variants (
+      id INTEGER PRIMARY KEY,
+      campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+      subject TEXT NOT NULL,
+      sent INTEGER NOT NULL DEFAULT 0,
+      opens INTEGER NOT NULL DEFAULT 0,
+      clicks INTEGER NOT NULL DEFAULT 0,
+      is_winner INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS subject_variants_campaign_idx ON subject_variants(campaign_id);
     CREATE TABLE IF NOT EXISTS send_settings (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       send_mode TEXT NOT NULL DEFAULT 'smtp',
@@ -225,6 +236,22 @@ export function openDatabase(path) {
   const acctCols = new Set(db.prepare('PRAGMA table_info(smtp_accounts)').all().map((c) => c.name));
   if (!acctCols.has('last_check')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN last_check TEXT");
   if (!acctCols.has('last_error')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN last_error TEXT NOT NULL DEFAULT ''");
+  const variantCols = db.prepare('SELECT name FROM sqlite_master WHERE type="table" AND name="subject_variants"').get();
+  if (!variantCols) {
+    db.exec(`
+      CREATE TABLE subject_variants (
+        id INTEGER PRIMARY KEY,
+        campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+        subject TEXT NOT NULL,
+        sent INTEGER NOT NULL DEFAULT 0,
+        opens INTEGER NOT NULL DEFAULT 0,
+        clicks INTEGER NOT NULL DEFAULT 0,
+        is_winner INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX subject_variants_campaign_idx ON subject_variants(campaign_id);
+    `);
+  }
   // campaigns.status CHECK predates the 'failed' state — rebuild the table once
   const campaignSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'campaigns'").get()?.sql || '';
   if (!campaignSql.includes("'failed'")) {

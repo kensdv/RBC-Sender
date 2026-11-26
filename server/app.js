@@ -545,6 +545,55 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     return { score, issues, dkimEnabled, dkimConfigured, sendMode };
   });
 
+  // ── Subject A/B Testing ──
+  app.post('/api/campaigns/:id/subject-variants', async (request) => {
+    const campaignId = Number(request.params.id);
+    const body = request.body || {};
+    const { subjects } = body;
+    if (!Array.isArray(subjects) || subjects.length < 2) fail('subjects must be an array with at least 2 variants');
+    const campaign = db.prepare('SELECT id FROM campaigns WHERE id = ?').get(campaignId);
+    if (!campaign) fail('Campaign not found');
+    const now = new Date().toISOString();
+    db.prepare('DELETE FROM subject_variants WHERE campaign_id = ?').run(campaignId);
+    for (const subject of subjects) {
+      db.prepare('INSERT INTO subject_variants (campaign_id, subject, created_at) VALUES (?, ?, ?)').run(campaignId, subject, now);
+    }
+    return { created: subjects.length };
+  });
+
+  app.get('/api/campaigns/:id/subject-variants', async (request) => {
+    const campaignId = Number(request.params.id);
+    const rows = db.prepare('SELECT id, subject, sent, opens, clicks, is_winner, created_at FROM subject_variants WHERE campaign_id = ? ORDER BY id').all(campaignId);
+    return rows.map(r => ({
+      id: r.id,
+      subject: r.subject,
+      sent: r.sent,
+      opens: r.opens,
+      clicks: r.clicks,
+      openRate: r.sent > 0 ? (r.opens / r.sent * 100).toFixed(1) : 0,
+      clickRate: r.sent > 0 ? (r.clicks / r.sent * 100).toFixed(1) : 0,
+      isWinner: Boolean(r.is_winner),
+      createdAt: r.created_at,
+    }));
+  });
+
+  app.post('/api/campaigns/:id/subject-variants/:variantId/winner', async (request) => {
+    const campaignId = Number(request.params.id);
+    const variantId = Number(request.params.variantId);
+    const variant = db.prepare('SELECT id FROM subject_variants WHERE id = ? AND campaign_id = ?').get(variantId, campaignId);
+    if (!variant) fail('Variant not found');
+    db.prepare('UPDATE subject_variants SET is_winner = 0 WHERE campaign_id = ?').run(campaignId);
+    db.prepare('UPDATE subject_variants SET is_winner = 1 WHERE id = ?').run(variantId);
+    return { ok: true };
+  });
+
+  app.delete('/api/campaigns/:id/subject-variants/:variantId', async (request) => {
+    const campaignId = Number(request.params.id);
+    const variantId = Number(request.params.variantId);
+    db.prepare('DELETE FROM subject_variants WHERE id = ? AND campaign_id = ?').run(variantId, campaignId);
+    return { ok: true };
+  });
+
   // ── SMTP account pool ──
   function accountView(row) {
     return {
