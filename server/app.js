@@ -1450,7 +1450,10 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
   app.get('/api/settings', async () => ({ sendSettings: publicSendSettings(db) }));
 
   app.put('/api/settings', async (request) => {
-    const body = { ...publicSendSettings(db), ...(request.body || {}) };
+    // publicSendSettings exposes secret fields as boolean flags (aiKey: true) —
+    // never let those sentinel values blend into the write body.
+    const { aiKey: _aiKeyFlag, ...publicDefaults } = publicSendSettings(db);
+    const body = { ...publicDefaults, ...(request.body || {}) };
     const allowedModes = ['smtp', 'direct', 'relay', 'socks5', 'graph', 'gmail'];
     const sendMode = allowedModes.includes(body.sendMode) ? body.sendMode : 'smtp';
     const allowedEncodings = ['base64', '8bit', 'quoted-printable'];
@@ -1493,10 +1496,11 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       ? encryptSecret(String(body.dkimPrivateKey), config.credentialKey)
       : (currentDkim?.dkim_key_encrypted || '');
 
-    // AI key: keep existing if blank, encrypt new if provided
+    // AI key: keep existing if blank, encrypt new if provided (string only — the
+    // public view's aiKey:true boolean flag must never be encrypted as a key)
     const currentAi = db.prepare('SELECT ai_key_encrypted FROM send_settings WHERE id = 1').get();
-    const aiKeyEncrypted = body.aiKey
-      ? encryptSecret(String(body.aiKey), config.credentialKey)
+    const aiKeyEncrypted = typeof body.aiKey === 'string' && body.aiKey.trim()
+      ? encryptSecret(body.aiKey.trim(), config.credentialKey)
       : (currentAi?.ai_key_encrypted || '');
 
     db.prepare(`

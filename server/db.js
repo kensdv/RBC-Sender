@@ -414,12 +414,13 @@ export function openDatabase(path) {
           attachments_json TEXT NOT NULL DEFAULT '[]',
           providers_json TEXT NOT NULL DEFAULT '[]',
           paused INTEGER NOT NULL DEFAULT 0,
+          send_time_optimization_enabled INTEGER NOT NULL DEFAULT 0,
           status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'queued', 'scheduled', 'sending', 'completed', 'cancelled', 'failed')),
           scheduled_for TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
-        INSERT INTO campaigns_migrated SELECT id, name, subject, preheader, html, text, COALESCE(attachments_json, '[]'), COALESCE(providers_json, '[]'), COALESCE(paused, 0), status, scheduled_for, created_at, updated_at FROM campaigns;
+        INSERT INTO campaigns_migrated SELECT id, name, subject, preheader, html, text, COALESCE(attachments_json, '[]'), COALESCE(providers_json, '[]'), COALESCE(paused, 0), COALESCE(send_time_optimization_enabled, 0), status, scheduled_for, created_at, updated_at FROM campaigns;
         DROP TABLE campaigns;
         ALTER TABLE campaigns_migrated RENAME TO campaigns;
         COMMIT;
