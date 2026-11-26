@@ -1141,6 +1141,7 @@ const EVENT_STYLE = {
   telegram_fail:    { icon: '⚠', color: 'var(--orange)', label: 'TG-ERR' },
   smtp_check:       { icon: '⇄', color: 'var(--cyan)',   label: 'SMTP' },
   campaign_fail:    { icon: '✗', color: 'var(--red)',    label: 'FAIL' },
+  sorter:           { icon: '⇅', color: 'var(--cyan)',   label: 'SORT' },
   info:             { icon: '·', color: 'var(--txt-dim)', label: 'INFO' },
 };
 
@@ -2763,6 +2764,12 @@ export default function App() {
                       </label>
                       {sorterInput.trim() && <button className="btn-sm" onClick={() => { setSorterInput(''); setSorterResult(null); }}>[ CLEAR ]</button>}
                     </div>
+                    {(sorterBusy || (state?.events || []).some((e) => e.kind === 'sorter')) && (
+                      <div className="pane" style={{ marginTop: 14, padding: '10px 12px' }}>
+                        <div className="pane-head"><span>SORT CONSOLE — LIVE</span><span className="dim">{sorterBusy ? 'streaming' : 'last run'}</span></div>
+                        <LiveConsole events={(state?.events || []).filter((e) => e.kind === 'sorter')} />
+                      </div>
+                    )}
                   </div>
 
                   {sorterResult && (
@@ -4395,6 +4402,22 @@ client_id:secret:tenant            app creds (no RT)
                         <tr><td>GRAPH sends but pool mailboxes idle</td><td>Normal if pool is empty — import MS RT creds. Single-engine creds only run when the pool has zero MS accounts.</td></tr>
                         <tr><td>API mode "Configure a from/direct email"</td><td>HTTP API sends via DIRECT CONFIG fields — fill FROM NAME + FROM EMAIL in SETTINGS.</td></tr>
                         <tr><td>Queue won't start</td><td>CAMPAIGN tab tells you why — missing engine creds, empty list, or send-window closed (see SCHEDULE).</td></tr>
+                      </tbody></table>
+                    </div>
+
+                    <div className="help-sec">
+                      <h3>[ FAQ — WHERE PEOPLE GET STUCK ]</h3>
+                      <table className="w-table help-table"><thead><tr><th>QUESTION</th><th>ANSWER</th></tr></thead><tbody>
+                        <tr><td>MS RT import says "unparseable line"</td><td>Every line must carry a refresh token AND a client id — or a JSON dump that contains an <code>access_token</code> (client + tenant get harvested from it). Bare <code>1.xxx</code> tokens auto-bind the Teams public client. Whole vault exports and <code>rubicon_backup</code> gzip blobs are supported — paste the entire blob, or use <code>[ SELECT FILE ]</code>. A line that is only a fragment (half a token, a JSON shard) can't import — re-export the file instead of copy-pasting through a clipped window.</td></tr>
+                        <tr><td>Update button fails / "cannot find npm"</td><td>Fixed — the updater resolves <code>npm.cmd</code> from the node executable dir, not PATH. If you're on a build older than that fix, run it once by hand: <code>git pull &amp;&amp; npm install &amp;&amp; npm run build &amp;&amp; pm2 restart rbc-api</code>. After that the button works.</td></tr>
+                        <tr><td>PORT 25 BLOCKED in the sidebar</td><td>Your host/provider filters outbound SMTP. DIRECT MX mode needs port 25 open — ask the provider to unblock it, or switch engines: SMTP pool, GRAPH, or an HTTP API provider (SendGrid/SES/etc.) doesn't need port 25 at all.</td></tr>
+                        <tr><td>Emails land in spam</td><td>Run the spam checker on the draft before queueing — it scores triggers and hands fixes to the AI in one click. Then the deliverability basics: SPF + DKIM + DMARC aligned on the sending domain (DKIM guide lives in SETTINGS), a real unsubscribe link (auto-inserted), warmed-up volume (start low, ramp), and clean lists (SORTER first — kills dead domains and disposables that tank reputation).</td></tr>
+                        <tr><td>"LAUNCH" is greyed out</td><td>The setup wizard is gating it — one of the four steps isn't ready: LETTER (subject + body), AUDIENCE (≥1 confirmed contact), ENGINE (creds for the selected send type — the step tells you exactly which field is missing), WINDOW (send window). Fix the amber step, launch unlocks.</td></tr>
+                        <tr><td>Contact import won't accept my list</td><td>Two gates: the consent checkbox must be ticked, and emails must parse — columns <code>email, first_name, last_name, company</code>. Messy exports? Run them through SORTER first — it extracts valid addresses from any paste, then <code>IMPORT CLEAN → CONTACTS</code>.</td></tr>
+                        <tr><td>Campaign stuck / sending slow</td><td>Check CAMPAIGN HISTORY for per-account errors, then the sidebar: PORT 25 blocked? Accounts in COOLDOWN? Quotas — each mailbox has a daily cap; exhausted accounts pause rotation until reset. SCHEDULE's window may be closed right now (it shows 24/7 when open). Warm-up ramp in SETTINGS deliberately throttles fresh setups.</td></tr>
+                        <tr><td>AI WRITER is slow or errors</td><td>Assist calls time out at 60s and fail over through your provider's live model list until one answers — the winning model is persisted. If it still fails, your AI key/endpoint in SETTINGS is dead: LIST MODELS there is the litmus test. Speed depends on the model you picked — smaller models answer in seconds, frontier models take longer but write better HTML.</td></tr>
+                        <tr><td>Forgot the dashboard token</td><td>It's in <code>.env</code> as <code>DASHBOARD_TOKEN</code> on the machine running the server. Change it there and restart. Sessions live in sessionStorage — closing the tab logs you out.</td></tr>
+                        <tr><td>Where do MS RT mailboxes come from?</td><td>They send via Microsoft Graph inside the normal rotation — same quotas, cooldowns and failover as SMTP pool accounts. VERIFY ALL handshakes every account; dead ones drop for 6h. App creds (<code>cid:secret:tenant</code>) import every mailbox in the tenant — that needs User.Read.All consent on the app.</td></tr>
                       </tbody></table>
                     </div>
                   </div>

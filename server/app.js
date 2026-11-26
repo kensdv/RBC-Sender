@@ -1466,13 +1466,28 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     const body = request.body || {};
     const quota = Math.min(100000, Math.max(0, Number(body.quota) || 10000));
     let raw = String(body.data || '').trim();
-    // rubicon_backup blob: {"rubicon_backup":"<base64+gzip>"} → decompress to payload
-    try {
+    // rubicon_backup blob — regex-extract the payload regardless of field order
+    // (vault exports put "version"/"created_at" before the data key, and huge
+    // blobs may arrive truncated mid-JSON where a full parse dies)
+    const b64hit = raw.match(/"rubicon_backup"\s*:\s*"([A-Za-z0-9+/=\s]{100,})"/);
+    if (b64hit) {
+      try { raw = gunzipSync(Buffer.from(b64hit[1].replace(/\s/g, ''), 'base64')).toString('utf8').trim(); } catch {}
+    } else try {
       const blob = JSON.parse(raw);
       if (blob && typeof blob.rubicon_backup === 'string') {
         raw = gunzipSync(Buffer.from(blob.rubicon_backup, 'base64')).toString('utf8').trim();
       }
     } catch {}
+    // vault/array exports: {"version":"…","mailboxes":[{…},{…}]} or a bare
+    // array of credential objects → flatten each element to a JSON line
+    if (/^\s*(\{|\[)/.test(raw)) {
+      try {
+        const parsed = JSON.parse(raw);
+        const arr = Array.isArray(parsed) ? parsed
+          : parsed && Object.values(parsed).find((v) => Array.isArray(v) && v.length && typeof v[0] === 'object');
+        if (Array.isArray(arr)) raw = arr.map((o) => JSON.stringify(o)).join('\n');
+      } catch {}
+    }
     // single whole-paste JSON blob (possibly pretty-printed across lines)
     if (raw.startsWith('{')) {
       try { JSON.parse(raw); raw = raw.replace(/\s*\n\s*/g, ''); } catch {}
@@ -1902,7 +1917,9 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
   // Standalone sorter — paste raw emails, get provider buckets + flags. Does not touch the contacts table.
   app.post('/api/sorter', async (request) => {
     const raw = String(request.body?.text || '').slice(0, 5000000);
+    emit('sorter', { message: `sort started — ${(raw.length / 1024).toFixed(0)}KB of input` });
     const found = raw.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || [];
+    emit('sorter', { message: `extracted ${found.length} address candidates` });
     const seen = new Set();
     const emails = [];
     let dupes = 0;
@@ -1913,6 +1930,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       emails.push(addr);
     }
     if (emails.length > 50000) fail('Max 50,000 unique emails per sort', 400);
+    emit('sorter', { message: `deduped — ${emails.length} unique (${dupes} dupes dropped)` });
     const invalid = [], disposable = [], roleBased = [], valid = [];
     for (const addr of emails) {
       const [local, domain] = addr.split('@');
@@ -1922,11 +1940,17 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       valid.push(addr);
     }
     const domains = [...new Set(valid.map((e) => e.split('@')[1]))].slice(0, 600);
+    emit('sorter', { message: `flagged ${invalid.length} invalid · ${disposable.length} disposable · ${roleBased.length} role — resolving ${domains.length} domains` });
     const mxCache = {};
     const CONCURRENCY = 10;
     for (let i = 0; i < domains.length; i += CONCURRENCY) {
-      await Promise.all(domains.slice(i, i + CONCURRENCY).map(async (d) => { mxCache[d] = await mxInfo(d); }));
+      await Promise.all(domains.slice(i, i + CONCURRENCY).map(async (d) => {
+        mxCache[d] = await mxInfo(d);
+        const info = mxCache[d];
+        emit('sorter', { message: `${info.hasMx ? '✓' : '✗'} ${d} → ${info.hasMx ? info.provider : 'no MX'}` });
+      }));
     }
+    emit('sorter', { message: `MX pass complete — bucketing ${valid.length} clean addresses` });
     const FREEMAIL = new Set(['gmail.com','googlemail.com','yahoo.com','yahoo.co.uk','yahoo.fr','ymail.com','rocketmail.com','outlook.com','hotmail.com','live.com','msn.com','aol.com','icloud.com','me.com','mac.com','protonmail.com','proton.me','pm.me','mail.com','gmx.com','gmx.net','zoho.com','yandex.com','yandex.ru','mail.ru','bk.ru','inbox.ru','list.ru','tutanota.com','tuta.io','fastmail.com','comcast.net','verizon.net','att.net','sbcglobal.net','bellsouth.net','earthlink.net','cox.net','charter.net','spectrum.net','shaw.ca','rogers.com','telus.net','sympatico.ca','btinternet.com','sky.com','talktalk.net','virginmedia.com','ntlworld.com','orange.fr','free.fr','wanadoo.fr','laposte.net','sfr.fr','web.de','t-online.de','gmx.de','freenet.de','libero.it','virgilio.it','tiscali.it','alice.it','terra.com.br','uol.com.br','bol.com.br','ig.com.br','globo.com','globomail.com','naver.com','daum.net','hanmail.net','qq.com','163.com','126.com','sina.com','sohu.com','rediffmail.com','hotmail.co.uk','hotmail.fr','hotmail.de','hotmail.es','hotmail.it','live.co.uk','live.fr','live.de','outlook.fr','outlook.de','outlook.es']);
     const buckets = {};
     const bucketMx = {};
@@ -1957,6 +1981,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       .filter(([, info]) => WEBMAIL_STACKS.has(info.provider))
       .map(([domain, info]) => ({ domain, stack: info.provider, count: domainCounts[domain] || 0, mx: info.mx }))
       .sort((a, b) => b.count - a.count);
+    emit('sorter', { message: `done — ${providers.length} provider bucket(s) · ${judged.length} judged webmail domain(s) · ${valid.length} clean` });
     return {
       total: found.length, unique: emails.length, dupes,
       buckets: ordered, invalid, disposable, roleBased,
