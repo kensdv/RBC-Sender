@@ -62,8 +62,19 @@ function ChromosomeBackground() {
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const glass = document.documentElement.dataset.theme === 'glass';
-      if (glass) {
+      const themeNow = document.documentElement.dataset.theme;
+      const glass = themeNow === 'glass';
+      if (themeNow === 'obsidian') {
+        // ── OBSIDIAN: flat ink base + sparse dim stars, no glow gimmick ──
+        ctx.fillStyle = '#12140f';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        for (const s of stars) {
+          s.pulse += s.pulseSpd;
+          const a = s.alpha * 0.35 * (0.6 + 0.4 * Math.sin(s.pulse));
+          ctx.fillStyle = `rgba(232,230,223,${a * 0.5})`;
+          ctx.beginPath(); ctx.arc(s.x, s.y, s.r * 0.7, 0, Math.PI * 2); ctx.fill();
+        }
+      } else if (glass) {
         // ── LIQUID GLASS: transparent canvas, water ripple highlights only ──
         if (Math.random() < 0.09) drop(Math.random() * canvas.width, Math.random() * canvas.height, 280 + Math.random() * 520);
         for (let y = 1; y < wH - 1; y++) {
@@ -78,15 +89,13 @@ function ChromosomeBackground() {
         for (let i = wW + 1; i < wW * wH - wW - 1; i++) {
           const gx = bufA[i + 1] - bufA[i - 1];
           const gy = bufA[i + wW] - bufA[i - wW];
-          const mag = Math.min(110, Math.sqrt(gx * gx + gy * gy) * 1.35);
+          const mag = Math.min(95, Math.sqrt(gx * gx + gy * gy) * 1.3);
           const j = i * 4;
-          px[j] = 150 + gx * 0.7; px[j + 1] = 220; px[j + 2] = 245; px[j + 3] = mag;
+          px[j] = 55 + gx * 0.4; px[j + 1] = 130; px[j + 2] = 205; px[j + 3] = mag;
         }
         wctx.putImageData(wImg, 0, 0);
-        ctx.globalCompositeOperation = 'screen';
         ctx.imageSmoothingEnabled = true;
         ctx.drawImage(waterCanvas, 0, 0, wW, wH, 0, 0, canvas.width, canvas.height);
-        ctx.globalCompositeOperation = 'source-over';
       } else {
         // Base — deep phosphor
         ctx.fillStyle = '#020402';
@@ -1861,8 +1870,8 @@ export default function App() {
           ))}
         </nav>
 
-        <button className="nav-item theme-toggle" onClick={() => setTheme((t) => (t === 'glass' ? 'phosphor' : 'glass'))}>
-          {theme === 'glass' ? '◑ PHOSPHOR' : '◐ LIQUID GLASS'}
+        <button className="nav-item theme-toggle" onClick={() => setTheme((t) => (t === 'phosphor' ? 'glass' : t === 'glass' ? 'obsidian' : 'phosphor'))}>
+          {theme === 'phosphor' ? '◐ LIQUID GLASS' : theme === 'glass' ? '◑ OBSIDIAN' : '◒ PHOSPHOR'}
         </button>
         <button className="nav-item logout-btn" onClick={logout}>✕ LOGOUT</button>
 
@@ -4088,7 +4097,7 @@ sudo tail -f /var/log/maillog`}</pre>
                     ))}
                   </div>
                   <div className="pane">
-                    <div className="pane-head"><span>CAMPAIGN SETUP</span><span className="dim">follow the steps — launch unlocks when ready</span></div>
+                    <div className="pane-head"><span>CAMPAIGN SETUP</span></div>
                     <div className="setup-steps">
                       <div className={`setup-step ${canQueue ? 'ok' : ''}`}>
                         <span className="setup-check">{canQueue ? '✓' : '!'}</span>
