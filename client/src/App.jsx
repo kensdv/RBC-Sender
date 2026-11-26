@@ -3125,7 +3125,9 @@ sudo tail -f /var/log/maillog`}</pre>
                       {msRtResults && (
                         <div style={{marginTop:8,maxHeight:140,overflowY:'auto',fontSize:11}}>
                           {msRtResults.map((r, i) => (
-                            <div key={i} className={r.ok ? 'dim-txt' : 'red-txt'}>{r.ok ? `✓ #${r.id} ${r.email} (${r.name})` : `✗ ${r.error}${r.email ? ' — ' + r.email : ''}${r.line ? ' — ' + r.line : ''}`}</div>
+                            <div key={i} className={r.ok ? 'dim-txt' : 'red-txt'}>{r.ok
+                              ? (r.note ? <span style={{ color: 'var(--yellow)' }}>⬆ {r.note}</span> : `✓ #${r.id} ${r.email} (${r.name})`)
+                              : `✗ ${r.error}${r.email ? ' — ' + r.email : ''}${r.line ? ' — ' + r.line : ''}`}</div>
                           ))}
                         </div>
                       )}

