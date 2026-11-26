@@ -1415,8 +1415,8 @@ export default function App() {
     }
   }
 
-  async function sendChat() {
-    const text = chatInput.trim();
+  async function sendChat(override) {
+    const text = (typeof override === 'string' ? override : chatInput).trim();
     if (!text || chatBusy) return;
     const msgs = [...chatMsgs, { role: 'user', content: text }];
     setChatMsgs(msgs);
@@ -1462,6 +1462,25 @@ export default function App() {
       } else if (['pause', 'resume', 'retry', 'queue'].includes(a.id)) {
         const r = await api(token, `/api/campaigns/${a.campaignId}/${a.id}`, { method: 'POST', body: {} });
         showNotice(`${a.id === 'queue' ? `Queued ${r?.queued ?? ''}` : `Campaign #${a.campaignId} ${a.id}d`}.`);
+      } else if (a.id === 'reset_quota_one') {
+        await api(token, `/api/smtp/accounts/${a.accountId}/reset-quota`, { method: 'POST' });
+        showNotice('Quota reset.');
+      } else if (a.id === 'toggle_account') {
+        const acct = (state.smtpAccounts || []).find((x) => x.id === a.accountId);
+        if (!acct) { showNotice('Account not found — refresh and retry.'); return; }
+        await api(token, `/api/smtp/accounts/${a.accountId}`, {
+          method: 'PUT',
+          body: { label: acct.label, host: acct.host, port: acct.port, secure: acct.secure, username: acct.username, password: '', fromName: acct.fromName, fromEmail: acct.fromEmail, replyTo: acct.replyTo, enabled: a.enabled, weight: acct.weight, dailyQuota: acct.dailyQuota },
+        });
+        showNotice(`${acct.label || acct.fromEmail} ${a.enabled ? 'enabled' : 'disabled'}.`);
+      } else if (a.id === 'send_test') {
+        showNotice(`Sending test to ${a.to}…`);
+        const r = await api(token, '/api/test-send', { method: 'POST', body: { to: a.to, subject: draft.subject, html: draft.html, text: draft.text } });
+        setChatMsgs((m) => [...m, { role: 'assistant', content: `Test email sent to ${a.to} (${r.messageId || 'queued'}). Check the inbox — placement there is the real verdict.` }]);
+      } else if (a.id === 'spam_check') {
+        const r = await api(token, '/api/spam-check', { method: 'POST', body: { subject: draft.subject, html: draft.html, text: draft.text } });
+        const issues = (r.issues || []).slice(0, 8).map((i) => `• ${i.type}${i.word ? ` "${i.word}"` : ''}${i.severity ? ` [${i.severity}]` : ''}`).join('\n');
+        setChatMsgs((m) => [...m, { role: 'assistant', content: `Spam check — score ${r.score ?? '?'}/100${issues ? `\n\n${issues}` : '\n\nNo issues flagged.'}${(r.issues || []).length > 8 ? `\n…and ${r.issues.length - 8} more` : ''}`, target: 'none', actions: [] }]);
       }
       refresh();
     } catch (err) {
@@ -1670,6 +1689,13 @@ export default function App() {
   const sendMode = settings.sendMode || 'smtp';
   const draftEmpty = !draft.html.trim() && !draft.text.trim();
   const canQueue = !draftEmpty && draft.subject.trim().length > 0;
+  const chatSugg = [
+    totals.failed > 0 ? `Why are ${totals.failed} sends failing?` : null,
+    !(state.smtpAccounts || []).length ? 'How do I import MS mailboxes?' : 'Check my account pool health',
+    !draftEmpty ? 'Improve my current letter' : 'Write a subject line for a promo email',
+    !draftEmpty ? 'Check my draft for spam triggers' : null,
+    totals.queued > 0 ? 'Pause the queue' : 'Which send mode am I on and is it right?',
+  ].filter(Boolean).slice(0, 5);
 
   return (
     <>
@@ -2922,6 +2948,15 @@ sudo tail -f /var/log/maillog`}</pre>
                           <div><label className="field-label">SEND-AS MAILBOX {settings.engineMsSendAs ? <span className="dim">(auto-filled on connect)</span> : null}</label><input className="w-input" type="email" value={settings.engineMsSendAs || settings.engineSendAs} onChange={(e) => updateSettings('engineSendAs', e.target.value)} placeholder="sender@yourdomain.com" /></div>
                         )}
                       </div>
+                      {sendMode === 'graph' && (
+                        <div className="ms-pool-callout">
+                          <div>
+                            <div className="cfg-block-title" style={{marginBottom:2}}>[ MAILBOX POOL — MS RT ]</div>
+                            <p className="dim-txt" style={{margin:0}}>Import refresh-token mailboxes — each sends as itself, rotates in GRAPH mode, 10k/day quota each.</p>
+                          </div>
+                          <button className="btn-sm" onClick={() => { setTab('smtp'); setMsRtImportOpen(true); }}>[ IMPORT MS RT → ]</button>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -3830,7 +3865,16 @@ sudo tail -f /var/log/maillog`}</pre>
             </div>
           </div>
           <div className="chat-body">
-            {!chatMsgs.length && <div className="dim-txt" style={{ padding: 10 }}>Ask anything — rewrites, subject lines, deliverability, provider questions.</div>}
+            {!chatMsgs.length && (
+              <>
+                <div className="dim-txt" style={{ padding: 10 }}>Ask anything — rewrites, deliverability, pool health, provider questions. Or:</div>
+                <div className="chat-sugg">
+                  {chatSugg.map((s) => (
+                    <button key={s} className="chat-sugg-chip" onClick={() => sendChat(s)}>{s}</button>
+                  ))}
+                </div>
+              </>
+            )}
             {chatMsgs.map((m, i) => (
               <div key={i} className={`chat-msg ${m.role === 'user' ? 'chat-user' : 'chat-ai'}`}>
                 <div className="chat-msg-text">{m.content}</div>

@@ -699,8 +699,30 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       actions.push({ id: 'verify_accounts', label: 'VERIFY ALL ACCOUNTS' });
     }
     if (/reset|clear|zero/i.test(lu) && /quota|limit|counter/i.test(lu)) {
-      const ids = accounts.filter((a) => a.daily_quota > 0).map((a) => a.id);
-      if (ids.length) actions.push({ id: 'reset_quotas', label: `RESET ${ids.length} QUOTA${ids.length > 1 ? 'S' : ''}`, ids });
+      const ident = (lastUser.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+|#\s*\d+/) || [])[0]?.replace('#', '').trim().toLowerCase();
+      const acct = ident ? accounts.find((a) => String(a.id) === ident || [a.from_email, a.username, a.label].some((v) => (v || '').toLowerCase() === ident)) : null;
+      if (acct) {
+        actions.push({ id: 'reset_quota_one', label: `RESET ${(acct.label || acct.from_email || 'ACCOUNT').toUpperCase()} QUOTA`, accountId: acct.id });
+      } else {
+        const ids = accounts.filter((a) => a.daily_quota > 0).map((a) => a.id);
+        if (ids.length) actions.push({ id: 'reset_quotas', label: `RESET ${ids.length} QUOTA${ids.length > 1 ? 'S' : ''}`, ids });
+      }
+    }
+    // send test — destination pulled from the message itself
+    if (/send.*test|test.*(send|mail)|test (an? )?(email|letter)|prove.*work/i.test(lu)) {
+      const to = (lastUser.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/) || [])[0];
+      if (to) actions.push({ id: 'send_test', label: `SEND TEST → ${to.toUpperCase()}`, to });
+    }
+    // enable/disable a specific account — matched by email, label, or #id
+    if (/(dis|en)able|turn (off|on)|deactivat|activat/i.test(lu) && /account|mailbox|sender|@|acct/i.test(lu)) {
+      const wantEnable = !/disable|turn off|deactivat/i.test(lu);
+      const ident = (lastUser.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+|#\s*\d+/i) || [])[0]?.replace('#', '').trim().toLowerCase();
+      const acct = ident ? accounts.find((a) => String(a.id) === ident || [a.from_email, a.username, a.label].some((v) => (v || '').toLowerCase() === ident)) : null;
+      if (acct) actions.push({ id: 'toggle_account', label: `${wantEnable ? 'ENABLE' : 'DISABLE'} ${(acct.label || acct.from_email || 'ACCOUNT').toUpperCase()}`, accountId: acct.id, enabled: wantEnable });
+    }
+    // spam/deliverability check on the current draft
+    if (/spam|deliverab|inbox placement|spam score|trigger/i.test(lu) && /check|score|test|scan|analy|audit|review|rate/i.test(lu)) {
+      actions.push({ id: 'spam_check', label: 'RUN SPAM CHECK' });
     }
     const activeCampaign = db.prepare("SELECT id, status FROM campaigns WHERE status IN ('sending','queued','scheduled') ORDER BY id DESC LIMIT 1").get();
     if (/pause|hold|halt|stop/i.test(lu) && /send|queue|campaign|blast/i.test(lu) && activeCampaign) {

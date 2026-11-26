@@ -1177,3 +1177,32 @@ code {
   color: #7fd4ff;
 }
 .chat-act:hover { border-color: #7fd4ff; color: #bfeaff; }
+.ms-pool-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px dashed rgba(0, 255, 65, 0.4);
+  border-radius: 5px;
+  background: rgba(0, 255, 65, 0.04);
+}
+.chat-sugg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+.chat-sugg-chip {
+  text-align: left;
+  background: rgba(0, 255, 65, 0.06);
+  border: 1px solid rgba(0, 255, 65, 0.2);
+  color: #a9f5bf;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 7px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.chat-sugg-chip:hover { border-color: var(--green); background: rgba(0, 255, 65, 0.12); }
