@@ -1149,6 +1149,8 @@ export default function App() {
   const [acctForm, setAcctForm] = useState(emptyAccount);
   const [editingAcct, setEditingAcct] = useState(null);
   const [settings, setSettings] = useState(emptySettings);
+  const [aiModelList, setAiModelList] = useState(null);
+  const [aiModelsMsg, setAiModelsMsg] = useState('');
   const [csv, setCsv] = useState('email,first_name,last_name,company\nalex@example.com,Alex,Morgan,Example Ltd');
   const [consentConfirmed, setConsentConfirmed] = useState(false);
   const [scheduledFor, setScheduledFor] = useState('');
@@ -2877,7 +2879,26 @@ sudo tail -f /var/log/maillog`}</pre>
                       </div>
                       <div>
                         <label className="field-label">MODEL</label>
-                        <input className="w-input" value={settings.aiModel} onChange={(e) => updateSettings('aiModel', e.target.value)} placeholder="gpt-4o" />
+                        <input className="w-input" value={settings.aiModel} onChange={(e) => updateSettings('aiModel', e.target.value)} placeholder="openai/gpt-oss-120b" />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5 }}>
+                          <button className="btn-xs" onClick={async () => {
+                            setAiModelsMsg('querying…');
+                            setAiModelList(null);
+                            try {
+                              const r = await api(token, '/api/ai/models');
+                              setAiModelList(r.models || []);
+                              setAiModelsMsg(r.models?.length ? `${r.models.length} live models` : 'no models returned');
+                            } catch (err) {
+                              setAiModelsMsg(err.message || 'failed');
+                            }
+                          }}>LIST MODELS</button>
+                          {aiModelsMsg ? <span className="dim" style={{ fontSize: 10 }}>{aiModelsMsg}</span> : null}
+                        </div>
+                        {aiModelList?.length ? (
+                          <select className="w-select" style={{ marginTop: 5 }} value={settings.aiModel} onChange={(e) => updateSettings('aiModel', e.target.value)}>
+                            {aiModelList.map((m) => <option key={m} value={m}>{m}</option>)}
+                          </select>
+                        ) : null}
                       </div>
                       <div>
                         <label className="field-label">API KEY {settings.aiKey === true ? <span className="dim">(configured — enter to rotate)</span> : null}</label>
@@ -2896,9 +2917,9 @@ sudo tail -f /var/log/maillog`}</pre>
                       <summary style={{ cursor: 'pointer', fontWeight: 700, letterSpacing: '.08em', color: 'var(--green)' }}>[ FREE PROVIDER SETUP — CLICK A PROVIDER TO AUTOFILL ]</summary>
                       <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {[
-                          { name: 'GROQ (recommended — fast, ~14k req/day free, no card)', endpoint: 'https://api.groq.com/openai/v1/chat/completions', model: 'llama-3.3-70b-versatile', where: 'console.groq.com → API Keys' },
-                          { name: 'OPENROUTER (free models, 50 req/day)', endpoint: 'https://openrouter.ai/api/v1/chat/completions', model: 'deepseek/deepseek-chat-v3-0324:free', where: 'openrouter.ai → Keys' },
-                          { name: 'GEMINI (1500 req/day free)', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', where: 'aistudio.google.com → Get API key' },
+                          { name: 'GROQ (recommended — fast, free tier, no card)', endpoint: 'https://api.groq.com/openai/v1/chat/completions', model: 'openai/gpt-oss-120b', where: 'console.groq.com → API Keys' },
+                          { name: 'OPENROUTER (free models, 50 req/day)', endpoint: 'https://openrouter.ai/api/v1/chat/completions', model: 'deepseek/deepseek-chat-v3.1:free', where: 'openrouter.ai → Keys' },
+                          { name: 'GEMINI (free tier)', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.5-flash', where: 'aistudio.google.com → Get API key' },
                           { name: 'MISTRAL (free tier)', endpoint: 'https://api.mistral.ai/v1/chat/completions', model: 'mistral-small-latest', where: 'console.mistral.ai → API keys' },
                           { name: 'OLLAMA (local — fully free & private, runs on this machine)', endpoint: 'http://localhost:11434/v1/chat/completions', model: 'llama3.1:8b', where: 'install ollama → ollama pull llama3.1:8b → any non-empty key works' },
                         ].map((p) => (

@@ -243,6 +243,14 @@ export function openDatabase(path) {
     db.prepare("INSERT INTO send_settings (id, ai_rules) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET ai_rules = CASE WHEN ai_rules = '' THEN excluded.ai_rules ELSE ai_rules END").run(DEFAULT_AI_RULES);
     db.prepare("INSERT INTO integrations (key, value) VALUES ('ai_rules_seeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'").run();
   }
+  // Retired provider models → current replacements (endpoint-gated so custom setups are untouched).
+  const staleModels = [
+    ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b', 'api.groq.com'],
+    ['deepseek/deepseek-chat-v3-0324:free', 'deepseek/deepseek-chat-v3-0324', 'deepseek/deepseek-chat-v3.1:free', 'openrouter.ai'],
+    ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash', 'generativelanguage.googleapis.com'],
+  ];
+  const fixModel = db.prepare("UPDATE send_settings SET ai_model = ? WHERE ai_model IN (?, ?) AND ai_endpoint LIKE '%' || ? || '%'");
+  for (const [deadA, deadB, live, host] of staleModels) fixModel.run(live, deadA, deadB, host);
   const campaignCols = new Set(db.prepare('PRAGMA table_info(campaigns)').all().map((c) => c.name));
   if (!campaignCols.has('preheader')) db.exec("ALTER TABLE campaigns ADD COLUMN preheader TEXT NOT NULL DEFAULT ''");
   if (!campaignCols.has('attachments_json')) db.exec("ALTER TABLE campaigns ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'");

@@ -456,6 +456,31 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     return { result: String(content).slice(0, 50000) };
   });
 
+  // Live model list from the provider — keeps model choice current when providers retire IDs.
+  app.get('/api/ai/models', async () => {
+    const row = db.prepare('SELECT ai_endpoint, ai_key_encrypted FROM send_settings WHERE id = 1').get() || {};
+    const endpoint = row.ai_endpoint || '';
+    const aiKey = row.ai_key_encrypted && config ? decryptSecret(row.ai_key_encrypted, config.credentialKey) : '';
+    if (!endpoint || !aiKey) fail('AI endpoint and key must be configured in SETTINGS');
+    const modelsUrl = endpoint.replace(/\/chat\/completions\/?$/i, '/models');
+    if (modelsUrl === endpoint) fail('Endpoint is not a /chat/completions URL — cannot derive /models');
+    let res;
+    try {
+      res = await fetch(modelsUrl, { headers: { Authorization: `Bearer ${aiKey}` }, signal: AbortSignal.timeout(15000) });
+    } catch (err) {
+      fail(`Model list failed: ${err.name === 'TimeoutError' ? 'timed out' : (err.message || err)}`);
+    }
+    const raw = await res.text();
+    if (!res.ok) fail(`Model list failed: ${res.status} — ${raw.slice(0, 300)}`);
+    let data = {};
+    try { data = JSON.parse(raw); } catch { fail('Provider returned a non-JSON model list'); }
+    const nonChat = /whisper|tts|orpheus|guard|embed|moderation|audio|speech|transcrib|image|dall-e|safeguard/i;
+    const models = (data.data || data.models || [])
+      .map((m) => (typeof m === 'string' ? m : m?.id || m?.name)).filter(Boolean)
+      .filter((id) => !nonChat.test(id)).sort();
+    return { models };
+  });
+
   // ── Spam Score Checker ──
   app.post('/api/spam-check', async (request) => {
     const body = request.body || {};
