@@ -32,6 +32,15 @@ function cleanAiOutput(raw, target) {
   out = out.replace(/🫡/g, '');
   const fence = out.trim().match(/^```[a-z]*\s*\n([\s\S]*?)\n?\s*```\s*$/i);
   if (fence) out = fence[1];
+  if (target) {
+    const lines = out.split(/\r?\n/);
+    const preamble = /^(here'?s|here is|sure|sure thing|certainly|of course|absolutely|okay|ok\b|great|as (an|your) (ai|assistant|email|copywrit)|i('ll|’ll| will| have| would| can|’m happy| am happy)|below is|the following|following is|let me |allow me|understood|got it|draft(ed)? (email|version|copy|letter)|revised|rewritten|improved (email|version)|this (email|letter|draft)|note\s*:|explanation\s*:|intro(duction)?\s*:)/i;
+    while (lines.length && (preamble.test(lines[0].trim()) || !lines[0].trim() || /^[-*_]{3,}$/.test(lines[0].trim()))) lines.shift();
+    const postamble = /^(let me know|hope this|i hope this|feel free|if you (need|want|like)|want me to|i can also|would you like|need (any|more)|happy to|ps\s*:?\s*(let me|if)|note that (i|this)|— let me|…and |disclaimer)/i;
+    while (lines.length && (postamble.test(lines[lines.length - 1].trim()) || !lines[lines.length - 1].trim() || /^[-*_]{3,}$/.test(lines[lines.length - 1].trim()))) lines.pop();
+    out = lines.join('\n');
+    if (/^(body|html|email body|email html|letter)\s*:\s*$/i.test(lines[0]?.trim() || '')) out = lines.slice(1).join('\n');
+  }
   if (target === 'subject' || target === 'preheader') {
     out = out.trim().replace(/^(subject|preheader|preview text|title)\s*:\s*/i, '');
     out = out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)[0] || out.trim();
@@ -553,13 +562,14 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const aiKey = row.ai_key_encrypted && config ? decryptSecret(row.ai_key_encrypted, config.credentialKey) : '';
     const rules = row.ai_rules || DEFAULT_AI_RULES;
     if (!endpoint || !aiKey) fail('AI endpoint and key must be configured in SETTINGS');
-    const wantsAttachment = /\bpdf\b|\battach(?:ment|ed)?\b|\bdoc(?:ument)?\s*(file|attach)|\bfile\s*attach|invoice pdf|brochure|\bstatement\s*(pdf|file)/i.test(prompt);
+    const wantsAttachment = /\bpdf\b|\battach(?:ment|ed)?\b|\bdoc(?:ument)?\s*(file|attach)|\bfile\s*attach|invoice pdf|brochure|\bstatement\s*(pdf|file)|\bgenerate a \w+ file\b/i.test(prompt);
     const wantsPreheader = !wantsAttachment && /preheader|pre-header|preview (text|line|snippet)|inbox preview/i.test(prompt);
     const wantsSubject = !wantsAttachment && !wantsPreheader && /subject|headline|title line/i.test(prompt);
-    const target = wantsAttachment ? 'attachment' : wantsPreheader ? 'preheader' : wantsSubject ? 'subject' : 'body';
+    const detected = wantsAttachment ? 'attachment' : wantsPreheader ? 'preheader' : wantsSubject ? 'subject' : 'body';
+    const target = ['body', 'subject', 'preheader', 'attachment', 'list'].includes(body.target) ? body.target : detected;
     const systemPrompt = `You are an email copywriting assistant specializing in deliverability, personalization, and inbox placement. Your job is to improve email content while preserving placeholders like [Firstname], [Lastname], [Company], ++rbc_*++, etc. The user will tell you what to do via the prompt field.${rules ? `\n\nSTANDING RULES set by the operator — follow these in every output, always:\n${rules}` : ''}
 
-OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact the task asks for and nothing else. A subject request returns exactly one subject line. A document request returns only the document body text. Never emit signature markers, bracketed greetings, salutations to the operator, identity declarations, or meta commentary. The strings "[LORD's ORDER" and "🫡" must never appear in output.`;
+OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact the task asks for and nothing else. A subject request returns exactly one subject line. A document request returns only the document body text. No preamble ("Here is…", "Sure, I'll…", "As an AI…"), no explanations of what you did, no closing offers ("Let me know if…", "Hope this helps"), no markdown fences around the whole answer, no field labels unless asked. The FIRST line of your reply must be the deliverable itself. Never emit signature markers, bracketed greetings, salutations to the operator, identity declarations, or meta commentary. The strings "[LORD's ORDER" and "🫡" must never appear in output.`;
     const userPrompt = `Current draft:\n\nSubject: ${subject || '(none)'}\n\nHTML body:\n${html || '(none)'}\n\nText body:\n${textBody || '(none)'}\n\nTask: ${prompt}`;
     const messages = [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }];
     const model = text(body.model || '', 'model', 200) || row.ai_model;
@@ -2237,7 +2247,20 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       });
       if (r.ok) { const j = await r.json(); remote = j?.commit?.sha || ''; }
     } catch {}
-    return { upToDate: !remote || local === remote, local, remote, version: _pkgVersion };
+    let changes = [];
+    if (remote && local && local !== remote) {
+      try {
+        const c = await fetch(`https://api.github.com/repos/kensdv/RBC-Sender/compare/${local}...${remote}`, {
+          headers: { 'User-Agent': 'rbc-sender-autoupdate/1.0' },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (c.ok) {
+          const j = await c.json();
+          changes = (j.commits || []).map((cm) => String(cm?.commit?.message || '').split('\n')[0]).filter(Boolean).slice(-10);
+        }
+      } catch {}
+    }
+    return { upToDate: !remote || local === remote, local, remote, version: _pkgVersion, changes };
   });
 
   const UPDATE_LOG = resolve(APP_ROOT, 'data', 'update.log');

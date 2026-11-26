@@ -1215,6 +1215,7 @@ export default function App() {
   const [awPrompt, setAwPrompt] = useState('');
   const [awBusy, setAwBusy] = useState(false);
   const [awResult, setAwResult] = useState(null);
+  const [awMode, setAwMode] = useState('letter');
   const [awTone, setAwTone] = useState('');
   const [awLength, setAwLength] = useState('');
   const [awAudience, setAwAudience] = useState('');
@@ -2320,7 +2321,6 @@ export default function App() {
                             <iframe title="Preview" sandbox="" srcDoc={plainPreviewDoc(preview.text)} className="preview-frame" />
                           </div>
                         )}
-                        <details className="preview-text"><summary>[ PLAIN TEXT ]</summary><pre>{preview.text}</pre></details>
                       </>
                     ) : (
                       <div className="preview-empty">[ START TYPING — PREVIEW STREAMS HERE ]</div>
@@ -2331,8 +2331,14 @@ export default function App() {
 
               {/* ══ AI WRITER ══ */}
               {tab === 'aiwriter' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  <div className="pane narrow-pane">
+                <div className="aw-layout">
+                  <div className="aw-left">
+                  <div className="mode-toggle aw-mode-toggle">
+                    <button type="button" className={awMode === 'letter' ? 'mode-btn active' : 'mode-btn'} onClick={() => setAwMode('letter')}>✉ LETTER MODE</button>
+                    <button type="button" className={awMode === 'attachment' ? 'mode-btn active' : 'mode-btn'} onClick={() => setAwMode('attachment')}>📎 ATTACHMENT MODE</button>
+                  </div>
+                  {awMode === 'letter' && (
+                  <div className="pane">
                     <div className="pane-head"><span>AI EMAIL WRITER</span></div>
                     <p className="dim-txt">Describe the letter — the AI drafts it against your current compose content, then apply straight into the draft. Pick a preset or write your own brief.</p>
                     <div className="ai-presets">
@@ -2394,7 +2400,7 @@ export default function App() {
                             method: 'POST',
                             body: { prompt: `Generate 6 alternative subject lines for this email${awTone ? ` in a ${awTone} tone` : ''}. Output ONLY the 6 lines, one per line, no numbering, no commentary.${awAudience.trim() ? ` Audience: ${awAudience.trim()}.` : ''}`, subject: draft.subject, html: draft.html, text: draft.text },
                           });
-                          setAwResult({ text: res.result || '', target: 'subject' });
+                          setAwResult({ text: res.result || '', target: 'subject', subject: draft.subject });
                         } catch (err) { setAwResult({ text: `Error: ${err.message}`, target: 'none' }); }
                         finally { setAwBusy(false); }
                       }}>[ ✦ 6 SUBJECT LINES ]</button>
@@ -2424,8 +2430,10 @@ export default function App() {
                       </div>
                     )}
                   </div>
+                  )}
 
-                  <div className="pane narrow-pane">
+                  {awMode === 'attachment' && (
+                  <div className="pane">
                     <div className="pane-head"><span>AI ATTACHMENT GENERATOR</span></div>
                     <p className="dim-txt">Describe the document — the AI generates a real file (PDF/ICS/CSV/etc.) and attaches it to the current letter.</p>
                     <div className="aw-controls">
@@ -2480,6 +2488,53 @@ export default function App() {
                           }}>[ ATTACH TO LETTER ]</button>
                         </div>
                       </div>
+                    )}
+                  </div>
+                  )}
+                  </div>
+
+                  {/* — RIGHT: LIVE PREVIEW — */}
+                  <div className="pane preview-pane aw-preview">
+                    <div className="pane-head"><span>LIVE PREVIEW</span>{draft.subject && <span className="dim">{draft.subject}</span>}</div>
+                    {awMode === 'letter' ? (
+                      awResult ? (
+                        awResult.target === 'subject' ? (
+                          <div className="preview-empty" style={{ textAlign: 'left', padding: 24 }}>
+                            <div className="dim" style={{ marginBottom: 12 }}>CLICK A LINE TO APPLY IT AS THE SUBJECT:</div>
+                            {awResult.text.split('\n').map((l) => l.replace(/^[\d\.\-\*\s]+/, '').trim()).filter(Boolean).map((line, i) => (
+                              <div key={i} className="aw-subject-preview" onClick={() => { updateDraft('subject', line); showNotice('Subject applied.'); }}>{line}</div>
+                            ))}
+                          </div>
+                        ) : /<\w+[^>]*>/.test(awResult.text) ? (
+                          <div className="preview-device-wrap desktop">
+                            <iframe title="AI Preview" sandbox="" srcDoc={awResult.text} className="preview-frame" />
+                          </div>
+                        ) : (
+                          <div className="preview-device-wrap desktop">
+                            <iframe title="AI Preview" sandbox="" srcDoc={plainPreviewDoc(awResult.text)} className="preview-frame" />
+                          </div>
+                        )
+                      ) : draft.html ? (
+                        <div className="preview-device-wrap desktop">
+                          <iframe title="Draft Preview" sandbox="" srcDoc={draft.html} className="preview-frame" />
+                        </div>
+                      ) : draft.text ? (
+                        <div className="preview-device-wrap desktop">
+                          <iframe title="Draft Preview" sandbox="" srcDoc={plainPreviewDoc(draft.text)} className="preview-frame" />
+                        </div>
+                      ) : (
+                        <div className="preview-empty">[ WRITE — PREVIEW RENDERS HERE ]</div>
+                      )
+                    ) : awAttachment ? (
+                      <div className="preview-empty" style={{ padding: 24 }}>
+                        <div className="aw-file-card">
+                          <div className="aw-file-icon">📎</div>
+                          <div className="aw-file-name">{awAttachment.filename || 'document'}</div>
+                          <div className="dim">{awAttachment.contentType || 'file'} · {Math.round(((awAttachment.data || '').length * 3) / 4096)}KB</div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="preview-empty">[ GENERATE — FILE CARD APPEARS HERE ]</div>
                     )}
                   </div>
                 </div>
@@ -4345,14 +4400,20 @@ client_id:secret:tenant            app creds (no RT)
           <div className="dlg-card" onClick={(e) => e.stopPropagation()}>
             <div className="dlg-title" style={{ color: 'var(--yellow)' }}>UPDATE AVAILABLE</div>
             <div className="dlg-msg">
-              A new version is available on GitHub.<br /><br />
-              <span className="dim">LOCAL &nbsp;</span><code style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{updateInfo.local?.slice(0, 7) || '—'}</code><br />
-              <span className="dim">REMOTE </span><code style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{updateInfo.remote?.slice(0, 7) || '—'}</code><br /><br />
-              Click <strong>[ YES ]</strong> to run <code style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>git pull → npm install → npm run build</code> and restart the server automatically.
+              A new version of Rubicon Email Suite is ready.<br />
+              Click <strong>[ UPDATE ]</strong> to upgrade your sender — it installs and restarts automatically.
+              {!!(updateInfo.changes || []).length && (
+                <>
+                  <br /><br /><span className="dim">WHAT WAS FIXED:</span>
+                  <ul className="update-changes">
+                    {updateInfo.changes.map((c, i) => <li key={i}>{c}</li>)}
+                  </ul>
+                </>
+              )}
             </div>
             <div className="dlg-actions">
-              <button className="btn-sm" onClick={() => setUpdateInfo(null)}>LATER</button>
-              <button className="btn-primary" onClick={applyUpdate}>[ YES — UPDATE ]</button>
+              <button className="btn-primary" onClick={applyUpdate}>[ UPDATE ]</button>
+              <button className="btn-sm" onClick={() => setUpdateInfo(null)}>DISMISS</button>
             </div>
           </div>
         </div>
