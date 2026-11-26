@@ -1220,6 +1220,7 @@ export default function App() {
   const [previewDevice, setPreviewDevice] = useState('desktop');
   const [versionInfo, setVersionInfo] = useState(null);
   const [updateInfo, setUpdateInfo] = useState(null);
+  const [updateOpen, setUpdateOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [testTo, setTestTo] = useState('');
   const [relayTest, setRelayTest] = useState({ state: 'idle' });
@@ -1370,7 +1371,7 @@ export default function App() {
       .then((r) => {
         if (!alive) return;
         setVersionInfo({ version: r.version, commit: r.local });
-        if (!r.upToDate && r.remote) setUpdateInfo(r);
+        if (!r.upToDate && r.remote) { setUpdateInfo(r); setUpdateOpen(false); }
       })
       .catch(() => {});
     check();
@@ -1830,7 +1831,7 @@ export default function App() {
                 try {
                   const r = await api(token, '/api/update/check');
                   setVersionInfo({ version: r.version, commit: r.local });
-                  if (!r.upToDate && r.remote) setUpdateInfo(r);
+                  if (!r.upToDate && r.remote) { setUpdateInfo(r); setUpdateOpen(false); }
                   else showNotice(`Up to date — ${String(r.local || '').slice(0, 7)}`);
                 } catch { showNotice('Update check failed.'); }
               }}>
@@ -4557,27 +4558,27 @@ client_id:secret:tenant            app creds (no RT)
         </div>
       )}
 
-      {/* ── UPDATE AVAILABLE MODAL ── */}
-      {updateInfo && !updating && (
-        <div className="dlg-overlay">
-          <div className="dlg-card" onClick={(e) => e.stopPropagation()}>
-            <div className="dlg-title" style={{ color: 'var(--yellow)' }}>UPDATE AVAILABLE</div>
-            <div className="dlg-msg">
-              A new version of Rubicon Email Suite is ready.<br />
-              Click <strong>[ UPDATE ]</strong> to upgrade your sender — it installs and restarts automatically.
-              {!!(updateInfo.changes || []).length && (
-                <>
-                  <br /><br /><span className="dim">WHAT WAS FIXED:</span>
-                  <ul className="update-changes">
-                    {updateInfo.changes.map((c, i) => <li key={i}>{c}</li>)}
-                  </ul>
-                </>
-              )}
-            </div>
-            <div className="dlg-actions">
-              <button className="btn-primary" onClick={applyUpdate}>[ UPDATE ]</button>
-              <button className="btn-sm" onClick={() => setUpdateInfo(null)}>DISMISS</button>
-            </div>
+      {/* ── UPDATE AVAILABLE — floating pill + popover ── */}
+      {updateInfo && !updating && !updateOpen && (
+        <button className="upd-fab" onClick={() => setUpdateOpen(true)}>⇧ UPDATE AVAILABLE</button>
+      )}
+      {updateInfo && !updating && updateOpen && (
+        <div className="upd-pop">
+          <div className="upd-pop-head"><span>UPDATE AVAILABLE</span><button className="upd-x" onClick={() => setUpdateOpen(false)}>✕</button></div>
+          <div className="upd-pop-body">
+            A new version of Rubicon Email Suite is ready — installs and restarts automatically.
+            {!!(updateInfo.changes || []).length && (
+              <>
+                <span className="dim" style={{ display: 'block', marginTop: 10 }}>WHAT WAS FIXED:</span>
+                <ul className="update-changes">
+                  {updateInfo.changes.map((c, i) => <li key={i}>{c}</li>)}
+                </ul>
+              </>
+            )}
+          </div>
+          <div className="upd-pop-actions">
+            <button className="btn-primary" onClick={applyUpdate}>[ UPDATE ]</button>
+            <button className="btn-sm" onClick={() => setUpdateInfo(null)}>DISMISS</button>
           </div>
         </div>
       )}

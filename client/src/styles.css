@@ -1090,6 +1090,38 @@ code {
 .chat-fab:hover { background: rgba(47, 224, 107, 0.12); }
 .chat-fab .rbc-mascot { animation-duration: 1.4s; }
 
+/* ── update pill + popover ── */
+.upd-fab {
+  position: fixed; right: 18px; bottom: 68px; z-index: 900;
+  padding: 10px 18px; border-radius: 8px; cursor: pointer;
+  background: rgba(232, 161, 58, 0.10); border: 1px solid var(--yellow);
+  color: var(--yellow); font-family: inherit; font-size: 11px; font-weight: 800; letter-spacing: 2px;
+  animation: upd-pulse 2.2s ease-in-out infinite;
+}
+@keyframes upd-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232, 161, 58, 0.45); }
+  50% { box-shadow: 0 0 22px 4px rgba(232, 161, 58, 0.25); }
+}
+.upd-fab:hover { background: var(--yellow); color: #100a00; animation: none; }
+.upd-pop {
+  position: fixed; right: 18px; bottom: 68px; z-index: 900; width: 340px;
+  background: var(--panel); border: 1px solid var(--yellow); border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6), 0 0 30px rgba(232, 161, 58, 0.12);
+  animation: dlg-in 0.18s ease-out;
+}
+.upd-pop-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--line);
+  color: var(--yellow); font-size: 11px; font-weight: 800; letter-spacing: 2px;
+}
+.upd-x { background: none; border: none; color: var(--dim); font-size: 13px; cursor: pointer; padding: 0 2px; }
+.upd-x:hover { color: var(--yellow); }
+.upd-pop-body { padding: 14px 16px; font-size: 12px; color: var(--txt); line-height: 1.7; }
+.upd-pop-actions { display: flex; gap: 10px; padding: 0 16px 16px; }
+.upd-pop .update-changes { margin: 6px 0 0; padding-left: 18px; color: var(--dim); font-size: 11px; line-height: 1.8; }
+::root[data-theme='obsidian'] .upd-pop { background: #171a14; border-color: #e8a13a; }
+::root[data-theme='obsidian'] .upd-fab { background: rgba(232, 161, 58, 0.10); border-color: #e8a13a; color: #e8a13a; }
+
 /* ── Rubicon AI mascot — dancing alien droid ── */
 .rbc-mascot { display: inline-block; vertical-align: middle; overflow: visible;
   animation: ms-bounce 1.8s cubic-bezier(.36,0,.64,1) infinite; }
