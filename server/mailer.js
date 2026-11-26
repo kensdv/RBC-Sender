@@ -1217,8 +1217,36 @@ export function createMailer({ db, config }) {
         return mailOpts;
       };
 
+      // Imported MS mailbox (delegated RT or app creds) → Graph sendMail as that mailbox
+      const sendViaMsAccount = async (acct) => {
+        const { fromName, fromEmail, replyTo } = buildFrom(settings, acct);
+        const sender = fromEmail || acct.username;
+        if (!sender) throw new Error(`MS mailbox #${acct.id}: no sender address`);
+        const token = acct.authType === 'ms_cc'
+          ? await msCcAccessToken(acct.msClientId, acct.msRt, acct.msTenant)
+          : await msRtAccessToken(acct.msClientId, acct.msRt, acct.msTenant);
+        const info = await msRtSendMail({
+          token, sender, recipient, fromName, replyTo, attachments, settings,
+          message: { ...message, extraHeaders: buildHeaders(sender) },
+        });
+        markAccountResult(db, acct.id, true);
+        return info;
+      };
+
       // ── OAuth API engines ──
       if (mode === 'graph') {
+        // Imported MS mailboxes ride the rotation first; single engine config is the fallback
+        const msPool = loadSmtpPool(db, config).filter((a) => a.authType === 'ms_rt' || a.authType === 'ms_cc');
+        if (msPool.length) {
+          const order = msPool.length > 1 ? [...msPool.slice(smtpCursor % msPool.length), ...msPool.slice(0, smtpCursor % msPool.length)] : msPool;
+          smtpCursor += msPool.length > 1 ? 1 : 0;
+          let msErr = null;
+          for (const acct of order) {
+            try { return await sendViaMsAccount(acct); }
+            catch (err) { markAccountResult(db, acct.id, false); msErr = err; }
+          }
+          throw msErr || new Error('All MS mailbox accounts failed');
+        }
         const { fromName, fromEmail, replyTo } = buildFrom(settings, null);
         if (!fromEmail && !settings.engineSendAs) throw new Error('Configure a from/direct email for Graph engine');
         return sendViaGraph({
@@ -1249,16 +1277,7 @@ export function createMailer({ db, config }) {
           const { fromName, fromEmail, replyTo } = buildFrom(settings, acct);
           // ── Imported MS mailbox: Graph sendMail (delegated RT or app creds) ──
           if (acct?.authType === 'ms_rt' || acct?.authType === 'ms_cc') {
-            const sender = fromEmail || acct.username;
-            if (!sender) throw new Error(`MS mailbox #${acct.id}: no sender address`);
-            const token = acct.authType === 'ms_cc'
-              ? await msCcAccessToken(acct.msClientId, acct.msRt, acct.msTenant)
-              : await msRtAccessToken(acct.msClientId, acct.msRt, acct.msTenant);
-            const info = await msRtSendMail({
-              token, sender, recipient, fromName, replyTo, attachments, settings,
-              message: { ...message, extraHeaders: buildHeaders(sender) },
-            });
-            markAccountResult(db, acct.id, true);
+            const info = await sendViaMsAccount(acct);
             return info;
           }
           if (!fromEmail) throw new Error(`No from email configured for mode: ${mode}`);
