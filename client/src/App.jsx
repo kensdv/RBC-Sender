@@ -8,31 +8,8 @@ function ChromosomeBackground() {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     let animId;
-    const resize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; waterResize(); };
+    const resize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
     window.addEventListener('resize', resize);
-
-    // ── Water field (liquid-glass): damped height-field ripple sim ──
-    const WSCALE = 6;
-    let wW = 0, wH = 0, bufA = null, bufB = null, wImg = null;
-    const waterCanvas = document.createElement('canvas');
-    const wctx = waterCanvas.getContext('2d');
-    function waterResize() {
-      wW = Math.max(4, Math.floor(canvas.width / WSCALE));
-      wH = Math.max(4, Math.floor(canvas.height / WSCALE));
-      bufA = new Float32Array(wW * wH);
-      bufB = new Float32Array(wW * wH);
-      waterCanvas.width = wW; waterCanvas.height = wH;
-      wImg = wctx.createImageData(wW, wH);
-    }
-    const drop = (x, y, s = 400) => {
-      const cx = Math.floor(x / WSCALE), cy = Math.floor(y / WSCALE);
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const px = cx + dx, py = cy + dy;
-        if (px > 0 && px < wW - 1 && py > 0 && py < wH - 1) bufA[py * wW + px] += s / (Math.abs(dx) + Math.abs(dy) + 1);
-      }
-    };
-    const onPointer = (e) => { if (document.documentElement.dataset.theme === 'glass') drop(e.clientX, e.clientY, 240); };
-    window.addEventListener('pointermove', onPointer);
     resize();
 
     // ── Neon galaxy: static stars + slow nebula glow pulses ──
@@ -63,7 +40,6 @@ function ChromosomeBackground() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       const themeNow = document.documentElement.dataset.theme;
-      const glass = themeNow === 'glass';
       if (themeNow === 'obsidian') {
         // ── OBSIDIAN: flat ink base + sparse dim stars, no glow gimmick ──
         ctx.fillStyle = '#12140f';
@@ -74,28 +50,6 @@ function ChromosomeBackground() {
           ctx.fillStyle = `rgba(232,230,223,${a * 0.5})`;
           ctx.beginPath(); ctx.arc(s.x, s.y, s.r * 0.7, 0, Math.PI * 2); ctx.fill();
         }
-      } else if (glass) {
-        // ── LIQUID GLASS: transparent canvas, water ripple highlights only ──
-        if (Math.random() < 0.09) drop(Math.random() * canvas.width, Math.random() * canvas.height, 280 + Math.random() * 520);
-        for (let y = 1; y < wH - 1; y++) {
-          const row = y * wW;
-          for (let x = 1; x < wW - 1; x++) {
-            const i = row + x;
-            bufB[i] = ((bufA[i - 1] + bufA[i + 1] + bufA[i - wW] + bufA[i + wW]) * 0.5 - bufB[i]) * 0.985;
-          }
-        }
-        const tmp = bufA; bufA = bufB; bufB = tmp;
-        const px = wImg.data;
-        for (let i = wW + 1; i < wW * wH - wW - 1; i++) {
-          const gx = bufA[i + 1] - bufA[i - 1];
-          const gy = bufA[i + wW] - bufA[i - wW];
-          const mag = Math.min(95, Math.sqrt(gx * gx + gy * gy) * 1.3);
-          const j = i * 4;
-          px[j] = 55 + gx * 0.4; px[j + 1] = 130; px[j + 2] = 205; px[j + 3] = mag;
-        }
-        wctx.putImageData(wImg, 0, 0);
-        ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(waterCanvas, 0, 0, wW, wH, 0, 0, canvas.width, canvas.height);
       } else {
         // Base — deep phosphor
         ctx.fillStyle = '#020402';
@@ -133,7 +87,7 @@ function ChromosomeBackground() {
       animId = requestAnimationFrame(draw);
     };
     draw();
-    return () => { cancelAnimationFrame(animId); window.removeEventListener('resize', resize); window.removeEventListener('pointermove', onPointer); };
+    return () => { cancelAnimationFrame(animId); window.removeEventListener('resize', resize); };
   }, []);
   return <canvas ref={canvasRef} style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }} />;
 }
@@ -1870,8 +1824,8 @@ export default function App() {
           ))}
         </nav>
 
-        <button className="nav-item theme-toggle" onClick={() => setTheme((t) => (t === 'phosphor' ? 'glass' : t === 'glass' ? 'obsidian' : 'phosphor'))}>
-          {theme === 'phosphor' ? '◐ LIQUID GLASS' : theme === 'glass' ? '◑ OBSIDIAN' : '◒ PHOSPHOR'}
+        <button className="nav-item theme-toggle" onClick={() => setTheme((t) => (t === 'phosphor' ? 'obsidian' : 'phosphor'))}>
+          {theme === 'phosphor' ? '◑ OBSIDIAN' : '◒ PHOSPHOR'}
         </button>
         <button className="nav-item logout-btn" onClick={logout}>✕ LOGOUT</button>
 
