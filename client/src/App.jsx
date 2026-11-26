@@ -1369,6 +1369,26 @@ export default function App() {
     setUpdateInfo(null);
     try {
       await api(token, '/api/update/apply', { method: 'POST' });
+      // Server restarts mid-run — poll the log for the outcome; request failures
+      // during restart are expected and ignored.
+      let tries = 0;
+      const poll = setInterval(async () => {
+        tries++;
+        try {
+          const s = await api(token, '/api/update/status');
+          if (s.log?.includes('FAILED')) {
+            clearInterval(poll);
+            setUpdating(false);
+            showNotice(`Update failed — ${s.log.trim().split('\n').pop()}`, 'err');
+          } else if (s.log?.includes('[update] OK')) {
+            clearInterval(poll);
+            setUpdating(false);
+            showNotice('Update applied — reloading…');
+            setTimeout(() => location.reload(), 6000);
+          }
+        } catch {}
+        if (tries > 20) { clearInterval(poll); setUpdating(false); }
+      }, 3000);
     } catch (err) {
       setUpdating(false);
       showNotice(`Update failed: ${err.message}`, 'err');

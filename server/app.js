@@ -1957,20 +1957,35 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
     return { upToDate: !remote || local === remote, local, remote, version: _pkgVersion };
   });
 
+  const UPDATE_LOG = resolve(APP_ROOT, 'data', 'update.log');
+  app.get('/api/update/status', async () => {
+    try { return { log: readFileSync(UPDATE_LOG, 'utf8').slice(-4000) }; } catch { return { log: '' }; }
+  });
+
   app.post('/api/update/apply', async (request, reply) => {
     reply.send({ ok: true, message: 'Update started — the server will restart automatically.' });
-    setTimeout(async () => {
+    setTimeout(() => {
+      const log = [];
+      const runSilent = (cmd) => {
+        log.push(`$ ${cmd}`);
+        const out = execSync(cmd, { cwd: APP_ROOT, stdio: 'pipe', shell: true, windowsHide: true, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+        log.push(String(out || '').trim().slice(-3000));
+      };
+      const save = () => { try { writeFileSync(UPDATE_LOG, log.join('\n')); } catch {} };
       try {
-        console.log('[update] Running git pull...');
-        execSync('git pull --rebase', { cwd: APP_ROOT, stdio: 'inherit', shell: true });
-        console.log('[update] Running npm install...');
-        execSync('npm install', { cwd: APP_ROOT, stdio: 'inherit', shell: true });
-        console.log('[update] Running npm run build...');
-        execSync('npm run build', { cwd: APP_ROOT, stdio: 'inherit', shell: true });
-        console.log('[update] Done — restarting process.');
+        // autostash covers dirty tracked files (package-lock churn); if the reapply
+        // conflicts, fall back to discarding local tracked changes — deployed box
+        // always wants upstream, data/ is untracked and untouched.
+        try { runSilent('git pull --rebase --autostash'); }
+        catch { runSilent('git checkout -- .'); runSilent('git pull --rebase'); }
+        runSilent('npm install');
+        runSilent('npm run build');
+        log.push(`[update] OK ${new Date().toISOString()}`);
+        save();
         process.exit(0);
       } catch (e) {
-        console.error('[update] FAILED:', e.message);
+        log.push(`[update] FAILED: ${String(e.stderr || e.message).slice(0, 1000)}`);
+        save();
       }
     }, 300);
   });
