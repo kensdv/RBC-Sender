@@ -711,7 +711,7 @@ export async function msRtSendMail({ token, sender, message, recipient, fromName
   else payload.message.toRecipients = [addr];
   if (replyTo) payload.message.replyTo = [{ emailAddress: { address: replyTo } }];
   const headers = Object.entries(message.extraHeaders || {})
-    .filter(([k]) => !GRAPH_BLOCKED_HEADERS.has(k.toLowerCase()))
+    .filter(([k]) => !GRAPH_BLOCKED_HEADERS.has(k.toLowerCase()) && k.toLowerCase().startsWith('x-'))
     .slice(0, 20)
     .map(([name, value]) => ({ name, value: String(value).slice(0, 500) }));
   if (headers.length) payload.message.internetMessageHeaders = headers;
@@ -986,7 +986,7 @@ async function sendViaGraph({ settings, message, recipient, fromName, fromEmail,
   if (replyTo) payload.message.replyTo = [{ emailAddress: { address: replyTo } }];
 
   const headers = Object.entries(message.extraHeaders || {})
-    .filter(([k]) => !GRAPH_BLOCKED_HEADERS.has(k.toLowerCase()))
+    .filter(([k]) => !GRAPH_BLOCKED_HEADERS.has(k.toLowerCase()) && k.toLowerCase().startsWith('x-'))
     .slice(0, 20)
     .map(([name, value]) => ({ name, value: String(value).slice(0, 500) }));
   if (headers.length) payload.message.internetMessageHeaders = headers;
