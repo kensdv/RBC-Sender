@@ -141,6 +141,52 @@ Sends through Gmail's API as yourself — no app password, no SMTP. One-time Goo
 
 Azure portal → App registrations → new registration → API permissions → Microsoft Graph → **Mail.Send** (Application) → Grant admin consent. Copy Tenant ID + Client ID + Client Secret into SETTINGS → GRAPH API. Send-as must be a real mailbox UPN in that tenant.
 
+### Delegated Graph (Microsoft account connect)
+
+Same Azure app registration, but with **delegated** permissions: `Mail.Send` + `Contacts.Read` (delegated). Set CLIENT ID + CLIENT SECRET + TENANT ID in SETTINGS → GRAPH API → **CONNECT MICROSOFT ACCOUNT** → sign in with the mailbox you want to send from. Stores a refresh token and auto-fills the send-as address. Also enables **PULL MS CONTACTS** in the MAIL LIST tab to import Outlook contacts as recipients.
+
+## Deliverability — PTR, SPF, DKIM
+
+If you're sending from your own IP (DIRECT MX, RELAY, or your own SMTP server), set these to avoid spam filtering:
+
+### PTR (Reverse DNS)
+
+Contact your VPS/RDP provider and request a PTR record for your IP pointing to a domain you own.
+
+- Example: IP `1.2.3.4` → PTR `mail.yourdomain.com`
+- Most providers let you set this in their panel or via support ticket
+- Verify: `nslookup 1.2.3.4` should return `mail.yourdomain.com`
+
+### SPF (Sender Policy Framework)
+
+Add a TXT record to your domain's DNS (`@` root):
+
+```
+v=spf1 ip4:YOUR_IP_HERE -all
+```
+
+Replace `YOUR_IP_HERE` with your actual server IP. The `-all` means only this IP is authorized to send from your domain.
+
+### DKIM (DomainKeys Identified Mail)
+
+Use the app's built-in DKIM feature:
+
+1. Go to **SETTINGS → DKIM SIGNING** → toggle ENABLE
+2. Fill **DKIM DOMAIN** (e.g., `yourdomain.com`)
+3. Fill **SELECTOR** (e.g., `mail` or `default`)
+4. Generate a key pair on your machine:
+
+```bash
+openssl genrsa -out private.key 2048
+openssl rsa -in private.key -pubout -out public.key
+```
+
+5. Paste the **PRIVATE KEY** (the whole `-----BEGIN PRIVATE KEY-----` block) into the app
+6. The app will show DNS records to publish under **DNS RECORDS TO PUBLISH**
+7. Add those TXT records to your DNS (e.g., `mail._domainkey.yourdomain.com`)
+
+Verification order: PTR first (provider), SPF second (DNS), DKIM third (app + DNS).
+
 ## First campaign walkthrough
 
 1. **EMAIL tab** — pick a send mode. For SMTP: use a quick guide preset (Gmail app password, M365, hosting provider) or fill host/port/user/pass manually, then `[ TEST ]` to verify and `[ SEND TEST ]` to fire a real message.
