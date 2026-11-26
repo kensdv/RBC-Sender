@@ -796,6 +796,33 @@ code {
   color: var(--txt-dim);
 }
 
+/* ── APP DIALOG (confirm/prompt) ── */
+.dlg-overlay {
+  position: fixed; inset: 0; z-index: 120;
+  background: rgba(0,0,0,0.8);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  display: flex; align-items: center; justify-content: center;
+}
+.dlg-card {
+  width: min(440px, 92vw);
+  background: rgba(4, 16, 4, 0.92);
+  border: 1px solid rgba(47,224,107,0.25);
+  border-radius: 8px;
+  padding: 24px 22px;
+  box-shadow: 0 0 50px rgba(47,224,107,0.12), 0 20px 60px rgba(0,0,0,0.9);
+  animation: dlg-in 0.18s ease-out;
+}
+.dlg-title {
+  font-family: var(--mono); font-weight: 900; letter-spacing: .2em;
+  color: var(--green); font-size: 12px; text-transform: uppercase;
+  text-shadow: 0 0 10px rgba(47,224,107,0.4); margin-bottom: 10px;
+}
+.dlg-msg { font-size: 12px; line-height: 1.7; color: var(--txt); margin-bottom: 16px; }
+.dlg-input { width: 100%; margin-bottom: 16px; }
+.dlg-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.dlg-actions .btn-primary { padding: 8px 18px; font-size: 12px; }
+
 /* ── A/B TEST DIALOG ── */
 .dlg-large {
   max-width: 600px;
@@ -1123,6 +1150,10 @@ code {
 .upd-side-card ul { margin: 0 0 10px; padding-left: 16px; color: var(--dim); line-height: 1.7; }
 .upd-side-actions { display: flex; gap: 8px; }
 .upd-side-actions .btn-primary { padding: 6px 14px; font-size: 12px; }
+@keyframes dlg-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 @keyframes upd-pulse {
   0%, 100% { opacity: 0.4; }
   50% { opacity: 1; text-shadow: 0 0 12px rgba(232, 161, 58, 0.8); }
