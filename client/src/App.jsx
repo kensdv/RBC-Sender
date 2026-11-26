@@ -3273,7 +3273,7 @@ export default function App() {
                   </div>
                   <label className="check-row">
                     <input type="checkbox" checked={smtp.secure} onChange={(e) => setSmtp({ ...smtp, secure: e.target.checked })} />
-                    <span>Implicit TLS (port 465) — uncheck for STARTTLS on 587</span>
+                    <span>Implicit TLS — auto-set by port (465=TLS, 587=STARTTLS)</span>
                   </label>
                   <div className="btn-row" style={{ alignItems: 'center' }}>
                     <button className="btn-primary" disabled={busy} onClick={() => run(async () => { await api(token, '/api/smtp', { method: 'PUT', body: smtp }); showNotice('SMTP saved.'); await refresh(); })}>[ SAVE SMTP ]</button>

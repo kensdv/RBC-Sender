@@ -241,10 +241,13 @@ async function resolveMxHost(domain) {
 }
 
 function transportFor(smtp, dkim = null, proxy = '') {
+  // Implicit TLS only makes sense on 465 — anywhere else it kills the greeting
+  // (587 negotiates STARTTLS after a plaintext banner).
+  const secure = Number(smtp.port) === 465 ? true : false;
   return nodemailer.createTransport({
     host: smtp.host,
     port: smtp.port,
-    secure: smtp.secure,
+    secure,
     ...(smtp.password ? { auth: { user: smtp.username, pass: smtp.password } } : {}),
     connectionTimeout: 10000,
     greetingTimeout: 10000,
