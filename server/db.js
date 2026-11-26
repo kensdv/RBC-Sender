@@ -81,6 +81,17 @@ export function openDatabase(path) {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS subject_variants_campaign_idx ON subject_variants(campaign_id);
+    CREATE TABLE IF NOT EXISTS ai_tasks (
+      id INTEGER PRIMARY KEY,
+      text TEXT NOT NULL,
+      run_at TEXT NOT NULL,
+      repeat TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending',
+      last_result TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS ai_tasks_run_at_idx ON ai_tasks(status, run_at);
     CREATE TABLE IF NOT EXISTS send_settings (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       send_mode TEXT NOT NULL DEFAULT 'smtp',
@@ -270,6 +281,7 @@ export function openDatabase(path) {
   if (!campaignCols.has('lists_json')) db.exec("ALTER TABLE campaigns ADD COLUMN lists_json TEXT NOT NULL DEFAULT '[]'");
   if (!campaignCols.has('accounts_json')) db.exec("ALTER TABLE campaigns ADD COLUMN accounts_json TEXT NOT NULL DEFAULT '[]'");
   if (!campaignCols.has('accounts_random')) db.exec("ALTER TABLE campaigns ADD COLUMN accounts_random INTEGER NOT NULL DEFAULT 0");
+  if (!campaignCols.has('tiers_json')) db.exec("ALTER TABLE campaigns ADD COLUMN tiers_json TEXT NOT NULL DEFAULT '[]'");
   const recipientCols = new Set(db.prepare('PRAGMA table_info(recipients)').all().map((c) => c.name));
   if (!recipientCols.has('timezone_guessed')) db.exec("ALTER TABLE recipients ADD COLUMN timezone_guessed TEXT NOT NULL DEFAULT ''");
   if (!recipientCols.has('engagement_score')) db.exec("ALTER TABLE recipients ADD COLUMN engagement_score INTEGER NOT NULL DEFAULT 0");

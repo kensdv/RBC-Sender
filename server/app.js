@@ -1,4 +1,7 @@
-import { existsSync, mkdirSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs';
+
+  const tiers = Array.isArray(body.tiers)
+    ? body.tiers.map((t) => String(t)).filter((t) => ['hot', 'warm', 'cold'].includes(t)).slice(0, 3)
+    : [];import { existsSync, mkdirSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { resolve, basename, dirname, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -136,9 +139,11 @@ function campaignView(row) {
   try { lists = JSON.parse(row.lists_json || '[]'); } catch {}
   let accounts = [];
   try { accounts = JSON.parse(row.accounts_json || '[]'); } catch {}
+  let tiers = [];
+  try { tiers = JSON.parse(row.tiers_json || '[]'); } catch {}
   return {
     id: row.id, name: row.name, subject: row.subject, preheader: row.preheader || '', html: row.html, text: row.text,
-    attachments, providers, lists, accounts, accountsRandom: Boolean(row.accounts_random), paused: Boolean(row.paused),
+    attachments, providers, lists, accounts, accountsRandom: Boolean(row.accounts_random), tiers, paused: Boolean(row.paused),
     status: row.status, scheduledFor: row.scheduled_for, createdAt: row.created_at,
     total: row.total || 0, sent: row.sent || 0, failed: row.failed || 0, queued: row.queued || 0,
     send_time_optimization_enabled: Boolean(row.send_time_optimization_enabled),
@@ -160,7 +165,7 @@ function campaignBody(body) {
   const accounts = Array.isArray(body.accounts)
     ? body.accounts.map((a) => Number(a)).filter((n) => Number.isInteger(n) && n > 0).slice(0, 300)
     : [];
-  return { name: text(body.name, 'name', 120) || subject, subject, preheader: text(body.preheader || '', 'preheader', 300), html, text: plainText, attachments, providers, lists, accounts, accountsRandom: body.accountsRandom === true };
+  return { name: text(body.name, 'name', 120) || subject, subject, preheader: text(body.preheader || '', 'preheader', 300), html, text: plainText, attachments, providers, lists, accounts, accountsRandom: body.accountsRandom === true, tiers };
 }
 
 function unsubscribePage(message, action = '') {
@@ -249,10 +254,16 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     if (hold) for (const c of campaigns) if (['queued', 'scheduled', 'sending'].includes(c.status) && c.queued > 0) c.hold = hold;
     const bounces = db.prepare('SELECT id, email, kind, reason, classification, suppression_action, created_at AS createdAt FROM bounces ORDER BY id DESC LIMIT 500').all();
     const confirmed = db.prepare('SELECT COUNT(*) AS count FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0').get().count;
+    const last30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const deliv30 = db.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE created_at > ?").get(last30).c || 1;
+    const rates = {
+      bounceRate: Math.round((db.prepare("SELECT COUNT(*) AS c FROM bounces WHERE created_at > ?").get(last30).c / deliv30) * 1000) / 10,
+      complaintRate: Math.round((db.prepare("SELECT COUNT(*) AS c FROM bounces WHERE classification = 'spam_complaint' AND created_at > ?").get(last30).c / deliv30) * 1000) / 10,
+    };
     const reputationAlerts = db.prepare('SELECT target, source, listed_at AS listedAt FROM reputation_alerts WHERE resolved_at IS NULL ORDER BY listed_at DESC').all();
     seedPoolFromLegacy();
     const smtpAccounts = db.prepare('SELECT * FROM smtp_accounts ORDER BY id').all().map(accountView);
-    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db), recipientTotal, providerCounts, lists, campaigns, bounces, confirmed, publicBaseUrl: config.publicBaseUrl, events: listEvents(120), telegram: telegramStatus(db, config), reputationAlerts };
+    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db), recipientTotal, providerCounts, lists, campaigns, bounces, confirmed, rates, aiTasks: db.prepare('SELECT id, text, run_at, repeat, status, last_result FROM ai_tasks ORDER BY run_at').all(), publicBaseUrl: config.publicBaseUrl, events: listEvents(120), telegram: telegramStatus(db, config), reputationAlerts };
   });
 
   app.put('/api/smtp', async (request) => {
@@ -313,7 +324,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
           preheader: '', html: body.html || '<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">Rubicon Email Suite test email — the active send engine accepted this message.</div>',
           text: body.text || 'Rubicon Email Suite test email — the active send engine accepted this message.', attachments: body.attachments || [],
         },
-        recipient: { id: 0, email: to, firstName: 'Test', lastName: 'User', company: '', custom: {} },
+        recipient: { id: 0, email: to, firstName: (to.split('@')[0] || '').split(/[._-]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ') || '', lastName: '', company: '', custom: {} },
         totalRecipients: 1,
       });
     } catch (err) {
@@ -586,7 +597,8 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     // Exemplar engine — pick the closest real letter from the template library
     // and feed its HTML as the structural/brand reference for body generation.
     let exemplar = '';
-    if (target === 'body' || target === 'attachment') {
+    // Exemplar is for fresh generation only — in edit mode it tempts redesign.
+    if ((target === 'body' || target === 'attachment') && !html.trim()) {
       const kw = (prompt + ' ' + subject).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3);
       const score = (t) => kw.reduce((n, w) => n + ((t.label + ' ' + t.subject).toLowerCase().includes(w) ? 1 : 0), 0);
       const best = EXTRA_TEMPLATES.map((t) => [score(t), t]).sort((a, b) => b[0] - a[0])[0];
@@ -595,7 +607,23 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const systemPrompt = `You are an email copywriting assistant specializing in deliverability, personalization, and inbox placement. Your job is to improve email content while preserving placeholders like [Firstname], [Lastname], [Company], ++rbc_*++, etc. The user will tell you what to do via the prompt field.${rules ? `\n\nSTANDING RULES set by the operator — follow these in every output, always:\n${rules}` : ''}
 
 OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact the task asks for and nothing else. A subject request returns exactly one subject line. A document request returns only the document body text. No preamble ("Here is…", "Sure, I'll…", "As an AI…"), no explanations of what you did, no closing offers ("Let me know if…", "Hope this helps"), no markdown fences around the whole answer, no field labels unless asked. The FIRST line of your reply must be the deliverable itself. Never emit signature markers, bracketed greetings, salutations to the operator, identity declarations, or meta commentary. The strings "[LORD's ORDER" and "🫡" must never appear in output.`;
-    const userPrompt = `Current draft:\n\nSubject: ${subject || '(none)'}\n\nHTML body:\n${html || '(none)'}\n\nText body:\n${textBody || '(none)'}\n\nTask: ${prompt}${exemplar ? `\n\nREFERENCE EXEMPLAR — a real production letter from the library. Match its layout class, brand styling, color scheme and structure; adapt content to the task:\n\`\`\`html\n${exemplar}\n\`\`\`` : ''}`;
+    const editing = (target === 'body' || target === 'subject') && html.trim().length > 0;
+    const modeRules = editing ? `
+
+SURGICAL-EDIT MODE — a draft already exists and it is the operator's working letter, not a sketch:
+- Change ONLY what the task asks. Every tag, attribute, style, <img>, table, link and color you were not told to touch returns byte-for-byte identical.
+- NEVER rebuild, restyle, rebrand or "improve" the layout — no redesign passes, no new sections, no moved blocks.
+- NEVER touch image sources or invent placeholders, mockups, screenshot descriptions, or lorem-ipsum.
+- NEVER repeat the subject line inside the body or add a headline duplicating it.
+- Preserve every placeholder ([Firstname], ++rbc_*++) byte-for-byte, including inside hrefs.
+- If the task is impossible without a redesign, make the smallest viable change and say nothing else.` : (target === 'body' ? `
+
+GENERATION RULES — hard requirements for every new letter:
+- Output complete render-ready HTML email only. NEVER a mockup, wireframe, screenshot description, or "preview" of a letter — it must BE the letter.
+- NEVER put the subject line inside the body — the subject lives in the subject field.
+- Prefer a styled text wordmark over hotlinked logos; if a logo is essential, use a real https URL only, never an invented path.
+- One CTA, real copy, no lorem ipsum, no bracketed [insert] stubs.` : '');
+    const userPrompt = `Current draft:\n\nSubject: ${subject || '(none)'}\n\nHTML body:\n${html || '(none)'}\n\nText body:\n${textBody || '(none)'}\n\nTask: ${prompt}${modeRules}${exemplar ? `\n\nREFERENCE EXEMPLAR — a real production letter from the library. Match its layout class, brand styling, color scheme and structure; adapt content to the task:\n\`\`\`html\n${exemplar}\n\`\`\`` : ''}`;
     const messages = [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }];
     const model = text(body.model || '', 'model', 200) || row.ai_model;
     const { content, model: usedModel } = await aiChatRequest({ endpoint, aiKey, model, messages, timeoutMs: 60000 });
@@ -609,6 +637,37 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
       return { result, target, attachment, model: usedModel };
     }
     return { result, target, model: usedModel };
+  });
+
+  // AI letter picker — scores the vault (saved templates + library) against the
+  // target audience and returns the strongest candidate for the campaign.
+  app.post('/api/ai/pick-letter', async (request) => {
+    const body = request.body || {};
+    const row = db.prepare('SELECT ai_endpoint, ai_key_encrypted, ai_model FROM send_settings WHERE id = 1').get() || {};
+    const endpoint = row.ai_endpoint || '';
+    const aiKey = row.ai_key_encrypted && config ? decryptSecret(row.ai_key_encrypted, config.credentialKey) : '';
+    if (!endpoint || !aiKey) fail('AI endpoint and key must be configured in SETTINGS');
+    const saved = db.prepare('SELECT id, name, subject, html FROM campaign_templates ORDER BY created_at DESC LIMIT 40').all();
+    const candidates = [
+      ...saved.map((t, i) => ({ key: `s${i}`, src: t })),
+      ...EXTRA_TEMPLATES.slice(0, 60).map((t, i) => ({ key: `l${i}`, src: t })),
+    ];
+    if (!candidates.length) fail('No letters in the vault to pick from');
+    const meta = candidates.map((c) => ({ key: c.key, name: c.src.label || c.src.name, subject: c.src.subject }));
+    const sys = `You are Rubicon's letter selector. Given a campaign goal and target audience, pick the ONE letter from the vault that fits best — tone, vertical, provider quirks, inbox-safety. Reply with ONLY JSON: {"pick":"<key>","why":"<one line>"}. No prose.`;
+    const user = `GOAL: ${String(body.goal || body.subject || '(untargeted blast)').slice(0, 500)}
+AUDIENCE: providers=${JSON.stringify(body.providers || [])} lists=${JSON.stringify(body.lists || [])} tiers=${JSON.stringify(body.tiers || [])}
+VAULT: ${JSON.stringify(meta)}`;
+    const { content } = await aiChatRequest({
+      endpoint, aiKey, model: row.ai_model, timeoutMs: 60000,
+      messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
+    });
+    const json = String(content || '').match(/\{[\s\S]*\}/)?.[0];
+    if (!json) fail('Selector returned no JSON');
+    let plan;
+    try { plan = JSON.parse(json); } catch { fail('Selector returned malformed JSON'); }
+    const hit = candidates.find((c) => c.key === plan.pick) || candidates[0];
+    return { name: hit.src.label || hit.src.name, subject: hit.src.subject, preheader: hit.src.preheader || '', html: hit.src.html, text: hit.src.text || '', why: String(plan.why || '').slice(0, 200), pick: hit.key };
   });
 
   // Live model list from the provider — keeps model choice current when providers retire IDs.
@@ -1857,6 +1916,15 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     }
     const poolIds = Array.isArray(body.poolAccountIds) ? body.poolAccountIds.map((a) => Number(a)).filter((n) => Number.isInteger(n) && n > 0).slice(0, 300) : [];
     db.prepare("INSERT INTO integrations (key, value) VALUES ('pool_account_ids', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(poolIds));
+    if (body.providerRates && typeof body.providerRates === 'object') {
+      const rates = {};
+      for (const [k, v] of Object.entries(body.providerRates)) {
+        const name = String(k).toLowerCase().trim().slice(0, 60);
+        const perMin = Math.min(600, Math.max(0, Number(v) || 0));
+        if (name && perMin > 0) rates[name] = perMin;
+      }
+      db.prepare("INSERT INTO integrations (key, value) VALUES ('provider_rates', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(rates));
+    }
     return { sendSettings: publicSendSettings(db) };
   });
 
@@ -2169,7 +2237,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
   app.post('/api/campaigns', async (request) => {
     const campaign = campaignBody(request.body || {});
     const now = new Date().toISOString();
-    const result = db.prepare("INSERT INTO campaigns (name, subject, preheader, html, text, attachments_json, providers_json, lists_json, accounts_json, accounts_random, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)").run(campaign.name, campaign.subject, campaign.preheader, campaign.html, campaign.text, JSON.stringify(campaign.attachments || []), JSON.stringify(campaign.providers || []), JSON.stringify(campaign.lists || []), JSON.stringify(campaign.accounts || []), campaign.accountsRandom ? 1 : 0, now, now);
+    const result = db.prepare("INSERT INTO campaigns (name, subject, preheader, html, text, attachments_json, providers_json, lists_json, accounts_json, accounts_random, tiers_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)").run(campaign.name, campaign.subject, campaign.preheader, campaign.html, campaign.text, JSON.stringify(campaign.attachments || []), JSON.stringify(campaign.providers || []), JSON.stringify(campaign.lists || []), JSON.stringify(campaign.accounts || []), campaign.accountsRandom ? 1 : 0, JSON.stringify(campaign.tiers || []), now, now);
     return { id: Number(result.lastInsertRowid) };
   });
 
@@ -2179,7 +2247,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     if (!existing) fail('Campaign not found', 404);
     if (!['draft', 'failed', 'scheduled'].includes(existing.status)) fail('Only draft, scheduled or failed campaigns can be edited');
     const campaign = campaignBody(request.body || {});
-    db.prepare('UPDATE campaigns SET name = ?, subject = ?, preheader = ?, html = ?, text = ?, attachments_json = ?, providers_json = ?, lists_json = ?, accounts_json = ?, accounts_random = ?, updated_at = ? WHERE id = ?').run(campaign.name, campaign.subject, campaign.preheader, campaign.html, campaign.text, JSON.stringify(campaign.attachments || []), JSON.stringify(campaign.providers || []), JSON.stringify(campaign.lists || []), JSON.stringify(campaign.accounts || []), campaign.accountsRandom ? 1 : 0, new Date().toISOString(), id);
+    db.prepare('UPDATE campaigns SET name = ?, subject = ?, preheader = ?, html = ?, text = ?, attachments_json = ?, providers_json = ?, lists_json = ?, accounts_json = ?, accounts_random = ?, tiers_json = ?, updated_at = ? WHERE id = ?').run(campaign.name, campaign.subject, campaign.preheader, campaign.html, campaign.text, JSON.stringify(campaign.attachments || []), JSON.stringify(campaign.providers || []), JSON.stringify(campaign.lists || []), JSON.stringify(campaign.accounts || []), campaign.accountsRandom ? 1 : 0, JSON.stringify(campaign.tiers || []), new Date().toISOString(), id);
     return { id };
   });
 
@@ -2187,7 +2255,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     const campaign = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(Number(request.params.id));
     if (!campaign) fail('Campaign not found', 404);
     const now = new Date().toISOString();
-    const result = db.prepare("INSERT INTO campaigns (name, subject, preheader, html, text, attachments_json, providers_json, lists_json, accounts_json, accounts_random, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)").run(`${campaign.name} copy`.slice(0, 120), campaign.subject, campaign.preheader || '', campaign.html, campaign.text, campaign.attachments_json || '[]', campaign.providers_json || '[]', campaign.lists_json || '[]', campaign.accounts_json || '[]', campaign.accounts_random || 0, now, now);
+    const result = db.prepare("INSERT INTO campaigns (name, subject, preheader, html, text, attachments_json, providers_json, lists_json, accounts_json, accounts_random, tiers_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)").run(`${campaign.name} copy`.slice(0, 120), campaign.subject, campaign.preheader || '', campaign.html, campaign.text, campaign.attachments_json || '[]', campaign.providers_json || '[]', campaign.lists_json || '[]', campaign.accounts_json || '[]', campaign.accounts_random || 0, campaign.tiers_json || '[]', now, now);
     return { id: Number(result.lastInsertRowid) };
   });
 
@@ -2215,8 +2283,17 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     const condParams = [];
     if (providers.length) { conds.push(`json_extract(COALESCE(custom_json,'{}'), '$.provider') IN (${providers.map(() => '?').join(',')})`); condParams.push(...providers); }
     if (lists.length) { conds.push(`list_name IN (${lists.map(() => '?').join(',')})`); condParams.push(...lists); }
+    let tiers = [];
+    try { tiers = JSON.parse(campaign.tiers_json || '[]').filter((t) => ['hot', 'warm', 'cold'].includes(t)); } catch {}
+    if (tiers.length) {
+      const bits = [];
+      if (tiers.includes('hot')) bits.push('engagement_score >= 70');
+      if (tiers.includes('warm')) bits.push('(engagement_score BETWEEN 31 AND 69)');
+      if (tiers.includes('cold')) bits.push('engagement_score < 31');
+      if (bits.length) conds.push(`(${bits.join(' OR ')})`);
+    }
     const recipients = db.prepare(`SELECT id FROM recipients WHERE ${conds.join(' AND ')}`).all(...condParams);
-    if (!recipients.length) fail(providers.length || lists.length ? 'No confirmed, unsuppressed recipients in the selected audience' : 'No confirmed, unsuppressed recipients are available');
+    if (!recipients.length) fail(providers.length || lists.length || tiers.length ? 'No confirmed, unsuppressed recipients in the selected audience' : 'No confirmed, unsuppressed recipients are available');
     let scheduledFor = null;
     if (request.body?.scheduledFor) {
       const timestamp = Date.parse(request.body.scheduledFor);
@@ -2540,5 +2617,130 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     if (request.method !== 'GET' || request.url.startsWith('/api/') || !existsSync(clientDist)) return reply.code(404).send({ error: 'Not found' });
     return reply.sendFile('index.html');
   });
+
+  // ── AI TASKS — scheduled autonomous actions, no operator needed ──
+  app.get('/api/ai/tasks', async () => ({
+    tasks: db.prepare('SELECT id, text, run_at, repeat, status, last_result, created_at FROM ai_tasks ORDER BY run_at ASC').all(),
+  }));
+
+  app.post('/api/ai/tasks', async (request) => {
+    const body = request.body || {};
+    const taskText = text(body.text, 'text', 2000, true);
+    const at = Date.parse(String(body.runAt || ''));
+    if (!Number.isFinite(at)) fail('runAt must be a date/time');
+    if (at > Date.now() + 366 * 86400000) fail('runAt is too far out');
+    const repeat = ['', 'daily', 'weekly'].includes(body.repeat) ? body.repeat : '';
+    const now = new Date().toISOString();
+    const r = db.prepare('INSERT INTO ai_tasks (text, run_at, repeat, status, last_result, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(taskText, new Date(at).toISOString(), repeat, 'pending', '', now, now);
+    return { id: Number(r.lastInsertRowid) };
+  });
+
+  app.delete('/api/ai/tasks/:id', async (request) => {
+    db.prepare('DELETE FROM ai_tasks WHERE id = ?').run(Number(request.params.id));
+    return { ok: true };
+  });
+
+  // Task → action translation is done by the configured AI; the whitelist of
+  // actions then executes through the suite's own API so every safeguard in the
+  // endpoints (validation, warm-up, engine checks) still applies.
+  const AI_TASK_ROUTES = {
+    queue_campaign: (p) => ['POST', `/api/campaigns/${Number(p.campaignId)}/queue`, {}],
+    schedule_campaign: (p) => ['POST', `/api/campaigns/${Number(p.campaignId)}/queue`, { scheduledFor: String(p.at || '') }],
+    pause_campaign: (p) => ['POST', `/api/campaigns/${Number(p.campaignId)}/pause`, {}],
+    resume_campaign: (p) => ['POST', `/api/campaigns/${Number(p.campaignId)}/resume`, {}],
+    retry_campaign: (p) => ['POST', `/api/campaigns/${Number(p.campaignId)}/retry`, {}],
+    cancel_campaign: (p) => ['POST', `/api/campaigns/${Number(p.campaignId)}/cancel`, {}],
+    verify_accounts: () => ['POST', '/api/smtp/verify-all', {}],
+    send_test: (p) => ['POST', '/api/test-send', { to: String(p.to || ''), subject: String(p.subject || ''), html: String(p.html || '') }],
+    reset_quota: (p) => ['POST', `/api/smtp/accounts/${Number(p.accountId)}/reset-quota`, {}],
+    extract_contacts: (p) => ['POST', `/api/smtp/accounts/${Number(p.accountId)}/extract-contacts`, { list: String(p.list || '') }],
+    probe_account: (p) => ['POST', `/api/smtp/accounts/${Number(p.accountId)}/probe`, {}],
+  };
+
+  async function callSuite(method, path, body) {
+    const res = await fetch(`http://127.0.0.1:${config.port}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${config.dashboardToken}` },
+      body: JSON.stringify(body || {}),
+      signal: AbortSignal.timeout(120000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `${res.status}`);
+    return data;
+  }
+
+  let aiTaskRunning = false;
+  async function runDueAiTasks() {
+    if (aiTaskRunning) return;
+    aiTaskRunning = true;
+    try {
+      const now = new Date().toISOString();
+      const due = db.prepare("SELECT * FROM ai_tasks WHERE status = 'pending' AND run_at <= ? ORDER BY run_at LIMIT 5").all(now);
+      if (!due.length) return;
+      const row = db.prepare('SELECT ai_endpoint, ai_key_encrypted, ai_model FROM send_settings WHERE id = 1').get() || {};
+      const endpoint = row.ai_endpoint || '';
+      const aiKey = row.ai_key_encrypted && config ? decryptSecret(row.ai_key_encrypted, config.credentialKey) : '';
+      const camps = db.prepare("SELECT id, name, subject, status FROM campaigns ORDER BY id DESC LIMIT 20").all();
+      const accts = db.prepare("SELECT id, label, username, auth_type, enabled FROM smtp_accounts ORDER BY id LIMIT 40").all();
+      for (const task of due) {
+        db.prepare("UPDATE ai_tasks SET status = 'running', updated_at = ? WHERE id = ?").run(now, task.id);
+        try {
+          if (!endpoint || !aiKey) throw new Error('AI not configured — set endpoint + key in SETTINGS');
+          const sys = `You are the Rubicon Email Suite scheduler executor. Translate the operator's task into JSON actions and NOTHING else — no prose, no fences.
+
+Reply shape: {"actions":[{"type":"<action>","campaignId":<id>|"accountId":<id>|"at":"<iso>"|"to":"<email>"|"list":"<name>"|"enabled":true}], "note":"<one-line summary>"}
+
+Allowed actions: queue_campaign(campaignId), schedule_campaign(campaignId+at ISO), pause_campaign(campaignId), resume_campaign(campaignId), retry_campaign(campaignId), cancel_campaign(campaignId), verify_accounts(), send_test(to), toggle_account(accountId+enabled), reset_quota(accountId), extract_contacts(accountId+list), probe_account(accountId).
+Rules: pick ids ONLY from the state below; if the task names a campaign/account by name or subject, resolve it to its id. Ambiguous or impossible task → {"actions":[],"note":"why it can't run"}. Maximum 5 actions. Never invent ids.
+
+STATE — campaigns: ${JSON.stringify(camps)} | accounts: ${JSON.stringify(accts)} | now: ${now}`;
+          const { content } = await aiChatRequest({
+            endpoint, aiKey, model: row.ai_model, timeoutMs: 90000,
+            messages: [{ role: 'system', content: sys }, { role: 'user', content: task.text }],
+          });
+          const raw = String(content || '');
+          const json = raw.match(/\{[\s\S]*\}/)?.[0];
+          if (!json) throw new Error(`executor reply was not JSON: ${raw.slice(0, 120)}`);
+          const plan = JSON.parse(json);
+          const results = [];
+          for (const a of (plan.actions || []).slice(0, 5)) {
+            if (a?.type === 'toggle_account') {
+              db.prepare('UPDATE smtp_accounts SET enabled = ?, updated_at = ? WHERE id = ?').run(a.enabled !== false ? 1 : 0, new Date().toISOString(), Number(a.accountId));
+              results.push('toggle_account: ok');
+              continue;
+            }
+            const route = AI_TASK_ROUTES[a?.type];
+            if (!route) { results.push(`${a?.type}: skipped — unknown action`); continue; }
+            try {
+              const [method, path, body] = route(a);
+              await callSuite(method, path, body);
+              results.push(`${a.type}: ok`);
+            } catch (e) { results.push(`${a.type}: ${String(e.message || e).slice(0, 140)}`); }
+          }
+          const note = String(plan.note || '').slice(0, 300);
+          const lastResult = [note, ...results].filter(Boolean).join(' · ').slice(0, 900);
+          emit('ai_task', { taskId: task.id, text: task.text.slice(0, 120), result: lastResult });
+          if (task.repeat === 'daily' || task.repeat === 'weekly') {
+            const next = new Date(Date.parse(task.run_at) + (task.repeat === 'daily' ? 86400000 : 7 * 86400000));
+            db.prepare("UPDATE ai_tasks SET status = 'pending', run_at = ?, last_result = ?, updated_at = ? WHERE id = ?")
+              .run(next.toISOString(), lastResult, new Date().toISOString(), task.id);
+          } else {
+            db.prepare("UPDATE ai_tasks SET status = 'done', last_result = ?, updated_at = ? WHERE id = ?")
+              .run(lastResult, new Date().toISOString(), task.id);
+          }
+        } catch (e) {
+          db.prepare("UPDATE ai_tasks SET status = 'failed', last_result = ?, updated_at = ? WHERE id = ?")
+            .run(String(e.message || e).slice(0, 500), new Date().toISOString(), task.id);
+          emit('ai_task', { taskId: task.id, text: task.text.slice(0, 120), error: String(e.message || e).slice(0, 200) });
+        }
+      }
+    } finally {
+      aiTaskRunning = false;
+    }
+  }
+  const aiTaskTimer = setInterval(runDueAiTasks, 30000);
+  aiTaskTimer.unref();
+
   return app;
 }

@@ -1278,6 +1278,9 @@ export default function App() {
   const [recipList, setRecipList] = useState('all');
   const [importList, setImportList] = useState('');
   const [aiSubjectBusy, setAiSubjectBusy] = useState(false);
+  const [aiTaskText, setAiTaskText] = useState('');
+  const [aiTaskAt, setAiTaskAt] = useState('');
+  const [aiTaskRepeat, setAiTaskRepeat] = useState('');
   const [recipPage, setRecipPage] = useState(1);
   const [recipRows, setRecipRows] = useState([]);
   const [recipTotal, setRecipTotal] = useState(0);
@@ -2254,6 +2257,30 @@ export default function App() {
                               </div>
                             </>
                           )}
+                          <label className="field-label" style={{ marginTop: 10 }}>ENGAGEMENT TIERS <span className="dim">(blank = every tier)</span></label>
+                          <div className="provider-chips">
+                            {[['hot', 'HOT 70+'], ['warm', 'WARM 31-69'], ['cold', 'COLD 0-30']].map(([t, l]) => (
+                              <button
+                                key={t}
+                                type="button"
+                                className={`prov-chip ${(draft.tiers || []).includes(t) ? 'prov-chip-on' : ''}`}
+                                onClick={() => {
+                                  const cur = draft.tiers || [];
+                                  updateDraft('tiers', cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]);
+                                }}
+                              >{l}</button>
+                            ))}
+                          </div>
+                          <div className="btn-row" style={{ marginTop: 10 }}>
+                            <button type="button" className="btn-sm" disabled={busy} title="AI picks the strongest letter from the vault for this audience" onClick={() => run(async () => {
+                              const r = await api(token, '/api/ai/pick-letter', { method: 'POST', body: { goal: draft.subject || draft.name, providers: draft.providers || [], lists: draft.lists || [], tiers: draft.tiers || [] } });
+                              updateDraft('html', r.html);
+                              if (r.text) updateDraft('text', r.text);
+                              if (r.subject && !draft.subject) updateDraft('subject', r.subject);
+                              if (r.preheader && !draft.preheader) updateDraft('preheader', r.preheader);
+                              showNotice(`AI picked "${r.name}" — ${r.why || 'best fit for this audience'}`);
+                            })}>✦ BEST LETTER FOR AUDIENCE</button>
+                          </div>
                         </div>
                       );
                     })()}
@@ -3393,6 +3420,20 @@ sudo tail -f /var/log/maillog`}</pre>
                     <input type="checkbox" checked={settings.warmupEnabled} onChange={(e) => setSettings({ ...settings, warmupEnabled: e.target.checked })} />
                     <span>Automatic warm-up {settings.warmupStartedAt ? <span className="dim">(started {new Date(settings.warmupStartedAt).toLocaleDateString()})</span> : null}</span>
                   </label>
+                  <label className="field-label" style={{ marginTop: 10 }}>PROVIDER PACING <span className="dim">— max sends/min per MX provider, one per line (google=30)</span></label>
+                  <textarea className="w-textarea" rows={3} placeholder={'google=30\nmicrosoft 365=60\nyahoo=20'}
+                    defaultValue={Object.entries(settings.providerRates || {}).map(([k, v]) => `${k}=${v}`).join('\n')}
+                    aria-label="Per-provider send rate limits"
+                    onBlur={(e) => {
+                      const rates = {};
+                      for (const line of e.target.value.split(/\r?\n/)) {
+                        const [k, v] = line.split('=');
+                        const name = (k || '').trim().toLowerCase();
+                        const rate = Number(v);
+                        if (name && rate > 0) rates[name] = rate;
+                      }
+                      setSettings({ ...settings, providerRates: rates });
+                    }} />
                 </div>
 
                 {/* ══ SECTION: INBOX ══ */}
@@ -4147,6 +4188,8 @@ sudo tail -f /var/log/maillog`}</pre>
                       ['IN QUEUE', totals.queued, 'var(--yellow)'],
                       ['RECIPIENTS', state.confirmed, 'var(--cyan)'],
                       ['BOUNCES', (state.bounces || []).length, 'var(--orange, #fb923c)'],
+                      ['BOUNCE %', `${state.rates?.bounceRate ?? 0}%`, (state.rates?.bounceRate || 0) > 5 ? 'var(--red)' : 'var(--green)'],
+                      ['COMPLAINT %', `${state.rates?.complaintRate ?? 0}%`, (state.rates?.complaintRate || 0) > 0.1 ? 'var(--red)' : 'var(--green)'],
                       ['ACCOUNTS', (state.smtpAccounts || []).filter((a) => a.enabled).length, 'var(--txt)'],
                     ].map(([lbl, val, color]) => (
                       <div key={lbl} className="kpi-card">
@@ -4306,6 +4349,44 @@ sudo tail -f /var/log/maillog`}</pre>
                   <div className="pane">
                     <div className="pane-head"><span>LIVE CONSOLE</span><span className="dim">streaming sends · opens · clicks · bounces</span></div>
                     <LiveConsole events={state.events} />
+                  </div>
+
+                  <div className="pane">
+                    <div className="pane-head"><span>AI TASKS <span className="dim">— scheduled commands, runs without you</span></span></div>
+                    <p className="dim-txt">Tell the suite what to do and when — <code>queue the draft at 9am</code>, <code>pause campaign #4 tonight</code>, <code>verify accounts daily at 06:00</code>. At the set time the AI resolves names to ids and executes through the API — no operator needed.</p>
+                    <div className="ab-test-input-row" style={{ alignItems: 'stretch', flexWrap: 'wrap' }}>
+                      <input className="w-input" style={{ flex: '1 1 260px' }} placeholder="e.g. Queue campaign #3 at 09:00 tomorrow" value={aiTaskText}
+                        onChange={(e) => setAiTaskText(e.target.value)} aria-label="Task for the AI to run" />
+                      <input className="w-input" style={{ maxWidth: 200 }} type="datetime-local" value={aiTaskAt} onChange={(e) => setAiTaskAt(e.target.value)} aria-label="Run at" />
+                      <select className="w-select" style={{ maxWidth: 120 }} value={aiTaskRepeat} onChange={(e) => setAiTaskRepeat(e.target.value)} aria-label="Repeat">
+                        <option value="">ONCE</option><option value="daily">DAILY</option><option value="weekly">WEEKLY</option>
+                      </select>
+                      <button className="btn-sm" disabled={busy || !aiTaskText.trim() || !aiTaskAt} onClick={() => run(async () => {
+                        await api(token, '/api/ai/tasks', { method: 'POST', body: { text: aiTaskText.trim(), runAt: new Date(aiTaskAt).toISOString(), repeat: aiTaskRepeat } });
+                        setAiTaskText(''); setAiTaskAt(''); setAiTaskRepeat('');
+                        showNotice('AI task armed.');
+                        await refresh();
+                      })}>[ ARM TASK ]</button>
+                    </div>
+                    {!!(state.aiTasks || []).length && (
+                      <div className="tbl-wrap" style={{ maxHeight: 180, marginTop: 10 }}>
+                        <table className="w-table">
+                          <thead><tr><th>WHEN</th><th>TASK</th><th>REPEAT</th><th>STATUS</th><th>RESULT</th><th></th></tr></thead>
+                          <tbody>
+                            {(state.aiTasks || []).map((t) => (
+                              <tr key={t.id}>
+                                <td className="dim" style={{ whiteSpace: 'nowrap' }}>{new Date(t.run_at).toLocaleString()}</td>
+                                <td>{t.text}</td>
+                                <td className="dim">{(t.repeat || 'once').toUpperCase()}</td>
+                                <td><span className={`badge ${t.status === 'done' ? 'badge-ok' : t.status === 'failed' ? 'badge-fail' : 'badge-def'}`}>{t.status.toUpperCase()}</span></td>
+                                <td className="dim" title={t.last_result}>{(t.last_result || '—').slice(0, 80)}</td>
+                                <td><button className="btn-xs btn-danger" aria-label={`Delete task ${t.id}`} onClick={() => run(async () => { await api(token, `/api/ai/tasks/${t.id}`, { method: 'DELETE' }); await refresh(); })}>✕</button></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
 
                   <div className="pane">

@@ -15,6 +15,7 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
   let lastAttempt = 0;
   let sendCount = 0;
   const preflighted = new Set();
+  const providerLast = {};
 
   function getSettings() {
     const smtp = db.prepare('SELECT rate_per_minute FROM smtp_settings WHERE id = 1').get();
@@ -45,6 +46,7 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
       warmupStartedAt: ss.warmup_started_at || '',
       scheduleEnabled: db.prepare("SELECT value FROM integrations WHERE key = 'schedule_enabled'").get()?.value !== '0',
       capsEnabled: db.prepare("SELECT value FROM integrations WHERE key = 'caps_enabled'").get()?.value === '1',
+      providerRates: (() => { try { return JSON.parse(db.prepare("SELECT value FROM integrations WHERE key = 'provider_rates'").get()?.value || '{}'); } catch { return {}; } })(),
     };
   }
 
@@ -130,6 +132,19 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
         db.prepare("UPDATE deliveries SET next_attempt_at = ? WHERE id = ?").run(new Date(Date.now() + 3600000).toISOString(), row.delivery_id);
         return;
       }
+    }
+    // Per-provider pacing — each MX provider gets its own min gap between sends.
+    let provKey = '';
+    try { provKey = (JSON.parse(row.custom_json || '{}').provider || '').toLowerCase(); } catch {}
+    const provRate = provKey ? (ctx.providerRates || {})[provKey] : null;
+    if (provRate > 0) {
+      const gap = Math.ceil(60000 / provRate);
+      const last = providerLast[provKey] || 0;
+      if (Date.now() - last < gap) {
+        db.prepare('UPDATE deliveries SET next_attempt_at = ? WHERE id = ?').run(new Date(last + gap).toISOString(), row.delivery_id);
+        return;
+      }
+      providerLast[provKey] = Date.now();
     }
     const claimed = db.prepare("UPDATE deliveries SET status = 'sending', attempts = attempts + 1 WHERE id = ? AND status = 'queued'").run(row.delivery_id);
     if (!claimed.changes) return;
