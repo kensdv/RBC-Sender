@@ -147,9 +147,23 @@ function campaignView(row) {
   };
 }
 
+function stripPageHtml(input) {
+  let out = String(input || '');
+  if (!/<!doctype|<html[\s>]/i.test(out)) return out;
+  const styles = [];
+  out = out.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, (m) => { styles.push(m); return ''; });
+  out = out
+    .replace(/<!doctype[^>]*>/gi, '')
+    .replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '')
+    .replace(/<\/?html[^>]*>/gi, '')
+    .replace(/<body([^>]*)>/i, '<div$1>')
+    .replace(/<\/body>/gi, '</div>');
+  return styles.join('\n') + '\n' + out.trim();
+}
+
 function campaignBody(body) {
   const subject = text(body.subject, 'subject', 200, true);
-  const html = String(body.html || '');
+  const html = stripPageHtml(String(body.html || ''));
   const plainText = String(body.text || '');
   if (!html.trim() && !plainText.trim()) fail('HTML or plain-text content is required');
   const attachments = sanitizeAttachments(body.attachments);
@@ -321,7 +335,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       info = await mailer.send({
         campaign: {
           id: 0, name: 'test', subject: text(body.subject || 'Rubicon Email Suite — test email', 'subject', 200),
-          preheader: '', html: body.html || '<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">Rubicon Email Suite test email — the active send engine accepted this message.</div>',
+          preheader: '', html: body.html ? stripPageHtml(String(body.html)) : '<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">Rubicon Email Suite test email — the active send engine accepted this message.</div>',
           text: body.text || 'Rubicon Email Suite test email — the active send engine accepted this message.', attachments: body.attachments || [],
         },
         recipient: { id: 0, email: to, firstName: (to.split('@')[0] || '').split(/[._-]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ') || '', lastName: '', company: '', custom: {} },

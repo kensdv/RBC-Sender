@@ -197,6 +197,8 @@ export function createPlaceholderContext({ recipient, subject = '', totalRecipie
     '++rbc_smtp_user++': localPart,
     '++rbc_date++': dateStr,
     '++rbc_time++': timeStr,
+    '++rbc_year++': String(new Date().getFullYear()),
+    '++rbc_id++': randNum(8),
     '++rbc_short++': redirectUrl || '',
     '++rbc_url++': redirectUrl || '',
     '++rbc_link++': redirectUrl || '',

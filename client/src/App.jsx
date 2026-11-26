@@ -262,6 +262,20 @@ function RbcLogo({ size = 44 }) {
 const DAY_LABELS = { 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat', 7: 'Sun' };
 const fmtMin = (m) => `${String(Math.floor((m ?? 0) / 60)).padStart(2, '0')}:${String((m ?? 0) % 60).padStart(2, '0')}`;
 
+function stripPageHtml(input) {
+  let out = String(input || '');
+  if (!/<!doctype|<html[\s>]/i.test(out)) return out;
+  const styles = [];
+  out = out.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, (m) => { styles.push(m); return ''; });
+  out = out
+    .replace(/<!doctype[^>]*>/gi, '')
+    .replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '')
+    .replace(/<\/?html[^>]*>/gi, '')
+    .replace(/<body([^>]*)>/i, '<div$1>')
+    .replace(/<\/body>/gi, '</div>');
+  return styles.join('\n') + '\n' + out.trim();
+}
+
 const LETTER_TEMPLATES = [
   {
     label: '— premium templates —',
@@ -2468,13 +2482,15 @@ export default function App() {
                       <label className="field-label">LETTER TEMPLATE <span className="dim">(loads subject + body — placeholders render per recipient)</span></label>
                       <select className="w-select" value="" onChange={(e) => {
                         const all = [...LETTER_TEMPLATES, ...extraTemplates];
-                        const t = all[Number(e.target.value)];
+                        const idx = e.target.value === 'random' ? Math.floor(Math.random() * all.length) : Number(e.target.value);
+                        const t = all[idx];
                         if (!t || !t.html) { e.target.value = ''; return; }
-                        setDraft({ ...draft, name: draft.name || t.label.replace(/^✉\s*/, ''), subject: t.subject || draft.subject, html: t.html, text: t.text || draft.text });
+                        setDraft({ ...draft, name: draft.name || t.label.replace(/^✉\s*/, ''), subject: t.subject || draft.subject, html: stripPageHtml(t.html), text: t.text || draft.text });
                         setBodyMode('paste');
                         e.target.value = '';
                       }}>
                         <option value="">— select a template to load —</option>
+                        <option value="random">⚄ RANDOM — pick one for me</option>
                         {LETTER_TEMPLATES.map((t, i) => <option key={i} value={i} disabled={!t.html}>{t.label}</option>)}
                         {extraTemplates.length > 0 && <option disabled>── {extraTemplates.length} letter imports ──</option>}
                         {extraTemplates.map((t, i) => <option key={`x${i}`} value={LETTER_TEMPLATES.length + i}>{t.label}</option>)}
