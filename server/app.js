@@ -1,7 +1,4 @@
-
-  const tiers = Array.isArray(body.tiers)
-    ? body.tiers.map((t) => String(t)).filter((t) => ['hot', 'warm', 'cold'].includes(t)).slice(0, 3)
-    : [];import { existsSync, mkdirSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { resolve, basename, dirname, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -164,6 +161,9 @@ function campaignBody(body) {
     : [];
   const accounts = Array.isArray(body.accounts)
     ? body.accounts.map((a) => Number(a)).filter((n) => Number.isInteger(n) && n > 0).slice(0, 300)
+    : [];
+  const tiers = Array.isArray(body.tiers)
+    ? body.tiers.map((t) => String(t)).filter((t) => ['hot', 'warm', 'cold'].includes(t)).slice(0, 3)
     : [];
   return { name: text(body.name, 'name', 120) || subject, subject, preheader: text(body.preheader || '', 'preheader', 300), html, text: plainText, attachments, providers, lists, accounts, accountsRandom: body.accountsRandom === true, tiers };
 }
