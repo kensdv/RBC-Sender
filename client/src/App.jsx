@@ -3106,9 +3106,16 @@ sudo tail -f /var/log/maillog`}</pre>
                   {msRtImportOpen && (
                     <div className="cfg-block" style={{marginBottom:12}}>
                       <div className="cfg-block-title">[ IMPORT MS REFRESH-TOKEN MAILBOXES ]</div>
-                      <p className="dim-txt">One per line — <code>client_id:refresh_token</code>, <code>email:client_id:rt</code>, app creds <code>client_id:client_secret:tenant_id</code> (optionally +mailbox email), or JSON <code>{'{"client_id":"…","refresh_token":"…"}'}</code> / <code>{'{"client_id":"…","client_secret":"…","tenant":"…","email":"…"}'}</code>. App creds without a mailbox import <b>every mailbox in the tenant</b> (needs User.Read.All). All send via Graph sendMail inside the normal rotation.</p>
+                      <p className="dim-txt">One per line — <code>client_id:refresh_token</code>, <code>email:client_id:rt</code>, app creds <code>client_id:client_secret:tenant_id</code> (optionally +mailbox email), bare <code>1.xxx</code> refresh tokens, JSON dumps <code>{'{"access_token":"eyJ…","refresh_token":"…"}'}</code> (client + tenant harvested from the JWT — multiple objects in one paste OK), or a <code>rubicon_backup</code> file. App creds without a mailbox import <b>every mailbox in the tenant</b> (needs User.Read.All). All send via Graph sendMail inside the normal rotation.</p>
                       <textarea className="w-textarea code-ta" rows={5} value={msRtData} onChange={(e) => setMsRtData(e.target.value)} placeholder="9e5f94bc-e8b4-4d4e-8c0a-… : M.C540_BAY…" />
                       <div style={{display:'flex',alignItems:'center',gap:10,marginTop:8,flexWrap:'wrap'}}>
+                        <label className="btn-sm" style={{margin:0,cursor:'pointer'}}>[ SELECT FILE ]
+                          <input type="file" accept=".txt,.json,.csv,.log,.bak" style={{display:'none'}} onChange={async (e) => {
+                            const f = e.target.files[0];
+                            if (f) setMsRtData(await f.text());
+                            e.target.value = '';
+                          }} />
+                        </label>
                         <label className="field-label" style={{margin:0}}>DAILY QUOTA / MAILBOX</label>
                         <input className="w-input" type="number" min="0" max="100000" style={{width:110}} value={msRtQuota} onChange={(e) => setMsRtQuota(Number(e.target.value))} />
                         <button className="btn-sm" disabled={busy || !msRtData.trim()} onClick={() => run(async () => {
