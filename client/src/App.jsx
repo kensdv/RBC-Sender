@@ -1812,7 +1812,7 @@ export default function App() {
       {/* ── SIDEBAR ── */}
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <RbcLogo size={34} />
+          <RbcLogo size={46} />
           <div>
             <span className="sb-wordmark">RUBICON<span>EMAIL SUITE</span></span>
             {versionInfo && (
