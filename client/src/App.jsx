@@ -1737,6 +1737,23 @@ export default function App() {
   function updateDraft(k, v) { setDraft((c) => ({ ...c, [k]: v })); }
   function updateSettings(k, v) { setSettings((c) => ({ ...c, [k]: v })); }
 
+  async function ensureDkimKey() {
+    let domain = (settings.dkimDomain || '').trim().toLowerCase();
+    if (!domain) {
+      const ans = await uiPrompt('Domain to sign outgoing mail with?', { title: 'DKIM DOMAIN', placeholder: 'yourdomain.com', confirmLabel: 'GENERATE' });
+      if (ans === null) return false;
+      domain = ans.trim().toLowerCase();
+    }
+    const selector = (settings.dkimSelector || '').trim().toLowerCase() || 'rbc';
+    const r = await api(token, '/api/settings/dkim-generate', { method: 'POST', body: { domain, selector } });
+    updateSettings('dkimDomain', r.domain);
+    updateSettings('dkimSelector', r.selector);
+    updateSettings('dkimPublicKey', r.publicKey);
+    updateSettings('dkimConfigured', true);
+    updateSettings('dkimPrivateKey', '');
+    return true;
+  }
+
   function execEditPaste(cmd, val = null) {
     pasteRef.current.focus();
     document.execCommand(cmd, false, val);
@@ -3641,7 +3658,12 @@ sudo tail -f /var/log/maillog`}</pre>
                         ['api',    'HTTP API',    'SendGrid, SES, Mailgun, Postmark, Brevo…'],
                       ].map(([v, lbl, desc]) => (
                         <label key={v} className={`mode-card ${sendMode === v ? 'active' : ''}`}>
-                          <input type="radio" name="sendMode" value={v} checked={sendMode === v} onChange={() => updateSettings('sendMode', v)} />
+                          <input type="radio" name="sendMode" value={v} checked={sendMode === v} onChange={() => {
+                            updateSettings('sendMode', v);
+                            if (v === 'direct' && !(settings.dkimEnabled && settings.dkimConfigured)) {
+                              showNotice('DIRECT MX sends unsigned mail — run DKIM SIGNING setup below before launching.', 'err');
+                            }
+                          }} />
                           <span className="mc-lbl">{lbl}</span>
                           <span className="mc-desc">{desc}</span>
                         </label>
@@ -3653,6 +3675,14 @@ sudo tail -f /var/log/maillog`}</pre>
                   {(sendMode === 'direct' || sendMode === 'socks5' || sendMode === 'api') && (
                     <div className="cfg-block">
                       <div className="cfg-block-title">[ DIRECT CONFIG ]</div>
+                      {sendMode === 'direct' && !(settings.dkimEnabled && settings.dkimConfigured) && (
+                        <div className="dkim-warn">
+                          ⚠ DIRECT MX + no DKIM — receivers get unsigned mail, expect spam-folder placement.
+                          <button className="btn-sm" disabled={busy} onClick={() => run(async () => {
+                            if (await ensureDkimKey()) { updateSettings('dkimEnabled', true); showNotice('DKIM key generated — publish the TXT records in DKIM SIGNING below.'); }
+                          })}>SET UP DKIM NOW</button>
+                        </div>
+                      )}
                       <div className="form-grid">
                         <div><label className="field-label">FROM NAME</label><input className="w-input" value={settings.directFromName} onChange={(e) => updateSettings('directFromName', e.target.value)} /></div>
                         <div><label className="field-label">FROM EMAIL</label><input className="w-input" type="email" value={settings.directFromEmail} onChange={(e) => updateSettings('directFromEmail', e.target.value)} /></div>
@@ -3933,7 +3963,13 @@ sudo tail -f /var/log/maillog`}</pre>
                   <div className="cfg-block">
                     <div className="cfg-block-title">[ DKIM SIGNING ]</div>
                     <p className="dim-txt">Sign outgoing mail with a DKIM key so receivers see a valid signature. Key is stored encrypted.</p>
-                    <div className="toggle-row" onClick={() => updateSettings('dkimEnabled', !settings.dkimEnabled)}>
+                    <div className="toggle-row" onClick={() => {
+                      if (settings.dkimEnabled) { updateSettings('dkimEnabled', false); return; }
+                      updateSettings('dkimEnabled', true);
+                      if (!settings.dkimConfigured) run(async () => {
+                        if (await ensureDkimKey()) showNotice('DKIM key generated — publish the TXT records below.');
+                      });
+                    }}>
                       <div>
                         <div className="toggle-lbl">ENABLE DKIM</div>
                         <div className="toggle-desc">{settings.dkimConfigured ? 'Key configured — enter new key to rotate' : 'No key stored yet'}</div>
@@ -3956,18 +3992,7 @@ sudo tail -f /var/log/maillog`}</pre>
                         <textarea className="w-textarea code-ta" rows={5} value={settings.dkimPrivateKey || ''} onChange={(e) => updateSettings('dkimPrivateKey', e.target.value)} placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----" />
                         <div className="btn-row" style={{ margin: '8px 0' }}>
                           <button className="btn-sm" disabled={busy} onClick={() => run(async () => {
-                            let domain = (settings.dkimDomain || '').trim().toLowerCase();
-                            if (!domain) {
-                              domain = await uiPrompt('Domain to sign mail with?', { title: 'DKIM DOMAIN', placeholder: 'yourdomain.com', confirmLabel: 'GENERATE' });
-                              if (domain === null) return;
-                              domain = domain.trim().toLowerCase();
-                            }
-                            const selector = (settings.dkimSelector || '').trim().toLowerCase() || 'rbc';
-                            const r = await api(token, '/api/settings/dkim-generate', { method: 'POST', body: { domain, selector } });
-                            updateSettings('dkimDomain', r.domain); updateSettings('dkimSelector', r.selector);
-                            updateSettings('dkimPublicKey', r.publicKey); updateSettings('dkimConfigured', true);
-                            updateSettings('dkimPrivateKey', '');
-                            showNotice(`DKIM key generated — ${r.selector}.${r.domain}. Publish the TXT records below.`);
+                            if (await ensureDkimKey()) showNotice(`DKIM key generated — publish the TXT records below.`);
                           })}>✦ GENERATE DKIM KEY</button>
                           {!!settings.dkimPublicKey && <button className="btn-sm" onClick={() => { navigator.clipboard.writeText(`v=DKIM1; k=rsa; p=${settings.dkimPublicKey}`); showNotice('DKIM TXT value copied.'); }}>COPY TXT VALUE</button>}
                         </div>

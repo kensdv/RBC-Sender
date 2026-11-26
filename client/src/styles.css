@@ -1532,3 +1532,8 @@ details.help-sec[open] summary::before { content: 'v '; }
 .chat-ic { background: rgba(61,255,162,0.1); border: 1px solid rgba(61,255,162,0.2); border-radius: 3px; padding: 0 4px; font-size: 11px; font-family: 'Cascadia Code', Consolas, monospace; color: #9dffc8; }
 .chat-msg-text strong { color: #4dffab; font-weight: 700; }
 .chat-msg-text em { color: #e8fff1; font-style: italic; }
+
+/* dkim direct-mx warning */
+.dkim-warn { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; background: rgba(255,180,60,0.08); border: 1px solid rgba(255,180,60,0.4); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; color: #ffd28a; font-size: 12px; }
+.dkim-warn .btn-sm { border-color: rgba(255,180,60,0.6); color: #ffd28a; }
+.dkim-warn .btn-sm:hover { background: rgba(255,180,60,0.15); }
