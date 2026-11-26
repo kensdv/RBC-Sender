@@ -108,6 +108,7 @@ function loadSendSettings(db, config = null) {
     attachFormats: (() => { try { return JSON.parse(row.attach_formats_json || '[]'); } catch { return []; } })(),
     imageRecompress: Boolean(row.image_recompress),
     sendDays: (() => { try { return JSON.parse(row.send_days_json || '[]'); } catch { return []; } })(),
+    poolAccountIds: (() => { try { return JSON.parse(db.prepare("SELECT value FROM integrations WHERE key = 'pool_account_ids'").get()?.value || '[]'); } catch { return []; } })(),
     sendFromMin: row.send_from_min ?? 480,
     sendToMin: row.send_to_min ?? 1200,
     maxPerHour: row.max_per_hour ?? 5000,
@@ -390,6 +391,7 @@ export function publicSendSettings(db) {
     attachFormats: (() => { try { return JSON.parse(row.attach_formats_json || '[]'); } catch { return []; } })(),
     imageRecompress: Boolean(row.image_recompress),
     sendDays: (() => { try { return JSON.parse(row.send_days_json || '[]'); } catch { return []; } })(),
+    poolAccountIds: (() => { try { return JSON.parse(db.prepare("SELECT value FROM integrations WHERE key = 'pool_account_ids'").get()?.value || '[]'); } catch { return []; } })(),
     sendFromMin: row.send_from_min ?? 480,
     sendToMin: row.send_to_min ?? 1200,
     maxPerHour: row.max_per_hour ?? 5000,
@@ -408,10 +410,17 @@ export function publicSendSettings(db) {
 // ── SMTP account pool ──────────────────────────────────────────────
 let smtpCursor = 0;
 
-function loadSmtpPool(db, config) {
+function poolScopeIds(db) {
+  try { return JSON.parse(db.prepare("SELECT value FROM integrations WHERE key = 'pool_account_ids'").get()?.value || '[]').filter((n) => Number.isFinite(n)); } catch { return []; }
+}
+
+function loadSmtpPool(db, config, scopeIds = null) {
   const now = new Date().toISOString();
   const today = now.slice(0, 10);
+  const globalScope = poolScopeIds(db);
   const rows = db.prepare('SELECT * FROM smtp_accounts WHERE enabled = 1').all()
+    .filter((r) => !globalScope.length || globalScope.includes(r.id))
+    .filter((r) => !scopeIds?.length || scopeIds.includes(r.id))
     .filter((r) => !r.cooldown_until || r.cooldown_until <= now)
     // daily quota: enforced when the counter belongs to today; a stale date resets on next send
     .filter((r) => !(r.daily_quota > 0 && r.sent_date === today && (r.sent_today || 0) >= r.daily_quota));
@@ -1516,13 +1525,25 @@ export function createMailer({ db, config }) {
         return info;
       };
 
+      // Campaign-scoped sender subset + shuffle flag (empty = every enabled sender)
+      const scopeIds = Array.isArray(campaign?.accountIds) ? campaign.accountIds.filter((n) => Number.isFinite(n)) : [];
+      const shuffled = (pool) => {
+        const arr = pool.slice();
+        for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; }
+        return arr;
+      };
+      const orderPool = (pool) => {
+        if (campaign?.accountsRandom) return shuffled(pool);
+        return pool.length > 1 ? [...pool.slice(smtpCursor % pool.length), ...pool.slice(0, smtpCursor % pool.length)] : pool;
+      };
+
       // ── OAuth API engines ──
       if (mode === 'graph') {
         // Imported MS mailboxes ride the rotation first; single engine config is the fallback
-        const msPool = loadSmtpPool(db, config).filter((a) => a.authType === 'ms_rt' || a.authType === 'ms_cc');
+        const msPool = loadSmtpPool(db, config, scopeIds).filter((a) => a.authType === 'ms_rt' || a.authType === 'ms_cc');
         if (msPool.length) {
-          const order = msPool.length > 1 ? [...msPool.slice(smtpCursor % msPool.length), ...msPool.slice(0, smtpCursor % msPool.length)] : msPool;
-          smtpCursor += msPool.length > 1 ? 1 : 0;
+          const order = orderPool(msPool);
+          smtpCursor += msPool.length > 1 && !campaign?.accountsRandom ? 1 : 0;
           let msErr = null;
           for (const acct of order) {
             try { return await sendViaMsAccount(acct); }
@@ -1551,13 +1572,13 @@ export function createMailer({ db, config }) {
       }
 
       // ── SMTP pool with round-robin + failover ──
-      const pool = mode === 'smtp' ? loadSmtpPool(db, config) : [null];
+      const pool = mode === 'smtp' ? loadSmtpPool(db, config, scopeIds) : [null];
       if (mode === 'smtp' && !pool.length) {
         throw Object.assign(new Error('Configure at least one SMTP account'), { statusCode: 400 });
       }
-      // rotate starting point
-      const order = pool.length > 1 ? [...pool.slice(smtpCursor % pool.length), ...pool.slice(0, smtpCursor % pool.length)] : pool;
-      smtpCursor += pool.length > 1 ? 1 : 0;
+      // rotate starting point (or shuffle when the campaign asks for random)
+      const order = orderPool(pool);
+      smtpCursor += pool.length > 1 && !campaign?.accountsRandom ? 1 : 0;
 
       let lastError = null;
       for (const acct of order) {

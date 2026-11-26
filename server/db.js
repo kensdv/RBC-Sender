@@ -268,6 +268,8 @@ export function openDatabase(path) {
   if (!campaignCols.has('paused')) db.exec("ALTER TABLE campaigns ADD COLUMN paused INTEGER NOT NULL DEFAULT 0");
   if (!campaignCols.has('send_time_optimization_enabled')) db.exec("ALTER TABLE campaigns ADD COLUMN send_time_optimization_enabled INTEGER NOT NULL DEFAULT 0");
   if (!campaignCols.has('lists_json')) db.exec("ALTER TABLE campaigns ADD COLUMN lists_json TEXT NOT NULL DEFAULT '[]'");
+  if (!campaignCols.has('accounts_json')) db.exec("ALTER TABLE campaigns ADD COLUMN accounts_json TEXT NOT NULL DEFAULT '[]'");
+  if (!campaignCols.has('accounts_random')) db.exec("ALTER TABLE campaigns ADD COLUMN accounts_random INTEGER NOT NULL DEFAULT 0");
   const recipientCols = new Set(db.prepare('PRAGMA table_info(recipients)').all().map((c) => c.name));
   if (!recipientCols.has('timezone_guessed')) db.exec("ALTER TABLE recipients ADD COLUMN timezone_guessed TEXT NOT NULL DEFAULT ''");
   if (!recipientCols.has('engagement_score')) db.exec("ALTER TABLE recipients ADD COLUMN engagement_score INTEGER NOT NULL DEFAULT 0");

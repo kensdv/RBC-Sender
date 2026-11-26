@@ -1277,6 +1277,7 @@ export default function App() {
   const [engagementTier, setEngagementTier] = useState('all');
   const [recipList, setRecipList] = useState('all');
   const [importList, setImportList] = useState('');
+  const [aiSubjectBusy, setAiSubjectBusy] = useState(false);
   const [recipPage, setRecipPage] = useState(1);
   const [recipRows, setRecipRows] = useState([]);
   const [recipTotal, setRecipTotal] = useState(0);
@@ -2222,6 +2223,33 @@ export default function App() {
                                 ))}
                                 {(draft.lists || []).length > 0 && (
                                   <button type="button" className="prov-chip prov-chip-clear" onClick={() => updateDraft('lists', [])}>ALL LISTS</button>
+                                )}
+                              </div>
+                            </>
+                          )}
+                          {!!(state.smtpAccounts || []).length && (
+                            <>
+                              <label className="field-label" style={{ marginTop: 10 }}>SEND ACCOUNTS <span className="dim">(blank = all enabled senders)</span></label>
+                              <div className="provider-chips">
+                                {state.smtpAccounts.filter((a) => a.enabled).map((a) => (
+                                  <button
+                                    key={a.id}
+                                    type="button"
+                                    className={`prov-chip ${(draft.accounts || []).includes(a.id) ? 'prov-chip-on' : ''}`}
+                                    onClick={() => {
+                                      const cur = draft.accounts || [];
+                                      updateDraft('accounts', cur.includes(a.id) ? cur.filter((x) => x !== a.id) : [...cur, a.id]);
+                                    }}
+                                  >{a.label || a.username} <span className="prov-count">{a.authType === 'ms_rt' ? 'RT' : a.authType === 'ms_cc' ? 'CC' : 'SMTP'}</span></button>
+                                ))}
+                                <button
+                                  type="button"
+                                  className={`prov-chip ${draft.accountsRandom ? 'prov-chip-on' : ''}`}
+                                  title="Shuffle the send order instead of round-robin"
+                                  onClick={() => updateDraft('accountsRandom', !draft.accountsRandom)}
+                                >⚄ RANDOM</button>
+                                {(draft.accounts || []).length > 0 && (
+                                  <button type="button" className="prov-chip prov-chip-clear" onClick={() => updateDraft('accounts', [])}>ALL SENDERS</button>
                                 )}
                               </div>
                             </>
@@ -3206,6 +3234,33 @@ sudo tail -f /var/log/maillog`}</pre>
                     </div>
                   )}
                   <p className="dim-txt">Sends rotate across enabled accounts; failures cool an account down and fail over to the next. VERIFY ALL handshakes every account — dead ones drop out of rotation for 6h. The legacy config above acts as fallback when the pool is empty.</p>
+                  {!!(state.smtpAccounts || []).length && (
+                    <div className="audience-block" style={{ marginBottom: 10 }}>
+                      <label className="field-label">ACTIVE SENDERS <span className="dim">— which mailboxes this suite sends from (blank = all enabled)</span></label>
+                      <div className="provider-chips">
+                        {state.smtpAccounts.map((a) => {
+                          const cur = settings.poolAccountIds || [];
+                          const on = !cur.length || cur.includes(a.id);
+                          return (
+                            <button
+                              key={a.id}
+                              type="button"
+                              className={`prov-chip ${on ? 'prov-chip-on' : ''}`}
+                              title={a.enabled ? `${a.username} — ${a.fromEmail || 'no from set'}` : `${a.username} (disabled)`}
+                              onClick={() => {
+                                const next = cur.includes(a.id) ? cur.filter((x) => x !== a.id) : [...cur, a.id];
+                                setSettings({ ...settings, poolAccountIds: next });
+                              }}
+                            >{a.label || a.username} <span className="prov-count">{a.authType === 'ms_rt' ? 'RT' : a.authType === 'ms_cc' ? 'CC' : 'SMTP'}{!a.enabled ? ' · OFF' : ''}</span></button>
+                          );
+                        })}
+                        {!!(settings.poolAccountIds || []).length && (
+                          <button type="button" className="prov-chip prov-chip-clear" onClick={() => setSettings({ ...settings, poolAccountIds: [] })}>ALL</button>
+                        )}
+                      </div>
+                      <p className="dim-txt" style={{ fontSize: 10, marginTop: 4 }}>Picks who can send — hit SAVE SETTINGS to persist. Campaigns can narrow it further per-send.</p>
+                    </div>
+                  )}
                   <div className="tbl-wrap" style={{maxHeight:240}}>
                     <table className="w-table">
                       <thead><tr><th>LABEL</th><th>TYPE</th><th>HOST</th><th>USER</th><th>FROM</th><th>W</th><th>QUOTA</th><th>STATE</th><th></th></tr></thead>
@@ -4579,6 +4634,33 @@ client_id:secret:tenant            app creds (no RT)
             <div className="dlg-title">SUBJECT A/B TEST</div>
             <div className="dlg-msg">
               <p className="dim-txt">Campaign #{abTestCampaignId} — spin multiple subject variants, split-test across recipients, track open/click rates.</p>
+              <div className="ab-test-input-row" style={{ marginBottom: 8 }}>
+                <button className="btn-sm" disabled={aiSubjectBusy} title="AI generates subject variants from the letter" onClick={async () => {
+                  setAiSubjectBusy(true);
+                  try {
+                    const res = await api(token, '/api/ai/assist', {
+                      method: 'POST',
+                      body: {
+                        prompt: 'Write 6 alternative subject lines for this email campaign. Rules: each on its own line, under 60 characters, varied tone — no numbering, no quotes, no explanations, no preamble.',
+                        subject: draft.subject, html: draft.html, text: draft.text,
+                      },
+                    });
+                    const lines = String(res.result || '').split(/\r?\n/)
+                      .map((l) => l.replace(/^\s*[\d\-•\*\.]+[\.\)]?\s*/, '').replace(/^["']|["']$/g, '').trim())
+                      .filter((l) => l.length >= 4 && l.length <= 120)
+                      .slice(0, 10);
+                    if (!lines.length) { showNotice('AI returned no usable subject lines.', 'err'); return; }
+                    await api(token, `/api/campaigns/${abTestCampaignId}/subject-variants`, {
+                      method: 'POST',
+                      body: { subjects: [...subjectVariants.map((v) => v.subject), ...lines] },
+                    });
+                    const r = await api(token, `/api/campaigns/${abTestCampaignId}/subject-variants`);
+                    setSubjectVariants(r || []);
+                    showNotice(`${lines.length} AI subject variant(s) added.`);
+                  } catch (err) { showNotice(`AI autofill failed: ${err.message}`, 'err'); }
+                  finally { setAiSubjectBusy(false); }
+                }}>{aiSubjectBusy ? '✦ THINKING…' : '✦ AI AUTOFILL'}</button>
+              </div>
               <div className="ab-test-input-row">
                 <input
                   className="w-input"

@@ -95,7 +95,7 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
   }
 
   const ROW_SELECT = `
-    SELECT d.id AS delivery_id, d.attempts, d.variant_id, c.id AS campaign_id, c.name, c.subject, c.preheader, c.html, c.text, c.attachments_json, c.send_time_optimization_enabled,
+    SELECT d.id AS delivery_id, d.attempts, d.variant_id, c.id AS campaign_id, c.name, c.subject, c.preheader, c.html, c.text, c.attachments_json, c.send_time_optimization_enabled, c.accounts_json, c.accounts_random,
       r.id AS recipient_id, r.email, r.first_name, r.last_name, r.company, r.custom_json, r.timezone_guessed
     FROM deliveries d
     JOIN campaigns c ON c.id = d.campaign_id
@@ -114,7 +114,9 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
       const v = db.prepare('SELECT subject FROM subject_variants WHERE id = ?').get(row.variant_id);
       if (v?.subject) subject = v.subject;
     }
-    return { id: row.campaign_id, name: row.name, subject, preheader: row.preheader, html: row.html, text: row.text, attachments: row.attachments_json };
+    let accountIds = [];
+    try { accountIds = JSON.parse(row.accounts_json || '[]').filter((n) => Number.isFinite(n)); } catch {}
+    return { id: row.campaign_id, name: row.name, subject, preheader: row.preheader, html: row.html, text: row.text, attachments: row.attachments_json, accountIds, accountsRandom: Boolean(row.accounts_random) };
   }
 
   async function sendOne(row, ctx) {

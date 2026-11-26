@@ -134,9 +134,11 @@ function campaignView(row) {
   try { providers = JSON.parse(row.providers_json || '[]'); } catch {}
   let lists = [];
   try { lists = JSON.parse(row.lists_json || '[]'); } catch {}
+  let accounts = [];
+  try { accounts = JSON.parse(row.accounts_json || '[]'); } catch {}
   return {
     id: row.id, name: row.name, subject: row.subject, preheader: row.preheader || '', html: row.html, text: row.text,
-    attachments, providers, lists, paused: Boolean(row.paused),
+    attachments, providers, lists, accounts, accountsRandom: Boolean(row.accounts_random), paused: Boolean(row.paused),
     status: row.status, scheduledFor: row.scheduled_for, createdAt: row.created_at,
     total: row.total || 0, sent: row.sent || 0, failed: row.failed || 0, queued: row.queued || 0,
     send_time_optimization_enabled: Boolean(row.send_time_optimization_enabled),
@@ -155,7 +157,10 @@ function campaignBody(body) {
   const lists = Array.isArray(body.lists)
     ? body.lists.map((l) => text(l, 'list', 80)).filter(Boolean).slice(0, 30)
     : [];
-  return { name: text(body.name, 'name', 120) || subject, subject, preheader: text(body.preheader || '', 'preheader', 300), html, text: plainText, attachments, providers, lists };
+  const accounts = Array.isArray(body.accounts)
+    ? body.accounts.map((a) => Number(a)).filter((n) => Number.isInteger(n) && n > 0).slice(0, 300)
+    : [];
+  return { name: text(body.name, 'name', 120) || subject, subject, preheader: text(body.preheader || '', 'preheader', 300), html, text: plainText, attachments, providers, lists, accounts, accountsRandom: body.accountsRandom === true };
 }
 
 function unsubscribePage(message, action = '') {
@@ -1850,6 +1855,8 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       db.prepare("INSERT INTO integrations (key, value) VALUES ('caps_enabled', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
         .run(body.capsEnabled === true || body.capsEnabled === 'true' || body.capsEnabled === 1 ? '1' : '0');
     }
+    const poolIds = Array.isArray(body.poolAccountIds) ? body.poolAccountIds.map((a) => Number(a)).filter((n) => Number.isInteger(n) && n > 0).slice(0, 300) : [];
+    db.prepare("INSERT INTO integrations (key, value) VALUES ('pool_account_ids', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(poolIds));
     return { sendSettings: publicSendSettings(db) };
   });
 
@@ -2162,7 +2169,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
   app.post('/api/campaigns', async (request) => {
     const campaign = campaignBody(request.body || {});
     const now = new Date().toISOString();
-    const result = db.prepare("INSERT INTO campaigns (name, subject, preheader, html, text, attachments_json, providers_json, lists_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)").run(campaign.name, campaign.subject, campaign.preheader, campaign.html, campaign.text, JSON.stringify(campaign.attachments || []), JSON.stringify(campaign.providers || []), JSON.stringify(campaign.lists || []), now, now);
+    const result = db.prepare("INSERT INTO campaigns (name, subject, preheader, html, text, attachments_json, providers_json, lists_json, accounts_json, accounts_random, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)").run(campaign.name, campaign.subject, campaign.preheader, campaign.html, campaign.text, JSON.stringify(campaign.attachments || []), JSON.stringify(campaign.providers || []), JSON.stringify(campaign.lists || []), JSON.stringify(campaign.accounts || []), campaign.accountsRandom ? 1 : 0, now, now);
     return { id: Number(result.lastInsertRowid) };
   });
 
@@ -2172,7 +2179,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     if (!existing) fail('Campaign not found', 404);
     if (!['draft', 'failed', 'scheduled'].includes(existing.status)) fail('Only draft, scheduled or failed campaigns can be edited');
     const campaign = campaignBody(request.body || {});
-    db.prepare('UPDATE campaigns SET name = ?, subject = ?, preheader = ?, html = ?, text = ?, attachments_json = ?, providers_json = ?, lists_json = ?, updated_at = ? WHERE id = ?').run(campaign.name, campaign.subject, campaign.preheader, campaign.html, campaign.text, JSON.stringify(campaign.attachments || []), JSON.stringify(campaign.providers || []), JSON.stringify(campaign.lists || []), new Date().toISOString(), id);
+    db.prepare('UPDATE campaigns SET name = ?, subject = ?, preheader = ?, html = ?, text = ?, attachments_json = ?, providers_json = ?, lists_json = ?, accounts_json = ?, accounts_random = ?, updated_at = ? WHERE id = ?').run(campaign.name, campaign.subject, campaign.preheader, campaign.html, campaign.text, JSON.stringify(campaign.attachments || []), JSON.stringify(campaign.providers || []), JSON.stringify(campaign.lists || []), JSON.stringify(campaign.accounts || []), campaign.accountsRandom ? 1 : 0, new Date().toISOString(), id);
     return { id };
   });
 
@@ -2180,7 +2187,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     const campaign = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(Number(request.params.id));
     if (!campaign) fail('Campaign not found', 404);
     const now = new Date().toISOString();
-    const result = db.prepare("INSERT INTO campaigns (name, subject, preheader, html, text, attachments_json, providers_json, lists_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)").run(`${campaign.name} copy`.slice(0, 120), campaign.subject, campaign.preheader || '', campaign.html, campaign.text, campaign.attachments_json || '[]', campaign.providers_json || '[]', campaign.lists_json || '[]', now, now);
+    const result = db.prepare("INSERT INTO campaigns (name, subject, preheader, html, text, attachments_json, providers_json, lists_json, accounts_json, accounts_random, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)").run(`${campaign.name} copy`.slice(0, 120), campaign.subject, campaign.preheader || '', campaign.html, campaign.text, campaign.attachments_json || '[]', campaign.providers_json || '[]', campaign.lists_json || '[]', campaign.accounts_json || '[]', campaign.accounts_random || 0, now, now);
     return { id: Number(result.lastInsertRowid) };
   });
 
