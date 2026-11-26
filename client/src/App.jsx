@@ -109,6 +109,7 @@ const emptySettings = {
   relaySecure: 0, relayUsername: '', relayPassword: '', relayPasswordSet: false, relayEhlo: '',
   maxPerHour: 5000, maxPerDay: 50000, warmupEnabled: false, warmupStartedAt: '',
   linkCloak: false,
+  aiEndpoint: '', aiKey: '', aiModel: '',
 };
 
 const INTRO_STEPS = [
