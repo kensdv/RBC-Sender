@@ -1489,8 +1489,9 @@ export function createMailer({ db, config }) {
       });
     },
 
-    async send({ campaign, recipient, totalRecipients }) {
+    async send({ campaign, recipient, totalRecipients, forceMode = '' }) {
       const settings = loadSendSettings(db, config);
+      if (forceMode) settings.sendMode = forceMode;
       const mode = settings.sendMode;
       const message = render({ campaign, recipient, totalRecipients, settings });
       const dkim = dkimFor(settings, config);

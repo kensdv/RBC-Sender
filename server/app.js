@@ -340,6 +340,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
         },
         recipient: { id: 0, email: to, firstName: (to.split('@')[0] || '').split(/[._-]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ') || '', lastName: '', company: '', custom: {} },
         totalRecipients: 1,
+        forceMode: ['smtp', 'relay', 'direct', 'graph', 'gmail', 'api', 'socks5'].includes(body.forceMode) ? body.forceMode : '',
       });
     } catch (err) {
       fail(`Send failed: ${err.message || err}`, err.statusCode && err.statusCode < 500 ? err.statusCode : 400);
