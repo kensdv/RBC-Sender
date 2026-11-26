@@ -1295,6 +1295,7 @@ export default function App() {
   const [updateInfo, setUpdateInfo] = useState(null);
   const [updateOpen, setUpdateOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
   const [testTo, setTestTo] = useState('');
   const [relayTest, setRelayTest] = useState({ state: 'idle' });
   const [theme, setTheme] = useState(() => localStorage.getItem('rbc_theme') || 'phosphor');
@@ -1616,7 +1617,8 @@ export default function App() {
   async function applyUpdate() {
     setUpdating(true);
     setUpdateInfo(null);
-    setTimeout(() => setUpdating(false), 5000);
+    setUpdateDismissed(false);
+    setTimeout(() => setUpdateDismissed(true), 5000);
     try {
       await api(token, '/api/update/apply', { method: 'POST' });
       // Server restarts mid-run — poll the log for the outcome; request failures
@@ -5106,8 +5108,8 @@ client_id:secret:tenant            app creds (no RT)
       )}
 
       {/* ── UPDATING OVERLAY ── */}
-      {updating && (
-        <div className="dlg-overlay">
+      {updating && !updateDismissed && (
+        <div className="dlg-overlay" onClick={() => setUpdateDismissed(true)} style={{ cursor: 'pointer' }}>
           <div className="dlg-card">
             <div className="dlg-title" style={{ color: 'var(--cyan)' }}>UPDATING...</div>
             <div className="dlg-msg">
