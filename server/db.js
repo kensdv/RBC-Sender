@@ -247,7 +247,7 @@ export function openDatabase(path) {
   const staleModels = [
     ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b', 'api.groq.com'],
     ['deepseek/deepseek-chat-v3-0324:free', 'deepseek/deepseek-chat-v3-0324', 'deepseek/deepseek-chat-v3.1:free', 'openrouter.ai'],
-    ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash', 'generativelanguage.googleapis.com'],
+    ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash', 'generativelanguage.googleapis.com'],
   ];
   const fixModel = db.prepare("UPDATE send_settings SET ai_model = ? WHERE ai_model IN (?, ?) AND ai_endpoint LIKE '%' || ? || '%'");
   for (const [deadA, deadB, live, host] of staleModels) fixModel.run(live, deadA, deadB, host);

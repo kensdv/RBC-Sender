@@ -2988,9 +2988,10 @@ sudo tail -f /var/log/maillog`}</pre>
                       <summary style={{ cursor: 'pointer', fontWeight: 700, letterSpacing: '.08em', color: 'var(--green)' }}>[ FREE PROVIDER SETUP — CLICK A PROVIDER TO AUTOFILL ]</summary>
                       <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {[
-                          { name: 'GROQ (recommended — fast, free tier, no card)', endpoint: 'https://api.groq.com/openai/v1/chat/completions', model: 'openai/gpt-oss-120b', where: 'console.groq.com → API Keys' },
+                          { name: 'GEMINI (recommended — 1M tokens/min free, no card)', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', where: 'aistudio.google.com → Get API key' },
+                          { name: 'GROQ (fast but tight token limits — big prompts hit cap fast)', endpoint: 'https://api.groq.com/openai/v1/chat/completions', model: 'openai/gpt-oss-120b', where: 'console.groq.com → API Keys' },
+                          { name: 'CEREBRAS (free trial $5 credit, 30K tok/min)', endpoint: 'https://api.cerebras.ai/v1/chat/completions', model: 'gpt-oss-120b', where: 'cloud.cerebras.ai → API Keys' },
                           { name: 'OPENROUTER (free models, 50 req/day)', endpoint: 'https://openrouter.ai/api/v1/chat/completions', model: 'deepseek/deepseek-chat-v3.1:free', where: 'openrouter.ai → Keys' },
-                          { name: 'GEMINI (free tier)', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.5-flash', where: 'aistudio.google.com → Get API key' },
                           { name: 'MISTRAL (free tier)', endpoint: 'https://api.mistral.ai/v1/chat/completions', model: 'mistral-small-latest', where: 'console.mistral.ai → API keys' },
                           { name: 'OLLAMA (local — fully free & private, runs on this machine)', endpoint: 'http://localhost:11434/v1/chat/completions', model: 'llama3.1:8b', where: 'install ollama → ollama pull llama3.1:8b → any non-empty key works' },
                         ].map((p) => (
