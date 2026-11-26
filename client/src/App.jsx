@@ -106,18 +106,35 @@ const emptySettings = {
   engineMsRefreshToken: false, engineMsSendAs: '',
   attachFormats: [], imageRecompress: false,
   aiEndpoint: '', aiKey: '', aiModel: '', aiRules: '',
+  apiProvider: 'sendgrid', apiKey: '', apiKeySet: false, apiUser: '', apiDomain: '', apiUrl: '',
   sendDays: [], sendFromMin: 480, sendToMin: 1200, scheduleEnabled: true, capsEnabled: false,
   relaySecure: 0, relayUsername: '', relayPassword: '', relayPasswordSet: false, relayEhlo: '',
   maxPerHour: 5000, maxPerDay: 50000, warmupEnabled: false, warmupStartedAt: '',
   linkCloak: false,
 };
 
+function Pager({ total, page, setPage, size, setSize }) {
+  const pages = Math.max(1, Math.ceil(total / size));
+  return (
+    <div className="pager">
+      <button className="btn-xs" disabled={page <= 1} onClick={() => setPage(page - 1)}>[ ‹ PREV ]</button>
+      <span className="pager-info">PAGE {page} / {pages} · {total} ROWS</span>
+      <button className="btn-xs" disabled={page >= pages} onClick={() => setPage(page + 1)}>[ NEXT › ]</button>
+      <select className="w-select pager-size" value={size} onChange={(e) => { setSize(Number(e.target.value)); setPage(1); }}>
+        <option value={50}>50 / page</option>
+        <option value={100}>100 / page</option>
+        <option value={200}>200 / page</option>
+      </select>
+    </div>
+  );
+}
+
 const INTRO_STEPS = [
-  { title: 'Welcome to RBC Sender', desc: 'A self-hosted mailer with SMTP pools, direct-MX delivery, OAuth engines (Graph/Gmail API), anti-fingerprint tooling and live preview. This walkthrough takes 30 seconds.', tab: 'compose' },
-  { title: '1 · Configure a send engine', desc: 'Open SETTINGS and pick a mode: SMTP (authenticated provider or account pool), DIRECT MX, RELAY/PROXY, GRAPH API or GMAIL API. The SMTP tab has presets for 19 providers and a credential guide.', tab: 'settings' },
+  { title: 'Welcome to Rubicon Email Suite', desc: 'A self-hosted email suite with SMTP pools, direct-MX delivery, OAuth engines (Graph/Gmail API), anti-fingerprint tooling and live preview. This walkthrough takes 30 seconds.', tab: 'compose' },
+  { title: '1 · Configure a send engine', desc: 'Open SETTINGS and pick a mode: SMTP (authenticated provider or account pool), DIRECT MX, RELAY/PROXY, GRAPH API, GMAIL API or HTTP API (SendGrid/SES/Mailgun+). The SMTP tab has presets for 19 providers and a credential guide.', tab: 'delivery' },
   { title: '2 · Import your list', desc: 'RECIPIENTS tab — paste CSV (email, first_name, last_name, company), confirm consent, import. VERIFY DNS checks MX/disposable/role addresses; SORT BY PROVIDER tags each mailbox.', tab: 'recipients' },
   { title: '3 · Compose the letter', desc: 'COMPOSE tab — subject, preheader, placeholders (++rbc_*++), three body modes plus a block editor, attachments, and a live preview streaming on the right with desktop/mobile toggle.', tab: 'compose' },
-  { title: '4 · Delivery options', desc: 'SETTINGS tab — spoofed sender identity, DKIM signing, tracking pixel/click wrap, parallel sends (beast mode), HTML randomize, spam-word bypass, base64 subject, auto-attach formats.', tab: 'settings' },
+  { title: '4 · Delivery options', desc: 'SETTINGS tab — spoofed sender identity, DKIM signing, tracking pixel/click wrap, parallel sends (beast mode), HTML randomize, spam-word bypass, base64 subject, auto-attach formats.', tab: 'delivery' },
   { title: '5 · Send & monitor', desc: 'SEND NOW or schedule a campaign. The queue throttles per your rate settings, retries failures, and the history table shows live sent/failed/queued counts with CSV export.', tab: 'send' },
 ];
 
@@ -1160,7 +1177,6 @@ export default function App() {
   const [scheduledFor, setScheduledFor] = useState('');
   const [preview, setPreview] = useState(null);
   const [verifyResults, setVerifyResults] = useState(null);
-  const [extraRecipients, setExtraRecipients] = useState([]);
   const [previewDevice, setPreviewDevice] = useState('desktop');
   const [versionInfo, setVersionInfo] = useState(null);
   const [updateInfo, setUpdateInfo] = useState(null);
@@ -1191,11 +1207,18 @@ export default function App() {
   const [spamScore, setSpamScore] = useState(null);
   const [spamIssues, setSpamIssues] = useState([]);
   const [spamChecking, setSpamChecking] = useState(false);
+  const [spamFix, setSpamFix] = useState(null);
+  const [spamFixing, setSpamFixing] = useState(false);
   const [abTestOpen, setAbTestOpen] = useState(false);
   const [abTestCampaignId, setAbTestCampaignId] = useState(null);
   const [subjectVariants, setSubjectVariants] = useState([]);
   const [newVariantSubject, setNewVariantSubject] = useState('');
   const [engagementTier, setEngagementTier] = useState('all');
+  const [recipPage, setRecipPage] = useState(1);
+  const [bouncePage, setBouncePage] = useState(1);
+  const [histPage, setHistPage] = useState(1);
+  const [acctPage, setAcctPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [templates, setTemplates] = useState([]);
   const [templateDropdownOpen, setTemplateDropdownOpen] = useState(false);
   const [analyticsData, setAnalyticsData] = useState(null);
@@ -1670,7 +1693,7 @@ export default function App() {
         <div className="login-box">
           <div className="login-brand">
             <RbcLogo size={72} />
-            <div className="login-wordmark">RBC<span>SENDER</span></div>
+            <div className="login-wordmark">RUBICON<span>EMAIL SUITE</span></div>
           </div>
           <p className="login-sub">[ SECURE CHANNEL — AUTHORIZED PERSONNEL ONLY ]</p>
           <form onSubmit={login} className="login-form">
@@ -1687,6 +1710,12 @@ export default function App() {
   }
 
   const sendMode = settings.sendMode || 'smtp';
+  const allRecip = state?.recipients || [];
+  const filteredRecip = engagementTier === 'all' ? allRecip : allRecip.filter((r) => { const s = r.engagement_score || 0; return (s >= 70 ? 'hot' : s >= 31 ? 'warm' : 'cold') === engagementTier; });
+  const pagedRecip = filteredRecip.slice((recipPage - 1) * pageSize, recipPage * pageSize);
+  const pagedBounces = (state?.bounces || []).slice((bouncePage - 1) * pageSize, bouncePage * pageSize);
+  const pagedCampaigns = (state?.campaigns || []).slice((histPage - 1) * pageSize, histPage * pageSize);
+  const pagedAccounts = (state?.smtpAccounts || []).slice((acctPage - 1) * pageSize, acctPage * pageSize);
   const draftEmpty = !draft.html.trim() && !draft.text.trim();
   const canQueue = !draftEmpty && draft.subject.trim().length > 0;
   const chatSugg = [
@@ -1707,7 +1736,7 @@ export default function App() {
         <div className="sidebar-brand">
           <RbcLogo size={34} />
           <div>
-            <span className="sb-wordmark">RBC<span>SENDER</span></span>
+            <span className="sb-wordmark">RUBICON<span>EMAIL SUITE</span></span>
             {versionInfo && (
               <div className="sb-ver" title="Check for update" style={{ cursor: 'pointer' }} onClick={async () => {
                 try {
@@ -1937,6 +1966,7 @@ export default function App() {
                             setSpamChecking(true);
                             setSpamScore(null);
                             setSpamIssues([]);
+                            setSpamFix(null);
                             try {
                               const res = await api(token, '/api/spam-check', {
                                 method: 'POST',
@@ -1979,6 +2009,46 @@ export default function App() {
                                     </span>
                                   </div>
                                 ))}
+                              </div>
+                            )}
+                            {spamIssues.length > 0 && spamScore < 80 && (
+                              <button
+                                className="btn-sm"
+                                disabled={spamFixing}
+                                onClick={async () => {
+                                  setSpamFixing(true);
+                                  setSpamFix(null);
+                                  try {
+                                    const findings = spamIssues.map((i) => `${i.type}${i.word ? ` "${i.word}"` : ''}${i.desc ? ` — ${i.desc}` : ''}`).join('; ');
+                                    const res = await api(token, '/api/ai/assist', {
+                                      method: 'POST',
+                                      body: {
+                                        prompt: `Rewrite this email to fix these spam-check findings: ${findings}. Keep the same intent, links, and ++rbc_*++ placeholders. Output only the revised content.`,
+                                        subject: draft.subject, html: draft.html, text: draft.text,
+                                      },
+                                    });
+                                    setSpamFix({ text: res.result || '', target: res.target || 'html' });
+                                  } catch (err) {
+                                    showNotice(`AI fix failed: ${err.message}`, 'err');
+                                  } finally {
+                                    setSpamFixing(false);
+                                  }
+                                }}
+                              >
+                                {spamFixing ? '[ FIXING... ]' : '[ FIX WITH AI ]'}
+                              </button>
+                            )}
+                            {spamFix && (
+                              <div className="ai-response-area">
+                                <div className="ai-response-head">
+                                  <span>AI FIX <span className="dim" style={{ fontSize: 10 }}>→ {spamFix.target}</span></span>
+                                  <button className="btn-sm" onClick={() => {
+                                    const field = spamFix.target === 'subject' ? 'subject' : spamFix.target === 'preheader' ? 'preheader' : spamFix.target === 'text' ? 'text' : 'html';
+                                    updateDraft(field, spamFix.text);
+                                    showNotice('Applied — re-run the check to verify.');
+                                  }}>[ APPLY → {spamFix.target.toUpperCase()} ]</button>
+                                </div>
+                                <pre className="ai-response-text">{spamFix.text}</pre>
                               </div>
                             )}
                           </div>
@@ -2262,7 +2332,7 @@ export default function App() {
                   </div>
                   <div className="pane">
                     <div className="pane-head">
-                      <span>AUDIENCE — {state.recipientTotal ?? state.recipients.length} RECORDS{(state.recipientTotal ?? 0) > state.recipients.length ? ` (showing ${state.recipients.length + extraRecipients.length})` : ''}</span>
+                      <span>AUDIENCE — {state.recipients.length} RECORDS</span>
                       <div className="btn-row">
                         <button className="btn-xs" disabled={busy || !state.recipients.length} onClick={() => run(async () => {
                           const r = await api(token, '/api/recipients/verify', { method: 'POST', body: { emails: state.recipients.map((x) => x.email) } });
@@ -2320,7 +2390,7 @@ export default function App() {
                     </div>
                     <div className="filter-row">
                       <span className="dim">ENGAGEMENT:</span>
-                      <select className="w-select" value={engagementTier} onChange={(e) => setEngagementTier(e.target.value)}>
+                      <select className="w-select" value={engagementTier} onChange={(e) => { setEngagementTier(e.target.value); setRecipPage(1); }}>
                         <option value="all">ALL</option>
                         <option value="hot">HOT (70+)</option>
                         <option value="warm">WARM (31-69)</option>
@@ -2351,12 +2421,7 @@ export default function App() {
                       <table className="w-table">
                         <thead><tr><th>EMAIL</th><th>NAME</th><th>PROVIDER</th><th>ENGAGEMENT</th><th>STATUS</th><th></th></tr></thead>
                         <tbody>
-                          {(state.recipients.concat(extraRecipients.filter((x) => !state.recipients.some((y) => y.id === x.id)))).map((r) => {
-                            if (engagementTier !== 'all') {
-                              const score = r.engagement_score || 0;
-                              const tier = score >= 70 ? 'hot' : score >= 31 ? 'warm' : 'cold';
-                              if (tier !== engagementTier) return null;
-                            }
+                          {pagedRecip.map((r) => {
                             return (
                               <tr key={r.id}>
                                 <td>{r.email}</td>
@@ -2378,13 +2443,7 @@ export default function App() {
                         </tbody>
                       </table>
                     </div>
-                    {(state.recipientTotal ?? 0) > state.recipients.length + extraRecipients.length && (
-                      <button className="btn-sm" style={{ marginTop: 10 }} onClick={() => run(async () => {
-                        const offset = state.recipients.length + extraRecipients.length;
-                        const r = await api(token, `/api/recipients?offset=${offset}&limit=1000`);
-                        setExtraRecipients((prev) => [...prev, ...r.recipients]);
-                      })}>[ LOAD MORE — {state.recipients.length + extraRecipients.length} / {state.recipientTotal} ]</button>
-                    )}
+                    <Pager total={filteredRecip.length} page={recipPage} setPage={setRecipPage} size={pageSize} setSize={setPageSize} />
                   </div>
                 </div>
               )}
@@ -2566,7 +2625,7 @@ sudo tail -f /var/log/maillog`}</pre>
                         <li>Go to <strong>myaccount.google.com</strong> → Security</li>
                         <li>Enable <strong>2-Step Verification</strong> (required)</li>
                         <li>Go to <strong>App passwords</strong> (search "app passwords")</li>
-                        <li>Select <strong>Mail</strong> → <strong>Other</strong> → name it "RBC Sender"</li>
+                        <li>Select <strong>Mail</strong> → <strong>Other</strong> → name it "Rubicon Email Suite"</li>
                         <li>Copy the 16-character password → paste into <strong>Password</strong> field above</li>
                         <li>Set Host: <code>smtp.gmail.com</code>, Port: <code>587</code>, Secure: <strong>OFF</strong> (STARTTLS)</li>
                       </ol>
@@ -2625,7 +2684,7 @@ sudo tail -f /var/log/maillog`}</pre>
                     <table className="w-table">
                       <thead><tr><th>LABEL</th><th>TYPE</th><th>HOST</th><th>USER</th><th>FROM</th><th>W</th><th>QUOTA</th><th>STATE</th><th></th></tr></thead>
                       <tbody>
-                        {(state.smtpAccounts || []).map((a) => (
+                        {pagedAccounts.map((a) => (
                           <tr key={a.id}>
                             <td>{a.label || '—'}</td>
                             <td><span className={`badge ${a.authType?.startsWith('ms_') ? 'badge-ok' : 'badge-def'}`}>{a.authType === 'ms_rt' ? 'MS RT' : a.authType === 'ms_cc' ? 'MS CC' : 'SMTP'}</span></td>
@@ -2653,6 +2712,7 @@ sudo tail -f /var/log/maillog`}</pre>
                       </tbody>
                     </table>
                   </div>
+                  <Pager total={(state.smtpAccounts || []).length} page={acctPage} setPage={setAcctPage} size={pageSize} setSize={setPageSize} />
                   <div className="cfg-block" style={{marginTop:12}}>
                     <div className="cfg-block-title">{editingAcct ? `EDIT ACCOUNT #${editingAcct}` : 'ADD ACCOUNT'}</div>
                     <div className="form-grid">
@@ -2771,6 +2831,7 @@ sudo tail -f /var/log/maillog`}</pre>
                         ['socks5', 'PROXY',       'Direct via HTTP/SOCKS4/SOCKS5 proxy'],
                         ['graph',  'GRAPH API',   'Microsoft 365 / Outlook via Graph'],
                         ['gmail',  'GMAIL API',   'Gmail via Google API'],
+                        ['api',    'HTTP API',    'SendGrid, SES, Mailgun, Postmark, Brevo…'],
                       ].map(([v, lbl, desc]) => (
                         <label key={v} className={`mode-card ${sendMode === v ? 'active' : ''}`}>
                           <input type="radio" name="sendMode" value={v} checked={sendMode === v} onChange={() => updateSettings('sendMode', v)} />
@@ -2781,8 +2842,8 @@ sudo tail -f /var/log/maillog`}</pre>
                     </div>
                   </div>
 
-                  {/* Direct / SOCKS5 */}
-                  {(sendMode === 'direct' || sendMode === 'socks5') && (
+                  {/* Direct / SOCKS5 / API (from + rate live here) */}
+                  {(sendMode === 'direct' || sendMode === 'socks5' || sendMode === 'api') && (
                     <div className="cfg-block">
                       <div className="cfg-block-title">[ DIRECT CONFIG ]</div>
                       <div className="form-grid">
@@ -2957,6 +3018,43 @@ sudo tail -f /var/log/maillog`}</pre>
                           <button className="btn-sm" onClick={() => { setTab('smtp'); setMsRtImportOpen(true); }}>[ IMPORT MS RT → ]</button>
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {/* HTTP API engine */}
+                  {sendMode === 'api' && (
+                    <div className="cfg-block">
+                      <div className="cfg-block-title">[ API ENGINE ]</div>
+                      <p className="dim-txt">Sends over the provider's HTTPS API — no SMTP socket, no port-25 exposure. FROM NAME / FROM EMAIL come from <strong>DIRECT CONFIG</strong> (or SENDER IDENTITY if set).</p>
+                      <div className="form-grid">
+                        <div>
+                          <label className="field-label">PROVIDER</label>
+                          <select className="w-select" value={settings.apiProvider || 'sendgrid'} onChange={(e) => updateSettings('apiProvider', e.target.value)}>
+                            <option value="sendgrid">SendGrid</option>
+                            <option value="brevo">Brevo (Sendinblue)</option>
+                            <option value="postmark">Postmark</option>
+                            <option value="mailgun">Mailgun</option>
+                            <option value="ses">Amazon SES (v2)</option>
+                            <option value="sparkpost">SparkPost</option>
+                            <option value="elastic">Elastic Email</option>
+                            <option value="mandrill">Mandrill</option>
+                            <option value="custom">Custom HTTPS endpoint</option>
+                          </select>
+                        </div>
+                        <div><label className="field-label">{settings.apiProvider === 'ses' ? 'IAM SECRET ACCESS KEY' : 'API KEY'} {settings.apiKeySet ? <span className="dim">(saved — blank keeps)</span> : null}</label><input className="w-input" type="password" value={typeof settings.apiKey === 'string' ? settings.apiKey : ''} onChange={(e) => updateSettings('apiKey', e.target.value)} placeholder={settings.apiKeySet ? '(unchanged)' : 'key'} /></div>
+                        {settings.apiProvider === 'ses' && (
+                          <div><label className="field-label">IAM ACCESS KEY ID</label><input className="w-input" value={settings.apiUser || ''} onChange={(e) => updateSettings('apiUser', e.target.value)} placeholder="AKIA…" /></div>
+                        )}
+                        {settings.apiProvider === 'mailgun' && (
+                          <div><label className="field-label">MAILGUN DOMAIN <span className="dim">(prefix eu: for EU region)</span></label><input className="w-input" value={settings.apiDomain || ''} onChange={(e) => updateSettings('apiDomain', e.target.value)} placeholder="mg.yourdomain.com or eu:mg.yourdomain.com" /></div>
+                        )}
+                        {settings.apiProvider === 'ses' && (
+                          <div><label className="field-label">AWS REGION</label><input className="w-input" value={settings.apiDomain || ''} onChange={(e) => updateSettings('apiDomain', e.target.value)} placeholder="us-east-1" /></div>
+                        )}
+                        {settings.apiProvider === 'custom' && (
+                          <div><label className="field-label">ENDPOINT URL</label><input className="w-input" value={settings.apiUrl || ''} onChange={(e) => updateSettings('apiUrl', e.target.value)} placeholder="https://api.example.com/send" /></div>
+                        )}
+                      </div>
                     </div>
                   )}
 
@@ -3390,7 +3488,7 @@ sudo tail -f /var/log/maillog`}</pre>
                     <table className="w-table">
                       <thead><tr><th>EMAIL</th><th>TYPE</th><th>CLASS</th><th>REASON</th><th>DATE</th><th></th></tr></thead>
                       <tbody>
-                        {state.bounces.map((b) => (
+                        {pagedBounces.map((b) => (
                           <tr key={b.id}>
                             <td>{b.email}</td>
                             <td><span className="badge badge-fail">{b.kind.toUpperCase()}</span></td>
@@ -3409,6 +3507,7 @@ sudo tail -f /var/log/maillog`}</pre>
                       </tbody>
                     </table>
                   </div>
+                  <Pager total={(state.bounces || []).length} page={bouncePage} setPage={setBouncePage} size={pageSize} setSize={setPageSize} />
                 </div>
               )}
 
@@ -3583,7 +3682,7 @@ sudo tail -f /var/log/maillog`}</pre>
                       <table className="w-table">
                         <thead><tr><th>#</th><th>NAME</th><th>STATUS</th><th>TOTAL</th><th>SENT</th><th>FAIL</th><th>QUEUE</th><th>ACTION</th></tr></thead>
                         <tbody>
-                          {state.campaigns.map((c) => (
+                          {pagedCampaigns.map((c) => (
                             <tr key={c.id}>
                               <td className="dim">{c.id}</td>
                               <td>{c.name}{c.providers?.length > 0 && <div className="dim-txt" style={{fontSize:11}}>→ {c.providers.join(', ')}</div>}</td>
@@ -3627,6 +3726,7 @@ sudo tail -f /var/log/maillog`}</pre>
                         </tbody>
                       </table>
                     </div>
+                    <Pager total={(state.campaigns || []).length} page={histPage} setPage={setHistPage} size={pageSize} setSize={setPageSize} />
                   </div>
                 </div>
               )}
@@ -3709,7 +3809,7 @@ sudo tail -f /var/log/maillog`}</pre>
       {showIntro && (
         <div className="intro-overlay">
           <div className="intro-card">
-            <div className="intro-brand">RBC SENDER</div>
+            <div className="intro-brand">RUBICON EMAIL SUITE</div>
             <div className="intro-step">{introStep + 1} / {INTRO_STEPS.length}</div>
             <h2 className="intro-title">{INTRO_STEPS[introStep].title}</h2>
             <p className="intro-desc">{INTRO_STEPS[introStep].desc}</p>

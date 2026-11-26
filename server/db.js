@@ -233,6 +233,11 @@ export function openDatabase(path) {
   ensureColumn('relay_ehlo', "relay_ehlo TEXT NOT NULL DEFAULT ''");
   ensureColumn('engine_ms_rt_encrypted', "engine_ms_rt_encrypted TEXT NOT NULL DEFAULT ''");
   ensureColumn('engine_ms_send_as', "engine_ms_send_as TEXT NOT NULL DEFAULT ''");
+  ensureColumn('api_provider', "api_provider TEXT NOT NULL DEFAULT ''");
+  ensureColumn('api_key_encrypted', "api_key_encrypted TEXT NOT NULL DEFAULT ''");
+  ensureColumn('api_user', "api_user TEXT NOT NULL DEFAULT ''");
+  ensureColumn('api_domain', "api_domain TEXT NOT NULL DEFAULT ''");
+  ensureColumn('api_url', "api_url TEXT NOT NULL DEFAULT ''");
   ensureColumn('ai_endpoint', "ai_endpoint TEXT NOT NULL DEFAULT ''");
   ensureColumn('ai_key_encrypted', "ai_key_encrypted TEXT NOT NULL DEFAULT ''");
   ensureColumn('ai_model', "ai_model TEXT NOT NULL DEFAULT ''");

@@ -205,13 +205,13 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
   app.post('/api/telegram/test', async () => {
     const status = telegramStatus(db, config);
     if (!status.configured) fail('Configure bot token and chat ID first', 400);
-    const res = await sendTelegram(db, config, `✅ <b>RBC SENDER</b>\n${'─'.repeat(18)}\nTelegram link is live.\nReports will land here.\n🕐 ${new Date().toLocaleString('en-GB', { hour12: false })}`);
+    const res = await sendTelegram(db, config, `✅ <b>RUBICON EMAIL SUITE</b>\n${'─'.repeat(18)}\nTelegram link is live.\nReports will land here.\n🕐 ${new Date().toLocaleString('en-GB', { hour12: false })}`);
     if (!res.ok) fail(`Telegram error: ${res.error}`, 400);
     return { ok: true };
   });
 
   app.get('/api/state', async () => {
-    const recipients = db.prepare('SELECT * FROM recipients ORDER BY id DESC LIMIT 1000').all().map(recipientView);
+    const recipients = db.prepare('SELECT * FROM recipients ORDER BY id DESC').all().map(recipientView);
     const recipientTotal = db.prepare('SELECT COUNT(*) AS c FROM recipients').get().c;
     const campaigns = db.prepare(`
       SELECT c.*, COUNT(d.id) AS total,
@@ -285,9 +285,9 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     try {
       info = await mailer.send({
         campaign: {
-          id: 0, name: 'test', subject: text(body.subject || 'RBC Sender — test email', 'subject', 200),
-          preheader: '', html: body.html || '<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">RBC Sender test email — the active send engine accepted this message.</div>',
-          text: body.text || 'RBC Sender test email — the active send engine accepted this message.', attachments: body.attachments || [],
+          id: 0, name: 'test', subject: text(body.subject || 'Rubicon Email Suite — test email', 'subject', 200),
+          preheader: '', html: body.html || '<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">Rubicon Email Suite test email — the active send engine accepted this message.</div>',
+          text: body.text || 'Rubicon Email Suite test email — the active send engine accepted this message.', attachments: body.attachments || [],
         },
         recipient: { id: 0, email: to, firstName: 'Test', lastName: 'User', company: '', custom: {} },
         totalRecipients: 1,
@@ -660,14 +660,14 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
       ctx.text ? `draft text:\n${String(ctx.text).slice(0, 3000)}` : '',
     ].filter(Boolean).join('\n');
 
-    const systemPrompt = `You are RBC Helper, the built-in assistant of the RBC Sender panel. You have full read access to this sender's live state (below) — answer from it, quote real numbers. Be concise and technical. When asked to write or rewrite email content, output the content itself and preserve placeholders like [Firstname], [Company], ++rbc_*++ exactly. When pointing the operator somewhere, name the exact tab and section from the LAYOUT MAP — never say "Settings" for things on the EMAIL tab.
+    const systemPrompt = `You are RBC Helper, the built-in assistant of the Rubicon Email Suite panel. You have full read access to this sender's live state (below) — answer from it, quote real numbers. Be concise and technical. When asked to write or rewrite email content, output the content itself and preserve placeholders like [Firstname], [Company], ++rbc_*++ exactly. When pointing the operator somewhere, name the exact tab and section from the LAYOUT MAP — never say "Settings" for things on the EMAIL tab.
 
 LAYOUT MAP (sidebar tabs):
 - DASHBOARD: overview, stats
 - LETTER: compose drafts — subject, preheader, body (HTML/text/blocks), AI assist panel, attachments, templates
 - MAIL LIST: recipients, import CSV/paste, suppression
 - EMAIL: OUTGOING CONNECTION (SMTP config + provider presets + guides), SENDING ACCOUNTS — ACCOUNT POOL rotation/failover with [ IMPORT MS RT ] and [ VERIFY ALL ] buttons in the pane head, ADD ACCOUNT form, SENDING HOURS, LIMITS & WARM-UP, INBOX (IMAP)
-- SETTINGS: SEND TYPE (SMTP auth / Direct MX / Relay / Proxy / Graph API / Gmail API), MICROSOFT GRAPH ENGINE creds, GMAIL engine, encoding/spoof/DKIM/headers, tracking, TIMEZONE, AI ASSISTANT (endpoint/key/model/rules + LIST MODELS)
+- SETTINGS: SEND TYPE (SMTP auth / Direct MX / Relay / Proxy / Graph API / Gmail API / HTTP API — SendGrid·SES·Mailgun·Postmark·Brevo·SparkPost·Elastic·Mandrill·custom), MICROSOFT GRAPH ENGINE creds, GMAIL engine, API ENGINE (provider/key, IAM user+region for SES, domain for Mailgun, URL for custom), encoding/spoof/DKIM/headers, tracking, TIMEZONE, AI ASSISTANT (endpoint/key/model/rules + LIST MODELS)
 - SCHEDULE: sending window, timezone
 - SEND: queue launch, campaign history, pause/resume/retry
 - BOUNCES: bounce log + suppression
@@ -740,7 +740,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       if (dc) actions.push({ id: 'queue', label: `QUEUE CAMPAIGN #${dc.id}`, campaignId: dc.id });
     }
     if (/open|go to|take me|show me|jump to|where|cant find|can't find|cannot find|missing|how do i (get|go|navigate)|navigate/i.test(lu)) {
-      const tabHit = [['import ms', 'smtp'], ['ms rt', 'smtp'], ['refresh token', 'smtp'], ['mailbox', 'smtp'], ['pool', 'smtp'], ['account', 'smtp'], ['smtp', 'smtp'], ['imap', 'smtp'], ['inbox', 'smtp'], ['import list', 'recipients'], ['import csv', 'recipients'], ['import contact', 'recipients'], ['import recipient', 'recipients'], ['list', 'recipients'], ['recipient', 'recipients'], ['contact', 'recipients'], ['graph', 'delivery'], ['setting', 'delivery'], ['config', 'delivery'], ['ai ', 'delivery'], ['model', 'delivery'], ['compos', 'compose'], ['letter', 'compose'], ['draft', 'compose'], ['send', 'send'], ['queue', 'send'], ['bounc', 'bounces'], ['analytic', 'analytics'], ['schedul', 'schedule'], ['window', 'schedule'], ['dash', 'dashboard']].find(([k]) => lu.includes(k));
+      const tabHit = [['import ms', 'smtp'], ['ms rt', 'smtp'], ['refresh token', 'smtp'], ['mailbox', 'smtp'], ['pool', 'smtp'], ['account', 'smtp'], ['smtp', 'smtp'], ['imap', 'smtp'], ['inbox', 'smtp'], ['import list', 'recipients'], ['import csv', 'recipients'], ['import contact', 'recipients'], ['import recipient', 'recipients'], ['list', 'recipients'], ['recipient', 'recipients'], ['contact', 'recipients'], ['graph', 'delivery'], ['sendgrid', 'delivery'], ['ses', 'delivery'], ['mailgun', 'delivery'], ['postmark', 'delivery'], ['brevo', 'delivery'], ['api key', 'delivery'], ['api engine', 'delivery'], ['setting', 'delivery'], ['config', 'delivery'], ['ai ', 'delivery'], ['model', 'delivery'], ['compos', 'compose'], ['letter', 'compose'], ['draft', 'compose'], ['send', 'send'], ['queue', 'send'], ['bounc', 'bounces'], ['analytic', 'analytics'], ['schedul', 'schedule'], ['window', 'schedule'], ['dash', 'dashboard']].find(([k]) => lu.includes(k));
       if (tabHit) actions.push({ id: 'goto', label: `OPEN ${tabHit[1].toUpperCase()}`, tab: tabHit[1] });
     }
     return { reply, model: usedModel, target, actions };
@@ -1488,7 +1488,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     // never let those sentinel values blend into the write body.
     const { aiKey: _aiKeyFlag, ...publicDefaults } = publicSendSettings(db);
     const body = { ...publicDefaults, ...(request.body || {}) };
-    const allowedModes = ['smtp', 'direct', 'relay', 'socks5', 'graph', 'gmail'];
+    const allowedModes = ['smtp', 'direct', 'relay', 'socks5', 'graph', 'gmail', 'api'];
     const sendMode = allowedModes.includes(body.sendMode) ? body.sendMode : 'smtp';
     const allowedEncodings = ['base64', '8bit', 'quoted-printable'];
     const encoding = allowedEncodings.includes(body.encoding) ? body.encoding : 'base64';
@@ -1536,6 +1536,13 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     const aiKeyEncrypted = typeof body.aiKey === 'string' && body.aiKey.trim()
       ? encryptSecret(body.aiKey.trim(), config.credentialKey)
       : (currentAi?.ai_key_encrypted || '');
+    // API engine key — same keep-existing-if-blank rule
+    const currentApiKey = db.prepare('SELECT api_key_encrypted FROM send_settings WHERE id = 1').get();
+    const apiKeyEncrypted = typeof body.apiKey === 'string' && body.apiKey.trim()
+      ? encryptSecret(body.apiKey.trim(), config.credentialKey)
+      : (currentApiKey?.api_key_encrypted || '');
+    let apiProvider = ['', 'sendgrid', 'postmark', 'brevo', 'sparkpost', 'elastic', 'mandrill', 'mailgun', 'ses', 'custom'].includes(body.apiProvider) ? body.apiProvider : '';
+    if (body.sendMode === 'api' && !apiProvider) apiProvider = 'sendgrid';
 
     db.prepare(`
       INSERT INTO send_settings (id, send_mode, direct_from_name, direct_from_email, direct_reply_to, direct_rate_per_minute,
@@ -1550,10 +1557,11 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
         engine_send_as, attach_formats_json, image_recompress,
         send_days_json, send_from_min, send_to_min, max_per_hour, max_per_day,
         warmup_enabled, warmup_started_at, link_cloak, cloak_base,
+        api_provider, api_key_encrypted, api_user, api_domain, api_url,
         ai_endpoint, ai_key_encrypted, ai_model, ai_rules,
         relay_secure, relay_username, relay_password_encrypted, relay_ehlo,
         updated_at)
-      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         send_mode=excluded.send_mode, direct_from_name=excluded.direct_from_name, direct_from_email=excluded.direct_from_email,
         direct_reply_to=excluded.direct_reply_to, direct_rate_per_minute=excluded.direct_rate_per_minute,
@@ -1585,6 +1593,8 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
         max_per_day=excluded.max_per_day, warmup_enabled=excluded.warmup_enabled,
         warmup_started_at=excluded.warmup_started_at, link_cloak=excluded.link_cloak,
         cloak_base=excluded.cloak_base,
+        api_provider=excluded.api_provider, api_key_encrypted=excluded.api_key_encrypted,
+        api_user=excluded.api_user, api_domain=excluded.api_domain, api_url=excluded.api_url,
         ai_endpoint=excluded.ai_endpoint, ai_key_encrypted=excluded.ai_key_encrypted,
         ai_model=excluded.ai_model, ai_rules=excluded.ai_rules,
         relay_secure=excluded.relay_secure, relay_username=excluded.relay_username,
@@ -1652,6 +1662,11 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       text(body.warmupStartedAt || db.prepare('SELECT warmup_started_at FROM send_settings WHERE id = 1').get()?.warmup_started_at || '', 'warmupStartedAt', 40),
       body.linkCloak ? 1 : 0,
       text(body.cloakBase || '', 'cloakBase', 500),
+      apiProvider,
+      apiKeyEncrypted,
+      text(body.apiUser || '', 'apiUser', 320),
+      text(body.apiDomain || '', 'apiDomain', 253),
+      text(body.apiUrl || '', 'apiUrl', 1000),
       text(body.aiEndpoint || '', 'aiEndpoint', 1000),
       aiKeyEncrypted,
       text(body.aiModel || '', 'aiModel', 200),
@@ -1893,6 +1908,8 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     if ((settings.sendMode === 'direct' || settings.sendMode === 'socks5' || settings.sendMode === 'relay') && !settings.directFromEmail) fail('Configure direct sending from-email before queueing');
     if (settings.sendMode === 'graph' && (!settings.engineClientId || !settings.engineClientSecret || !settings.engineTenant)) fail('Configure Graph engine credentials before queueing');
     if (settings.sendMode === 'gmail' && (!settings.engineClientId || !settings.engineClientSecret || !settings.engineRefreshToken)) fail('Configure Gmail engine credentials before queueing');
+    if (settings.sendMode === 'api' && (!settings.apiProvider || (settings.apiProvider !== 'custom' && !db.prepare('SELECT api_key_encrypted FROM send_settings WHERE id = 1').get()?.api_key_encrypted))) fail('Configure the API engine provider and key before queueing');
+    if (settings.sendMode === 'api' && !settings.directFromEmail) fail('Configure a from/direct email before queueing');
     let providers = [];
     try { providers = JSON.parse(campaign.providers_json || '[]').filter((p) => typeof p === 'string' && p); } catch {}
     const recipients = providers.length
@@ -2200,8 +2217,8 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
   const clientDist = resolve('client/dist');
   if (existsSync(clientDist)) await app.register(fastifyStatic, { root: clientDist });
   app.setNotFoundHandler((request, reply) => {
-    if (request.method === 'GET' && !request.url.startsWith('/api/') && existsSync(clientDist)) return reply.sendFile('index.html');
-    return reply.code(404).send({ error: 'Not found' });
+    if (request.method !== 'GET' || request.url.startsWith('/api/') || !existsSync(clientDist)) return reply.code(404).send({ error: 'Not found' });
+    return reply.sendFile('index.html');
   });
   return app;
 }

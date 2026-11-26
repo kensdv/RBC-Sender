@@ -1206,3 +1206,18 @@ code {
   cursor: pointer;
 }
 .chat-sugg-chip:hover { border-color: var(--green); background: rgba(0, 255, 65, 0.12); }
+
+/* Table pagination */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 10px 0 2px;
+}
+.pager-info {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: var(--dim);
+}
+.pager-size { width: auto; padding: 3px 6px; font-size: 10px; }

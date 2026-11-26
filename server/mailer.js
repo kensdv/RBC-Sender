@@ -1,4 +1,4 @@
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID, createHash, createHmac } from 'node:crypto';
 import { resolveMx } from 'node:dns/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
@@ -100,6 +100,11 @@ function loadSendSettings(db, config = null) {
     engineMsSendAs: row.engine_ms_send_as || '',
     relayPassword: row.relay_password_encrypted && config ? decryptSecret(row.relay_password_encrypted, config.credentialKey) : '',
     engineSendAs: row.engine_send_as || '',
+    apiProvider: row.api_provider || '',
+    apiKey: row.api_key_encrypted && config ? decryptSecret(row.api_key_encrypted, config.credentialKey) : '',
+    apiUser: row.api_user || '',
+    apiDomain: row.api_domain || '',
+    apiUrl: row.api_url || '',
     attachFormats: (() => { try { return JSON.parse(row.attach_formats_json || '[]'); } catch { return []; } })(),
     imageRecompress: Boolean(row.image_recompress),
     sendDays: (() => { try { return JSON.parse(row.send_days_json || '[]'); } catch { return []; } })(),
@@ -377,6 +382,11 @@ export function publicSendSettings(db) {
     engineMsSendAs: row.engine_ms_send_as || '',
     relayPasswordSet: Boolean(row.relay_password_encrypted),
     engineSendAs: row.engine_send_as || '',
+    apiProvider: row.api_provider || '',
+    apiKeySet: Boolean(row.api_key_encrypted),
+    apiUser: row.api_user || '',
+    apiDomain: row.api_domain || '',
+    apiUrl: row.api_url || '',
     attachFormats: (() => { try { return JSON.parse(row.attach_formats_json || '[]'); } catch { return []; } })(),
     imageRecompress: Boolean(row.image_recompress),
     sendDays: (() => { try { return JSON.parse(row.send_days_json || '[]'); } catch { return []; } })(),
@@ -646,6 +656,232 @@ export async function msRtSendMail({ token, sender, message, recipient, fromName
 
 const GRAPH_BLOCKED_HEADERS = new Set(['from', 'to', 'cc', 'bcc', 'subject', 'mime-version', 'content-type', 'content-transfer-encoding', 'date', 'message-id', 'return-path', 'received', 'reply-to']);
 
+// ── HTTP API send engines — provider presets over one pipeline ──────────────
+// Each def builds {url, headers, body} from the normalized message; ok() decides success.
+const sesSha256 = (s) => createHash('sha256').update(s).digest('hex');
+const sesHmac = (key, data) => createHmac('sha256', key).update(data).digest();
+function sigV4Headers({ region, service, host, payload, accessKey, secretKey }) {
+  const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+  const canonicalHeaders = `host:${host}\nx-amz-date:${amzDate}\n`;
+  const signedHeaders = 'host;x-amz-date';
+  const canonicalRequest = ['POST', '/v2/email/outbound-emails', '', canonicalHeaders, signedHeaders, sesSha256(payload)].join('\n');
+  const scope = `${dateStamp}/${region}/${service}/aws4_request`;
+  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, scope, sesSha256(canonicalRequest)].join('\n');
+  const kSigning = sesHmac(sesHmac(sesHmac(sesHmac(`AWS4${secretKey}`, dateStamp), region), service), 'aws4_request');
+  return {
+    'x-amz-date': amzDate,
+    Authorization: `AWS4-HMAC-SHA256 Credential=${accessKey}/${scope}, SignedHeaders=${signedHeaders}, Signature=${createHmac('sha256', kSigning).update(stringToSign).digest('hex')}`,
+  };
+}
+
+const nameAddr = (email, name) => (name ? `${name.replace(/[<>"\\]/g, '')} <${email}>` : email);
+const headerList = (h) => Object.entries(h || {}).map(([Name, Value]) => ({ Name, Value: String(Value) }));
+
+const API_ENGINES = {
+  sendgrid: {
+    label: 'SendGrid',
+    build: (m, c) => ({
+      url: 'https://api.sendgrid.com/v3/mail/send',
+      headers: { Authorization: `Bearer ${c.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: m.to, name: m.toName }], ...(m.ccOrBcc && m.sendType === 'cc' ? { cc: [{ email: m.ccOrBcc }] } : {}), ...(m.ccOrBcc && m.sendType === 'bcc' ? { bcc: [{ email: m.ccOrBcc }] } : {}) }],
+        from: { email: m.fromEmail, name: m.fromName },
+        ...(m.replyTo ? { reply_to: { email: m.replyTo } } : {}),
+        subject: m.subject,
+        content: [{ type: 'text/plain', value: m.text }, ...(m.html ? [{ type: 'text/html', value: m.html }] : [])],
+        headers: m.headers,
+        ...(m.attachments.length ? { attachments: m.attachments.map((a) => ({ content: a.b64, type: a.type, filename: a.filename, disposition: 'attachment' })) } : {}),
+      }),
+    }),
+    ok: (r) => r.status === 202,
+    messageId: (r) => r.headers.get('x-message-id'),
+  },
+  postmark: {
+    label: 'Postmark',
+    build: (m, c) => ({
+      url: 'https://api.postmarkapp.com/email',
+      headers: { 'X-Postmark-Server-Token': c.apiKey, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        From: nameAddr(m.fromEmail, m.fromName), To: nameAddr(m.to, m.toName),
+        ...(m.ccOrBcc && m.sendType === 'cc' ? { Cc: m.ccOrBcc } : {}), ...(m.ccOrBcc && m.sendType === 'bcc' ? { Bcc: m.ccOrBcc } : {}),
+        ...(m.replyTo ? { ReplyTo: m.replyTo } : {}),
+        Subject: m.subject, TextBody: m.text, ...(m.html ? { HtmlBody: m.html } : {}),
+        Headers: headerList(m.headers),
+        ...(m.attachments.length ? { Attachments: m.attachments.map((a) => ({ Name: a.filename, Content: a.b64, ContentType: a.type })) } : {}),
+      }),
+    }),
+    ok: (r) => r.status === 200,
+    messageId: (r, raw) => { try { return JSON.parse(raw).MessageID; } catch { return null; } },
+  },
+  brevo: {
+    label: 'Brevo',
+    build: (m, c) => ({
+      url: 'https://api.brevo.com/v3/smtp/email',
+      headers: { 'api-key': c.apiKey, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        sender: { email: m.fromEmail, name: m.fromName },
+        to: [{ email: m.to, name: m.toName }],
+        ...(m.ccOrBcc && m.sendType === 'cc' ? { cc: [{ email: m.ccOrBcc }] } : {}), ...(m.ccOrBcc && m.sendType === 'bcc' ? { bcc: [{ email: m.ccOrBcc }] } : {}),
+        ...(m.replyTo ? { replyTo: { email: m.replyTo } } : {}),
+        subject: m.subject, textContent: m.text, ...(m.html ? { htmlContent: m.html } : {}),
+        headers: m.headers,
+        ...(m.attachments.length ? { attachment: m.attachments.map((a) => ({ content: a.b64, name: a.filename })) } : {}),
+      }),
+    }),
+    ok: (r) => r.status === 201,
+    messageId: (r, raw) => { try { return JSON.parse(raw).messageId; } catch { return null; } },
+  },
+  sparkpost: {
+    label: 'SparkPost',
+    build: (m, c) => ({
+      url: 'https://api.sparkpost.com/api/v1/transmissions',
+      headers: { Authorization: c.apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: { from: { email: m.fromEmail, name: m.fromName }, subject: m.subject, text: m.text, ...(m.html ? { html: m.html } : {}), headers: { ...(m.replyTo ? { 'Reply-To': m.replyTo } : {}), ...m.headers }, ...(m.attachments.length ? { attachments: m.attachments.map((a) => ({ name: a.filename, type: a.type, data: a.b64 })) } : {}) },
+        recipients: [{ address: { email: m.to, name: m.toName } }],
+        ...(m.ccOrBcc ? { [m.sendType]: [{ address: { email: m.ccOrBcc } }] } : {}),
+      }),
+    }),
+    ok: (r) => r.status === 200,
+    messageId: (r, raw) => { try { return `tx-${JSON.parse(raw).results?.id}`; } catch { return null; } },
+  },
+  elastic: {
+    label: 'Elastic Email',
+    build: (m, c) => ({
+      url: 'https://api.elasticemail.com/v4/emails',
+      headers: { 'X-ElasticEmail-ApiKey': c.apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        Recipients: { To: [m.to], ...(m.ccOrBcc && m.sendType === 'cc' ? { CC: [m.ccOrBcc] } : {}), ...(m.ccOrBcc && m.sendType === 'bcc' ? { BCC: [m.ccOrBcc] } : {}) },
+        Content: { From: nameAddr(m.fromEmail, m.fromName), ...(m.replyTo ? { ReplyTo: m.replyTo } : {}), Subject: m.subject, Headers: m.headers, Body: [{ ContentType: 'PlainText', Content: m.text, Charset: 'utf-8' }, ...(m.html ? [{ ContentType: 'HTML', Content: m.html, Charset: 'utf-8' }] : [])], ...(m.attachments.length ? { Attachments: m.attachments.map((a) => ({ Name: a.filename, ContentType: a.type, BinaryContent: a.b64 })) } : {}) },
+      }),
+    }),
+    ok: (r) => r.status === 200 || r.status === 202,
+    messageId: (r, raw) => { try { return JSON.parse(raw).TransactionID; } catch { return null; } },
+  },
+  mandrill: {
+    label: 'Mandrill',
+    build: (m, c) => ({
+      url: 'https://mandrillapp.com/api/1.0/messages/send.json',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: c.apiKey,
+        message: {
+          from_email: m.fromEmail, from_name: m.fromName,
+          to: [{ email: m.to, name: m.toName, type: 'to' }, ...(m.ccOrBcc ? [{ email: m.ccOrBcc, type: m.sendType }] : [])],
+          headers: { ...(m.replyTo ? { 'Reply-To': m.replyTo } : {}), ...m.headers },
+          subject: m.subject, text: m.text, ...(m.html ? { html: m.html } : {}),
+          ...(m.attachments.length ? { attachments: m.attachments.map((a) => ({ type: a.type, name: a.filename, content: a.b64 })) } : {}),
+        },
+      }),
+    }),
+    ok: (r, raw) => { try { const d = JSON.parse(raw); return r.status === 200 && Array.isArray(d) && d[0]?.status !== 'rejected' && d[0]?.status !== 'invalid'; } catch { return false; } },
+    messageId: (r, raw) => { try { return JSON.parse(raw)[0]?._id; } catch { return null; } },
+  },
+  mailgun: {
+    label: 'Mailgun',
+    build: (m, c) => {
+      const host = /^eu[:.]/i.test(c.apiDomain || '') ? 'api.eu.mailgun.net' : 'api.mailgun.net';
+      const domain = (c.apiDomain || '').replace(/^eu[:.]+\s*/i, '');
+      const fd = new FormData();
+      fd.append('from', nameAddr(m.fromEmail, m.fromName));
+      fd.append('to', nameAddr(m.to, m.toName));
+      fd.append('subject', m.subject);
+      fd.append('text', m.text);
+      if (m.html) fd.append('html', m.html);
+      if (m.ccOrBcc) fd.append(m.sendType, m.ccOrBcc);
+      if (m.replyTo) fd.append('h:Reply-To', m.replyTo);
+      for (const [k, v] of Object.entries(m.headers)) fd.append(`h:${k}`, String(v));
+      for (const a of m.attachments) fd.append('attachment', new Blob([Buffer.from(a.b64, 'base64')], { type: a.type }), a.filename);
+      return {
+        url: `https://${host}/v3/${domain}/messages`,
+        headers: { Authorization: `Basic ${Buffer.from(`api:${c.apiKey}`).toString('base64')}` },
+        body: fd,
+      };
+    },
+    ok: (r) => r.status === 200,
+    messageId: (r, raw) => { try { return JSON.parse(raw).id; } catch { return null; } },
+  },
+  ses: {
+    label: 'AWS SES',
+    build: async (m, c) => {
+      const region = c.apiDomain || 'us-east-1';
+      const host = `email.${region}.amazonaws.com`;
+      // Raw MIME via nodemailer — carries attachments and arbitrary headers the Simple API can't
+      const rawMsg = await new Promise((resolve, reject) => {
+        const t = nodemailer.createTransport({ streamTransport: true, buffer: true });
+        t.sendMail({
+          from: nameAddr(m.fromEmail, m.fromName), to: m.to,
+          ...(m.ccOrBcc ? { [m.sendType]: m.ccOrBcc } : {}),
+          ...(m.replyTo ? { replyTo: m.replyTo } : {}),
+          subject: m.subject, text: m.text, ...(m.html ? { html: m.html } : {}),
+          headers: m.headers,
+          attachments: m.attachments.map((a) => ({ filename: a.filename, contentType: a.type, content: Buffer.from(a.b64, 'base64') })),
+        }, (err, info) => (err ? reject(err) : resolve(info.message)));
+      });
+      const payload = JSON.stringify({
+        FromEmailAddress: m.fromEmail,
+        Destination: { ToAddresses: [m.to], ...(m.ccOrBcc && m.sendType === 'cc' ? { CcAddresses: [m.ccOrBcc] } : {}), ...(m.ccOrBcc && m.sendType === 'bcc' ? { BccAddresses: [m.ccOrBcc] } : {}) },
+        Content: { Raw: { Data: rawMsg.toString('base64') } },
+      });
+      return {
+        url: `https://${host}/v2/email/outbound-emails`,
+        headers: { 'Content-Type': 'application/json', ...sigV4Headers({ region, service: 'ses', host, payload, accessKey: c.apiUser, secretKey: c.apiKey }) },
+        body: payload,
+      };
+    },
+    ok: (r) => r.status === 200,
+    messageId: (r, raw) => { try { return JSON.parse(raw).MessageId; } catch { return null; } },
+  },
+  custom: {
+    label: 'Custom API',
+    build: (m, c) => ({
+      url: c.apiUrl,
+      headers: { 'Content-Type': 'application/json', ...(c.apiKey ? { Authorization: `Bearer ${c.apiKey}` } : {}) },
+      body: JSON.stringify({ from: nameAddr(m.fromEmail, m.fromName), to: m.to, ...(m.ccOrBcc ? { [m.sendType]: m.ccOrBcc } : {}), replyTo: m.replyTo, subject: m.subject, text: m.text, html: m.html, ...(m.attachments.length ? { attachments: m.attachments.map((a) => ({ name: a.filename, type: a.type, content: a.b64 })) } : {}) }),
+    }),
+    ok: (r) => r.status >= 200 && r.status < 300,
+    messageId: () => null,
+  },
+};
+
+async function sendViaApi({ settings, message, recipient, fromName, fromEmail, replyTo, attachments, extraHeaders }) {
+  const provider = API_ENGINES[settings.apiProvider];
+  if (!provider) throw new Error('Select an API provider in SETTINGS → API ENGINE');
+  if (settings.apiProvider !== 'custom' && !settings.apiKey) throw new Error(`Configure the ${provider.label} API key`);
+  if (settings.apiProvider === 'custom' && !settings.apiUrl) throw new Error('Configure the custom endpoint URL');
+  if (settings.apiProvider === 'ses' && !settings.apiUser) throw new Error('SES needs the IAM access key ID in API USER');
+  if (settings.apiProvider === 'mailgun' && !settings.apiDomain) throw new Error('Mailgun needs its sending domain in API DOMAIN');
+  const sendType = settings.sendType || 'to';
+  const m = {
+    to: recipient.email, toName: [recipient.firstName, recipient.lastName].filter(Boolean).join(' '),
+    fromEmail, fromName, replyTo, subject: message.subject, text: message.text,
+    html: settings.textOnly ? '' : message.html,
+    headers: Object.fromEntries(
+      Object.entries(extraHeaders || {}).filter(([k, v]) =>
+        typeof v === 'string' &&
+        !['date', 'message-id', 'return-path', 'received', 'mime-version', 'content-type', 'content-transfer-encoding', 'dkim-signature'].includes(k.toLowerCase())
+      )
+    ),
+    attachments: (attachments || []).map((a) => {
+      try {
+        const buf = Buffer.isBuffer(a.content) ? a.content : (a.path && existsSync(a.path) ? readFileSync(a.path) : (typeof a.content === 'string' ? Buffer.from(a.content) : null));
+        return buf ? { filename: a.filename || 'attachment', type: a.contentType || 'application/octet-stream', b64: buf.toString('base64') } : null;
+      } catch { return null; }
+    }).filter(Boolean),
+    sendType,
+    ccOrBcc: (sendType === 'cc' || sendType === 'bcc') ? recipient.email : '',
+  };
+  if (m.ccOrBcc) m.to = fromEmail;
+  const req = await provider.build(m, settings);
+  let res;
+  try { res = await fetch(req.url, { method: 'POST', headers: req.headers, body: req.body, signal: AbortSignal.timeout(60000) }); }
+  catch (err) { throw new Error(`${provider.label} request failed: ${err.name === 'TimeoutError' ? 'timed out' : (err.message || err)}`); }
+  const raw = await res.text();
+  if (!provider.ok(res, raw)) throw new Error(`${provider.label} ${res.status}: ${raw.slice(0, 250)}`);
+  return { messageId: provider.messageId?.(res, raw) || randomUUID(), provider: settings.apiProvider };
+}
+
 async function sendViaGraph({ settings, message, recipient, fromName, fromEmail, replyTo, attachments }) {
   const token = await graphAccessToken(settings);
   const sender = settings.engineSendAs || fromEmail;
@@ -816,7 +1052,7 @@ function icsBuffer({ subject, text, email }) {
   const start = new Date(Date.now() + 86400000).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
   const esc = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n').slice(0, 500);
   const ics = [
-    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//RBC Sender//EN', 'BEGIN:VEVENT',
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Rubicon Email Suite//EN', 'BEGIN:VEVENT',
     `UID:${randomUUID()}@rbc`, `DTSTAMP:${stamp}`, `DTSTART:${start}`, `DTEND:${start}`,
     `SUMMARY:${esc(subject)}`, `DESCRIPTION:${esc(text)}`, `ORGANIZER;CN=Sender:mailto:${email || 'noreply@localhost'}`,
     'END:VEVENT', 'END:VCALENDAR',
@@ -1260,6 +1496,11 @@ export function createMailer({ db, config }) {
         if (!sender) throw new Error('Configure a from/direct email or Gmail send-as for Gmail engine');
         const mailOpts = buildMailOpts({ fromName, fromEmail: sender, replyTo });
         return sendViaGmail({ mailOpts, settings });
+      }
+      if (mode === 'api') {
+        const { fromName, fromEmail, replyTo } = buildFrom(settings, null);
+        if (!fromEmail) throw new Error('Configure a from/direct email for the API engine');
+        return sendViaApi({ settings, message, recipient, fromName, fromEmail, replyTo, attachments, extraHeaders: buildHeaders(fromEmail) });
       }
 
       // ── SMTP pool with round-robin + failover ──
