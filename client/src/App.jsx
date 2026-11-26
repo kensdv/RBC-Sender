@@ -3157,6 +3157,13 @@ sudo tail -f /var/log/maillog`}</pre>
                                   setAcctForm({ label: a.label, host: a.host, port: a.port, secure: a.secure, username: a.username, password: '', fromName: a.fromName, fromEmail: a.fromEmail, replyTo: a.replyTo, weight: a.weight, dailyQuota: a.dailyQuota });
                                 }}>EDIT</button>
                                 <button className="btn-xs" onClick={() => run(async () => { await api(token, `/api/smtp/accounts/${a.id}`, { method: 'PUT', body: { label: a.label, host: a.host, port: a.port, secure: a.secure, username: a.username, fromName: a.fromName, fromEmail: a.fromEmail, replyTo: a.replyTo, weight: a.weight, enabled: !a.enabled } }); await refresh(); })}>{a.enabled ? 'DISABLE' : 'ENABLE'}</button>
+                                {a.authType?.startsWith('ms_') && <button className="btn-xs" title="Probe for admin rights — if the credential can read the org directory, every eligible mailbox gets imported" onClick={() => run(async () => {
+                                  const r = await api(token, `/api/smtp/accounts/${a.id}/probe`, { method: 'POST' });
+                                  showNotice(r.admin
+                                    ? `Admin credential — org takeover: ${r.imported} mailbox(es) imported (org size ${r.orgSize})`
+                                    : `No admin rights${r.error ? ` — ${r.error}` : ' — single mailbox stays'}`, r.admin ? 'ok' : 'err');
+                                  await refresh();
+                                })}>PROBE</button>}
                                 <button className="btn-xs btn-danger" onClick={async () => { if (await uiConfirm(`Delete account ${a.label || a.username}?`, { title: 'DELETE SMTP ACCOUNT', danger: true, confirmLabel: 'DELETE' })) run(async () => { await api(token, `/api/smtp/accounts/${a.id}`, { method: 'DELETE' }); await refresh(); }); }}>DEL</button>
                               </div>
                             </td>
