@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { DEFAULT_AI_RULES } from './default-ai-rules.js';
 
 export function openDatabase(path) {
   const databasePath = path === ':memory:' ? path : resolve(path);
@@ -236,6 +237,12 @@ export function openDatabase(path) {
   ensureColumn('ai_key_encrypted', "ai_key_encrypted TEXT NOT NULL DEFAULT ''");
   ensureColumn('ai_model', "ai_model TEXT NOT NULL DEFAULT ''");
   ensureColumn('ai_rules', "ai_rules TEXT NOT NULL DEFAULT ''");
+  // Seed the operator's default ruleset once; a cleared field stays cleared.
+  const rulesSeeded = db.prepare("SELECT value FROM integrations WHERE key = 'ai_rules_seeded'").get()?.value === '1';
+  if (!rulesSeeded) {
+    db.prepare("INSERT INTO send_settings (id, ai_rules) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET ai_rules = CASE WHEN ai_rules = '' THEN excluded.ai_rules ELSE ai_rules END").run(DEFAULT_AI_RULES);
+    db.prepare("INSERT INTO integrations (key, value) VALUES ('ai_rules_seeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'").run();
+  }
   const campaignCols = new Set(db.prepare('PRAGMA table_info(campaigns)').all().map((c) => c.name));
   if (!campaignCols.has('preheader')) db.exec("ALTER TABLE campaigns ADD COLUMN preheader TEXT NOT NULL DEFAULT ''");
   if (!campaignCols.has('attachments_json')) db.exec("ALTER TABLE campaigns ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'");

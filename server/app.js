@@ -12,6 +12,7 @@ import { parseRecipientsCsv, parseLooseEmails } from './csv.js';
 import { publicSmtp, publicSendSettings, getGraphAccessToken } from './mailer.js';
 import { escapeHtml } from './placeholders.js';
 import { transaction } from './db.js';
+import { DEFAULT_AI_RULES } from './default-ai-rules.js';
 import { createEmitter, telegramStatus, saveTelegram, sendTelegram, formatEvent } from './telegram.js';
 import { listEvents } from './events.js';
 
@@ -414,32 +415,45 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
   // ── AI Assistant for Letter Panel ──
   app.post('/api/ai/assist', async (request) => {
     const body = request.body || {};
-    const { prompt, subject, html, text } = body;
+    const prompt = String(body.prompt || '').slice(0, 4000);
+    const subject = String(body.subject || '').slice(0, 500);
+    const html = String(body.html || '').slice(0, 60000);
+    const textBody = String(body.text || '').slice(0, 60000);
     if (!prompt) fail('Prompt is required');
     const row = db.prepare('SELECT ai_endpoint, ai_key_encrypted, ai_model, ai_rules FROM send_settings WHERE id = 1').get() || {};
     const endpoint = row.ai_endpoint || '';
     const aiKey = row.ai_key_encrypted && config ? decryptSecret(row.ai_key_encrypted, config.credentialKey) : '';
     const model = row.ai_model || '';
-    const rules = row.ai_rules || '';
+    const rules = row.ai_rules || DEFAULT_AI_RULES;
     if (!endpoint || !aiKey) fail('AI endpoint and key must be configured in SETTINGS');
+    if (!model) fail('AI model must be configured in SETTINGS');
     const systemPrompt = `You are an email copywriting assistant specializing in deliverability, personalization, and inbox placement. Your job is to improve email content while preserving placeholders like [Firstname], [Lastname], [Company], ++rbc_*++, etc. Return only the improved content — no explanations, no meta commentary. The user will tell you what to do via the prompt field.${rules ? `\n\nSTANDING RULES set by the operator — follow these in every output, always:\n${rules}` : ''}`;
-    const userPrompt = `Current draft:\n\nSubject: ${subject || '(none)'}\n\nHTML body:\n${html || '(none)'}\n\nText body:\n${text || '(none)'}\n\nTask: ${prompt}`;
+    const userPrompt = `Current draft:\n\nSubject: ${subject || '(none)'}\n\nHTML body:\n${html || '(none)'}\n\nText body:\n${textBody || '(none)'}\n\nTask: ${prompt}`;
+    let res;
     try {
-      const res = await fetch(endpoint, {
+      res = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${aiKey}`,
         },
         body: JSON.stringify({ model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }] }),
+        signal: AbortSignal.timeout(120000),
       });
-      if (!res.ok) fail(`AI request failed: ${res.status}`);
-      const data = await res.json().catch(() => ({}));
-      const content = data.choices?.[0]?.message?.content || data.message?.content || '';
-      return { result: content || '' };
     } catch (err) {
-      fail(`AI error: ${err.message || err}`);
+      fail(`AI request failed: ${err.name === 'TimeoutError' ? 'timed out after 120s' : (err.message || err)}`);
     }
+    const raw = await res.text();
+    if (!res.ok) fail(`AI request failed: ${res.status} — ${raw.slice(0, 300)}`);
+    let data = {};
+    try { data = JSON.parse(raw); } catch { return { result: raw.slice(0, 50000) }; }
+    let content = data.choices?.[0]?.message?.content
+      ?? data.message?.content
+      ?? data.content?.[0]?.text
+      ?? data.response
+      ?? '';
+    if (Array.isArray(content)) content = content.map((c) => (typeof c === 'string' ? c : c?.text || '')).join('');
+    return { result: String(content).slice(0, 50000) };
   });
 
   // ── Spam Score Checker ──
@@ -1242,7 +1256,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       text(body.aiEndpoint || '', 'aiEndpoint', 1000),
       aiKeyEncrypted,
       text(body.aiModel || '', 'aiModel', 200),
-      text(body.aiRules || '', 'aiRules', 4000),
+      text(body.aiRules || '', 'aiRules', 60000),
       [0, 1, 2].includes(Number(body.relaySecure)) ? Number(body.relaySecure) : 0,
       text(body.relayUsername || '', 'relayUsername', 320),
       typeof body.relayPassword === 'string' && body.relayPassword.trim() ? encryptSecret(body.relayPassword.trim(), config.credentialKey) : (db.prepare('SELECT relay_password_encrypted FROM send_settings WHERE id = 1').get()?.relay_password_encrypted || ''),
