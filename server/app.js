@@ -665,11 +665,14 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
 LAYOUT MAP (sidebar tabs):
 - DASHBOARD: overview, stats
 - LETTER: compose drafts — subject, preheader, body (HTML/text/blocks), AI assist panel, attachments, templates
-- MAIL LIST: recipients, import CSV/paste, suppression
+- AI WRITER: full drafting workspace (presets + custom brief → apply to draft) + AI ATTACHMENT GENERATOR (invoice/statement/notice/ICS → attach to letter)
+- CONTACTS: recipient list, import CSV/paste, suppression
+- SORTER: raw email list → extract/dedupe/flag/bucket-by-MX-provider, copy clean or per-provider lists (no import)
 - EMAIL: OUTGOING CONNECTION (SMTP config + provider presets + guides), SENDING ACCOUNTS — ACCOUNT POOL rotation/failover with [ IMPORT MS RT ] and [ VERIFY ALL ] buttons in the pane head, ADD ACCOUNT form, SENDING HOURS, LIMITS & WARM-UP, INBOX (IMAP)
 - SETTINGS: SEND TYPE (SMTP auth / Direct MX / Relay / Proxy / Graph API / Gmail API / HTTP API — SendGrid·SES·Mailgun·Postmark·Brevo·SparkPost·Elastic·Mandrill·custom), MICROSOFT GRAPH ENGINE creds, GMAIL engine, API ENGINE (provider/key, IAM user+region for SES, domain for Mailgun, URL for custom), encoding/spoof/DKIM/headers, tracking, TIMEZONE, AI ASSISTANT (endpoint/key/model/rules + LIST MODELS)
 - SCHEDULE: sending window, timezone
 - SEND: queue launch, campaign history, pause/resume/retry
+- HELP: full manual — quick start, engines, MS RT formats, AI setup, placeholders, deliverability, troubleshooting
 - BOUNCES: bounce log + suppression
 - ANALYTICS: delivery stats
 NOTE: the [ IMPORT MS RT ] button is on the EMAIL tab inside ACCOUNT POOL — accepts client_id:refresh_token, email:cid:rt, cid:secret:tenant, or JSON, one per line.
@@ -740,7 +743,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       if (dc) actions.push({ id: 'queue', label: `QUEUE CAMPAIGN #${dc.id}`, campaignId: dc.id });
     }
     if (/open|go to|take me|show me|jump to|where|cant find|can't find|cannot find|missing|how do i (get|go|navigate)|navigate/i.test(lu)) {
-      const tabHit = [['import ms', 'smtp'], ['ms rt', 'smtp'], ['refresh token', 'smtp'], ['mailbox', 'smtp'], ['pool', 'smtp'], ['account', 'smtp'], ['smtp', 'smtp'], ['imap', 'smtp'], ['inbox', 'smtp'], ['import list', 'recipients'], ['import csv', 'recipients'], ['import contact', 'recipients'], ['import recipient', 'recipients'], ['list', 'recipients'], ['recipient', 'recipients'], ['contact', 'recipients'], ['graph', 'delivery'], ['sendgrid', 'delivery'], ['ses', 'delivery'], ['mailgun', 'delivery'], ['postmark', 'delivery'], ['brevo', 'delivery'], ['api key', 'delivery'], ['api engine', 'delivery'], ['setting', 'delivery'], ['config', 'delivery'], ['ai ', 'delivery'], ['model', 'delivery'], ['compos', 'compose'], ['letter', 'compose'], ['draft', 'compose'], ['send', 'send'], ['queue', 'send'], ['bounc', 'bounces'], ['analytic', 'analytics'], ['schedul', 'schedule'], ['window', 'schedule'], ['dash', 'dashboard']].find(([k]) => lu.includes(k));
+      const tabHit = [['import ms', 'smtp'], ['ms rt', 'smtp'], ['refresh token', 'smtp'], ['mailbox', 'smtp'], ['pool', 'smtp'], ['account', 'smtp'], ['smtp', 'smtp'], ['imap', 'smtp'], ['inbox', 'smtp'], ['sort', 'sorter'], ['clean list', 'sorter'], ['dedupe', 'sorter'], ['ai writer', 'aiwriter'], ['writer', 'aiwriter'], ['attachment', 'aiwriter'], ['help', 'help'], ['manual', 'help'], ['how do', 'help'], ['import list', 'recipients'], ['import csv', 'recipients'], ['import contact', 'recipients'], ['import recipient', 'recipients'], ['list', 'recipients'], ['recipient', 'recipients'], ['contact', 'recipients'], ['graph', 'delivery'], ['sendgrid', 'delivery'], ['ses', 'delivery'], ['mailgun', 'delivery'], ['postmark', 'delivery'], ['brevo', 'delivery'], ['api key', 'delivery'], ['api engine', 'delivery'], ['setting', 'delivery'], ['config', 'delivery'], ['ai ', 'delivery'], ['model', 'delivery'], ['compos', 'compose'], ['letter', 'compose'], ['draft', 'compose'], ['send', 'send'], ['queue', 'send'], ['bounc', 'bounces'], ['analytic', 'analytics'], ['schedul', 'schedule'], ['window', 'schedule'], ['dash', 'dashboard']].find(([k]) => lu.includes(k));
       if (tabHit) actions.push({ id: 'goto', label: `OPEN ${tabHit[1].toUpperCase()}`, tab: tabHit[1] });
     }
     return { reply, model: usedModel, target, actions };
@@ -1822,6 +1825,49 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       };
     });
     return { results };
+  });
+
+  // Standalone sorter — paste raw emails, get provider buckets + flags. Does not touch the contacts table.
+  app.post('/api/sorter', async (request) => {
+    const raw = String(request.body?.text || '').slice(0, 500000);
+    const found = raw.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || [];
+    const seen = new Set();
+    const emails = [];
+    let dupes = 0;
+    for (const e of found) {
+      const addr = e.toLowerCase();
+      if (seen.has(addr)) { dupes++; continue; }
+      seen.add(addr);
+      emails.push(addr);
+    }
+    if (emails.length > 2000) fail('Max 2,000 unique emails per sort', 400);
+    const invalid = [], disposable = [], roleBased = [], valid = [];
+    for (const addr of emails) {
+      const [local, domain] = addr.split('@');
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(addr)) { invalid.push(addr); continue; }
+      if (DISPOSABLE_DOMAINS.has(domain)) { disposable.push(addr); continue; }
+      if (ROLE_LOCALS.has(local)) roleBased.push(addr);
+      valid.push(addr);
+    }
+    const domains = [...new Set(valid.map((e) => e.split('@')[1]))].slice(0, 120);
+    const mxCache = {};
+    const CONCURRENCY = 10;
+    for (let i = 0; i < domains.length; i += CONCURRENCY) {
+      await Promise.all(domains.slice(i, i + CONCURRENCY).map(async (d) => { mxCache[d] = await mxInfo(d); }));
+    }
+    const buckets = {};
+    for (const addr of valid) {
+      const domain = addr.split('@')[1];
+      const info = mxCache[domain] || { hasMx: false, mx: '', provider: 'Unsorted (domain cap)' };
+      const key = info.hasMx ? info.provider : 'No MX';
+      (buckets[key] = buckets[key] || []).push(addr);
+    }
+    const ordered = Object.fromEntries(Object.entries(buckets).sort((a, b) => b[1].length - a[1].length));
+    return {
+      total: found.length, unique: emails.length, dupes,
+      buckets: ordered, invalid, disposable, roleBased,
+      clean: valid.filter((e) => !roleBased.includes(e) && (buckets['No MX'] || []).indexOf(e) === -1 && (buckets['Unsorted (domain cap)'] || []).indexOf(e) === -1),
+    };
   });
 
   // Email sorter — classify stored recipient list by provider via MX

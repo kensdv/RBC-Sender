@@ -808,13 +808,16 @@ const PLACEHOLDER_GROUPS = [
 const NAV_ITEMS = [
   { id: 'dashboard',  label: 'DASHBOARD',   icon: '◈' },
   { id: 'compose',    label: 'LETTER',      icon: '✉' },
-  { id: 'recipients', label: 'MAIL LIST',   icon: '☰' },
+  { id: 'aiwriter',   label: 'AI WRITER',   icon: '✦' },
+  { id: 'recipients', label: 'CONTACTS',    icon: '@' },
+  { id: 'sorter',     label: 'SORTER',      icon: '⇅' },
   { id: 'smtp',       label: 'EMAIL',       icon: '⚙' },
   { id: 'delivery',   label: 'SETTINGS',    icon: '⚡' },
   { id: 'schedule',   label: 'SCHEDULE',    icon: '◷' },
   { id: 'bounces',    label: 'BOUNCES',     icon: '⚠' },
   { id: 'send',       label: 'SEND',        icon: '▶' },
   { id: 'analytics',  label: 'ANALYTICS',   icon: '▤' },
+  { id: 'help',       label: 'HELP',        icon: '?' },
 ];
 
 const BLOCK_TYPES = [
@@ -1209,6 +1212,15 @@ export default function App() {
   const [spamChecking, setSpamChecking] = useState(false);
   const [spamFix, setSpamFix] = useState(null);
   const [spamFixing, setSpamFixing] = useState(false);
+  const [awPrompt, setAwPrompt] = useState('');
+  const [awBusy, setAwBusy] = useState(false);
+  const [awResult, setAwResult] = useState(null);
+  const [awDocPrompt, setAwDocPrompt] = useState('');
+  const [awDocBusy, setAwDocBusy] = useState(false);
+  const [awAttachment, setAwAttachment] = useState(null);
+  const [sorterInput, setSorterInput] = useState('');
+  const [sorterResult, setSorterResult] = useState(null);
+  const [sorterBusy, setSorterBusy] = useState(false);
   const [abTestOpen, setAbTestOpen] = useState(false);
   const [abTestCampaignId, setAbTestCampaignId] = useState(null);
   const [subjectVariants, setSubjectVariants] = useState([]);
@@ -2312,6 +2324,93 @@ export default function App() {
                 </div>
               )}
 
+              {/* ══ AI WRITER ══ */}
+              {tab === 'aiwriter' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div className="pane narrow-pane">
+                    <div className="pane-head"><span>AI EMAIL WRITER</span></div>
+                    <p className="dim-txt">Describe the letter — the AI drafts it against your current compose content, then apply straight into the draft. Pick a preset or write your own brief.</p>
+                    <div className="ai-presets">
+                      <button className="btn-sm" onClick={() => setAwPrompt('Write a cold outreach email — short, professional, one clear call to action.')}>COLD OUTREACH</button>
+                      <button className="btn-sm" onClick={() => setAwPrompt('Write a follow-up email referencing the previous message — polite nudge, same thread feel.')}>FOLLOW-UP</button>
+                      <button className="btn-sm" onClick={() => setAwPrompt('Write an urgent account notification email — security alert tone, action required, no fear-mongering.')}>URGENT NOTICE</button>
+                      <button className="btn-sm" onClick={() => setAwPrompt('Write a promotional email — punchy benefit-led copy, single offer, strong CTA button text.')}>PROMO BLAST</button>
+                      <button className="btn-sm" onClick={() => setAwPrompt('Write a newsletter-style update email — scannable sections, friendly expert voice.')}>NEWSLETTER</button>
+                      <button className="btn-sm" onClick={() => setAwPrompt('Write a payment/invoice reminder email — firm but professional, deadline and amount placeholders.')}>PAYMENT REMINDER</button>
+                    </div>
+                    <textarea className="ai-prompt-input" rows={4} value={awPrompt} onChange={(e) => setAwPrompt(e.target.value)}
+                      placeholder="Brief the writer… e.g. 'Notice that the client's mailbox storage is 90% full, offer the upgrade link, keep it under 120 words, use ++rbc_*++ placeholders where a link goes'" />
+                    <button className="btn-primary" disabled={awBusy || !awPrompt.trim()} onClick={async () => {
+                      setAwBusy(true); setAwResult(null);
+                      try {
+                        const res = await api(token, '/api/ai/assist', {
+                          method: 'POST',
+                          body: { prompt: awPrompt, subject: draft.subject, html: draft.html, text: draft.text },
+                        });
+                        setAwResult({ text: res.result || '', target: res.target || 'html' });
+                      } catch (err) { setAwResult({ text: `Error: ${err.message}`, target: 'none' }); }
+                      finally { setAwBusy(false); }
+                    }}>{awBusy ? '[ WRITING... ]' : '[ WRITE ]'}</button>
+                    {awResult && (
+                      <div className="ai-response-area">
+                        <div className="ai-response-head">
+                          <span>DRAFT <span className="dim" style={{ fontSize: 10 }}>→ {awResult.target}</span></span>
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            {['subject', 'preheader', 'html', 'text'].map((f) => (
+                              <button key={f} className={`btn-xs ${awResult.target === f || (awResult.target === 'body' && f === 'html') ? 'btn-solid' : ''}`}
+                                onClick={() => { updateDraft(f, awResult.text); showNotice(`Applied to ${f === 'html' ? 'body' : f}.`); }}>
+                                → {f === 'html' ? 'BODY' : f.toUpperCase()}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <pre className="ai-response-text">{awResult.text}</pre>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pane narrow-pane">
+                    <div className="pane-head"><span>AI ATTACHMENT GENERATOR</span></div>
+                    <p className="dim-txt">Describe the document — the AI generates a real file (PDF/ICS/etc.) and attaches it to the current letter.</p>
+                    <div className="ai-presets">
+                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a professional invoice PDF — clean table layout, placeholder amounts that match the letter.')}>INVOICE</button>
+                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate an account statement PDF — summary box + transaction table, realistic but generic.')}>STATEMENT</button>
+                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a formal notice PDF — letterhead look, reference number, one-page.')}>NOTICE</button>
+                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a calendar invite (ICS) — meeting that fits the letter subject, 30 minutes.')}>CALENDAR INVITE</button>
+                    </div>
+                    <textarea className="ai-prompt-input" rows={3} value={awDocPrompt} onChange={(e) => setAwDocPrompt(e.target.value)}
+                      placeholder="Describe the attachment… e.g. 'Renewal quote PDF for a 12-month mailbox plan, company header, total line'" />
+                    <button className="btn-primary" disabled={awDocBusy || !awDocPrompt.trim()} onClick={async () => {
+                      setAwDocBusy(true); setAwAttachment(null);
+                      try {
+                        const res = await api(token, '/api/ai/assist', {
+                          method: 'POST',
+                          body: { prompt: `Generate a file attachment document: ${awDocPrompt}`, subject: draft.subject, html: draft.html, text: draft.text },
+                        });
+                        if (res.attachment) setAwAttachment(res.attachment);
+                        else setAwResult({ text: res.result || '(no file generated — describe the document type more explicitly)', target: 'none' });
+                      } catch (err) { setAwResult({ text: `Error: ${err.message}`, target: 'none' }); }
+                      finally { setAwDocBusy(false); }
+                    }}>{awDocBusy ? '[ GENERATING... ]' : '[ GENERATE FILE ]'}</button>
+                    {awAttachment && (
+                      <div className="ai-response-area">
+                        <div className="ai-response-head">
+                          <span>FILE READY — {awAttachment.filename || 'document'}</span>
+                          <button className="btn-sm" onClick={async () => {
+                            try {
+                              const up = await api(token, '/api/uploads', { method: 'POST', body: awAttachment });
+                              updateDraft('attachments', [...(draft.attachments || []), up]);
+                              showNotice(`Attached ${up.filename} (${Math.round((up.size || 0) / 1024)}KB).`);
+                              setAwAttachment(null);
+                            } catch (err) { showNotice(`Attach failed: ${err.message}`); }
+                          }}>[ ATTACH TO LETTER ]</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* ══ MAIL LIST / RECIPIENTS ══ */}
               {tab === 'recipients' && (
                 <div className="two-col">
@@ -2445,6 +2544,76 @@ export default function App() {
                     </div>
                     <Pager total={filteredRecip.length} page={recipPage} setPage={setRecipPage} size={pageSize} setSize={setPageSize} />
                   </div>
+                </div>
+              )}
+
+              {/* ══ EMAIL SORTER ══ */}
+              {tab === 'sorter' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div className="pane">
+                    <div className="pane-head"><span>EMAIL SORTER — RAW LIST → PROVIDER BUCKETS</span></div>
+                    <p className="dim-txt">Paste any mess — commas, newlines, mixed text. Emails get extracted, deduped, syntax-checked, flagged (disposable/role), then bucketed by live MX provider. Nothing is imported — the output is yours to copy.</p>
+                    <textarea className="w-textarea code-ta" rows={9} value={sorterInput} onChange={(e) => setSorterInput(e.target.value)}
+                      placeholder={'john@gmail.com, jane@company.com\ninfo@domain.org; "Name" <user@outlook.com>\nadmin@site.net — anything goes, the sorter extracts the emails'} />
+                    <div className="btn-row" style={{ marginTop: 10 }}>
+                      <button className="btn-primary" disabled={sorterBusy || !sorterInput.trim()} onClick={async () => {
+                        setSorterBusy(true); setSorterResult(null);
+                        try { setSorterResult(await api(token, '/api/sorter', { method: 'POST', body: { text: sorterInput } })); }
+                        catch (err) { showNotice(`Sort failed: ${err.message}`, 'err'); }
+                        finally { setSorterBusy(false); }
+                      }}>{sorterBusy ? '[ SORTING — MX lookups… ]' : '[ SORT LIST ]'}</button>
+                      {sorterInput.trim() && <button className="btn-sm" onClick={() => { setSorterInput(''); setSorterResult(null); }}>[ CLEAR ]</button>}
+                    </div>
+                  </div>
+
+                  {sorterResult && (
+                    <>
+                      <div className="kpi-row">
+                        {[['EXTRACTED', sorterResult.total, 'var(--txt)'], ['UNIQUE', sorterResult.unique, 'var(--cyan)'], ['DUPES', sorterResult.dupes, 'var(--yellow)'], ['CLEAN', (sorterResult.clean || []).length, 'var(--green)']].map(([l, v, c]) => (
+                          <div key={l} className="kpi-card"><div className="kpi-val" style={{ color: c }}>{v}</div><div className="kpi-lbl">{l}</div></div>
+                        ))}
+                      </div>
+
+                      <div className="pane">
+                        <div className="pane-head">
+                          <span>PROVIDER BUCKETS</span>
+                          <button className="btn-xs" onClick={() => { navigator.clipboard.writeText((sorterResult.clean || []).join('\n')); showNotice(`Copied ${(sorterResult.clean || []).length} clean emails.`); }}>[ COPY CLEAN LIST ]</button>
+                        </div>
+                        <div className="sorter-buckets">
+                          {Object.entries(sorterResult.buckets || {}).map(([provider, list]) => (
+                            <div key={provider} className="sorter-bucket">
+                              <div className="sorter-bucket-head">
+                                <span>{provider.toUpperCase()} <span className="dim">({list.length})</span></span>
+                                <button className="btn-xs" onClick={() => { navigator.clipboard.writeText(list.join('\n')); showNotice(`Copied ${list.length} ${provider} emails.`); }}>COPY</button>
+                              </div>
+                              <pre className="sorter-bucket-list">{list.slice(0, 30).join('\n')}{list.length > 30 ? `\n… +${list.length - 30} more` : ''}</pre>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="two-col">
+                        {!!sorterResult.invalid.length && (
+                          <div className="pane">
+                            <div className="pane-head"><span>INVALID SYNTAX ({sorterResult.invalid.length})</span></div>
+                            <pre className="sorter-bucket-list">{sorterResult.invalid.slice(0, 50).join('\n')}</pre>
+                          </div>
+                        )}
+                        {!!sorterResult.disposable.length && (
+                          <div className="pane">
+                            <div className="pane-head"><span>DISPOSABLE ({sorterResult.disposable.length})</span></div>
+                            <pre className="sorter-bucket-list">{sorterResult.disposable.slice(0, 50).join('\n')}</pre>
+                          </div>
+                        )}
+                        {!!sorterResult.roleBased.length && (
+                          <div className="pane">
+                            <div className="pane-head"><span>ROLE-BASED ({sorterResult.roleBased.length})</span></div>
+                            <pre className="sorter-bucket-list">{sorterResult.roleBased.slice(0, 50).join('\n')}</pre>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -3795,6 +3964,94 @@ sudo tail -f /var/log/maillog`}</pre>
                           ))}
                         </tbody>
                       </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ══ HELP ══ */}
+              {tab === 'help' && (
+                <div className="help-wrap">
+                  <div className="pane">
+                    <div className="pane-head"><span>HELP — RUBICON EMAIL SUITE MANUAL</span></div>
+
+                    <div className="help-sec">
+                      <h3>[ QUICK START ]</h3>
+                      <ol className="help-list">
+                        <li><strong>Engine:</strong> SETTINGS → SEND TYPE — pick SMTP / DIRECT MX / RELAY / PROXY / GRAPH / GMAIL / HTTP API and fill its block. The EMAIL tab also holds the OUTGOING CONNECTION presets.</li>
+                        <li><strong>List:</strong> CONTACTS → paste or import CSV (<code>email, first_name, last_name, company</code>), confirm consent, import. SORTER pre-cleans any raw list first.</li>
+                        <li><strong>Letter:</strong> LETTER tab — subject, preheader, body (HTML / text / blocks / paste), attachments, live preview. AI WRITER drafts it for you.</li>
+                        <li><strong>Send:</strong> SEND tab → queue it. Pause/resume/retry from CAMPAIGN HISTORY. SCHEDULE sets the window; caps + warm-up live on EMAIL.</li>
+                      </ol>
+                    </div>
+
+                    <div className="help-sec">
+                      <h3>[ SEND ENGINES ]</h3>
+                      <table className="w-table help-table"><thead><tr><th>MODE</th><th>WHAT IT DOES</th><th>NEEDS</th></tr></thead><tbody>
+                        <tr><td>SMTP</td><td>Any authenticated SMTP server or the account pool</td><td>host:port, user, password (or pool accounts)</td></tr>
+                        <tr><td>DIRECT MX</td><td>Delivers to recipient MX on port 25 — no provider</td><td>FROM NAME + FROM EMAIL; port 25 open outbound</td></tr>
+                        <tr><td>RELAY</td><td>Auth-free relay / IP-allowlisted host</td><td>relay host:port</td></tr>
+                        <tr><td>PROXY</td><td>Direct send tunneled through HTTP/SOCKS4/5</td><td>proxy string + from address</td></tr>
+                        <tr><td>GRAPH</td><td>Microsoft 365 via Graph API — app or delegated</td><td>client id + secret + tenant, or pool MS mailboxes</td></tr>
+                        <tr><td>GMAIL</td><td>Gmail API with OAuth</td><td>client id + secret + refresh token</td></tr>
+                        <tr><td>HTTP API</td><td>SendGrid · SES · Mailgun · Postmark · Brevo · SparkPost · Elastic · Mandrill · custom endpoint</td><td>API key; SES adds IAM user + region, Mailgun adds domain, custom adds URL</td></tr>
+                      </tbody></table>
+                    </div>
+
+                    <div className="help-sec">
+                      <h3>[ MAILBOX POOL / MS RT IMPORT ]</h3>
+                      <p className="help-p">EMAIL tab → ACCOUNT POOL → <code>[ IMPORT MS RT ]</code> — one account per line, up to 200 at once. Accepted formats:</p>
+                      <pre className="help-pre">{`email@x.com:client_id:M.C5...rt      email:cid:rt
+client_id:M.C5...rt                cid:rt
+email|cid|rt · email,cid,rt · email;cid;rt
+client_id:secret:tenant            app creds (no RT)
+{"client_id":"…","refresh_token":"…"}   JSON`}</pre>
+                      <p className="help-p">GRAPH mode round-robins imported mailboxes first (each sends as itself, 10k/day quota, cooldown + failover). SMTP mode mixes them with SMTP accounts. VERIFY ALL handshakes every account and shows per-account errors.</p>
+                    </div>
+
+                    <div className="help-sec">
+                      <h3>[ AI — HELPER · WRITER · ASSIST ]</h3>
+                      <p className="help-p">Configure in SETTINGS → AI ASSISTANT: endpoint (OpenAI-compatible or Gemini URL), API key, model — LIST MODELS shows the live list; dead model IDs self-heal on next call.</p>
+                      <ul className="help-list">
+                        <li><strong>✦ RBC Helper AI</strong> (bottom-right button) — chatbot with live access to your sender state. Ask why sends fail, how much quota is left, or to rewrite the draft. ⚡ buttons verify accounts, pause/resume/retry campaigns, send tests, reset quotas, navigate tabs. → apply buttons write its output into subject/preheader/body.</li>
+                        <li><strong>AI WRITER tab</strong> — full drafting workspace with presets + a document generator (invoice/statement/notice/ICS) that attaches straight to the letter.</li>
+                        <li><strong>AI ASSIST panel</strong> (LETTER tab) — quick rewrites against the current draft; same apply flow.</li>
+                        <li><strong>SPAM CHECK → FIX WITH AI</strong> — scores the draft, then one click has AI rewrite around the findings.</li>
+                      </ul>
+                    </div>
+
+                    <div className="help-sec">
+                      <h3>[ SORTER ]</h3>
+                      <p className="help-p">SORTER tab — paste any raw list (commas, lines, mixed text). Extracts emails, dedupes, syntax-checks, flags disposable + role addresses, buckets by live MX provider. Copy clean or per-provider lists — nothing is imported unless you take it to CONTACTS yourself.</p>
+                    </div>
+
+                    <div className="help-sec">
+                      <h3>[ PLACEHOLDERS ]</h3>
+                      <p className="help-p"><code>[Firstname] [Lastname] [Company] [Email]</code> — recipient fields. <code>++rbc_url++ ++rbc_link++ ++rbc_short++</code> — random link from the pool. <code>++rbc_domain1++</code> etc — rotation tokens. Full list in the LETTER tab tag palette.</p>
+                    </div>
+
+                    <div className="help-sec">
+                      <h3>[ DELIVERABILITY CHECKLIST ]</h3>
+                      <ul className="help-list">
+                        <li>DKIM on (SETTINGS → SENDER IDENTITY) + SPF/DMARC on the sending domain</li>
+                        <li>Warm-up enabled on a fresh IP — ramp 2–3 weeks</li>
+                        <li>TRACKING off for cold lists; on for engaged ones</li>
+                        <li>VERIFY DNS + SORTER before every import — kill no-MX/disposable early</li>
+                        <li>Watch BOUNCES — hard bounces and complaints suppress automatically</li>
+                        <li>SPAM CHECK every draft — fix what it flags before queueing</li>
+                      </ul>
+                    </div>
+
+                    <div className="help-sec">
+                      <h3>[ TROUBLESHOOTING ]</h3>
+                      <table className="w-table help-table"><thead><tr><th>SYMPTOM</th><th>FIX</th></tr></thead><tbody>
+                        <tr><td>AI 401 / "not working"</td><td>Key got wiped or is wrong — re-enter it in SETTINGS → AI ASSISTANT, save, retry. LIST MODELS confirms the key works.</td></tr>
+                        <tr><td>AI 503 "high demand"</td><td>Transient — the engine retries then fails over to the next live model automatically and persists the winner.</td></tr>
+                        <tr><td>Pool account in COOLDOWN</td><td>It failed recently — wait it out or VERIFY ALL to retest now. Check last_error in the pool table.</td></tr>
+                        <tr><td>GRAPH sends but pool mailboxes idle</td><td>Normal if pool is empty — import MS RT creds. Single-engine creds only run when the pool has zero MS accounts.</td></tr>
+                        <tr><td>API mode "Configure a from/direct email"</td><td>HTTP API sends via DIRECT CONFIG fields — fill FROM NAME + FROM EMAIL in SETTINGS.</td></tr>
+                        <tr><td>Queue won't start</td><td>SEND tab tells you why — missing engine creds, empty list, or send-window closed (see SCHEDULE).</td></tr>
+                      </tbody></table>
                     </div>
                   </div>
                 </div>
