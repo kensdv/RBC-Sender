@@ -841,19 +841,42 @@ const PLACEHOLDER_GROUPS = [
   },
 ];
 
+// Lucide-style stroke icons — crisp at 14px, no font dependency, no tofu.
+const NAV_ICONS = {
+  dashboard: 'M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z',
+  send: 'M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z',
+  compose: 'M4 4h16v16H4zM4 7l8 6 8-6',
+  aiwriter: 'M12 2l2.1 5.9L20 10l-5.9 2.1L12 18l-2.1-5.9L4 10l5.9-2.1zM19 15l.9 2.6L22.5 18.5l-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9z',
+  recipients: 'M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM21 21v-2a4 4 0 0 0-3-3.87M15.5 3.13a4 4 0 0 1 0 7.75',
+  sorter: 'M3 4h18l-7 8v5l-4 2v-7L3 4z',
+  smtp: 'M4 2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM4 14h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2zM6 6h.01M6 18h.01',
+  delivery: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
+  schedule: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2',
+  bounces: 'M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01',
+  analytics: 'M3 21h18M7 16v-5M12 16V8M17 16v-8',
+  help: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01',
+};
+function NavIcon({ name, size = 15 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={NAV_ICONS[name] || NAV_ICONS.help} />
+    </svg>
+  );
+}
+
 const NAV_ITEMS = [
-  { id: 'dashboard',  label: 'DASHBOARD',   icon: '◈' },
-  { id: 'send',       label: 'CAMPAIGN',    icon: '▶' },
-  { id: 'compose',    label: 'LETTER',      icon: '✉' },
-  { id: 'aiwriter',   label: 'AI WRITER',   icon: '✦' },
-  { id: 'recipients', label: 'CONTACTS',    icon: '@' },
-  { id: 'sorter',     label: 'SORTER',      icon: '⇅' },
-  { id: 'smtp',       label: 'SMTP',        icon: '⚙' },
-  { id: 'delivery',   label: 'SETTINGS',    icon: '⚡' },
-  { id: 'schedule',   label: 'SCHEDULE',    icon: '◷' },
-  { id: 'bounces',    label: 'BOUNCES',     icon: '⚠' },
-  { id: 'analytics',  label: 'ANALYTICS',   icon: '▤' },
-  { id: 'help',       label: 'HELP',        icon: '?' },
+  { id: 'dashboard',  label: 'DASHBOARD',   icon: 'dashboard' },
+  { id: 'send',       label: 'CAMPAIGN',    icon: 'send' },
+  { id: 'compose',    label: 'LETTER',      icon: 'compose' },
+  { id: 'aiwriter',   label: 'AI WRITER',   icon: 'aiwriter' },
+  { id: 'recipients', label: 'CONTACTS',    icon: 'recipients' },
+  { id: 'sorter',     label: 'SORTER',      icon: 'sorter' },
+  { id: 'smtp',       label: 'SMTP',        icon: 'smtp' },
+  { id: 'delivery',   label: 'SETTINGS',    icon: 'delivery' },
+  { id: 'schedule',   label: 'SCHEDULE',    icon: 'schedule' },
+  { id: 'bounces',    label: 'BOUNCES',     icon: 'bounces' },
+  { id: 'analytics',  label: 'ANALYTICS',   icon: 'analytics' },
+  { id: 'help',       label: 'HELP',        icon: 'help' },
 ];
 
 const BLOCK_TYPES = [
@@ -1217,6 +1240,7 @@ export default function App() {
   const [scheduledFor, setScheduledFor] = useState('');
   const [preview, setPreview] = useState(null);
   const [verifyResults, setVerifyResults] = useState(null);
+  const [opsLog, setOpsLog] = useState([]);
   const [previewDevice, setPreviewDevice] = useState('desktop');
   const [versionInfo, setVersionInfo] = useState(null);
   const [updateInfo, setUpdateInfo] = useState(null);
@@ -1235,7 +1259,9 @@ export default function App() {
   const [noticeType, setNoticeType] = useState('ok');
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState(null);
-  const [extractJob, setExtractJob] = useState(null); // {jobId, accountId, owner, fetched, total, status, error, contacts, list}
+  const [extractJob, setExtractJob] = useState(null);
+  const [clockNow, setClockNow] = useState(() => new Date());
+  useEffect(() => { const t = setInterval(() => setClockNow(new Date()), 1000); return () => clearInterval(t); }, []); // {jobId, accountId, owner, fetched, total, status, error, contacts, list}
   const [bodyMode, setBodyMode] = useState('html');
   const [toolbarOpen, setToolbarOpen] = useState(false);
   const [extraTemplates, setExtraTemplates] = useState([]);
@@ -1466,7 +1492,10 @@ export default function App() {
     return () => clearTimeout(t);
   }, [notice]);
 
-  function showNotice(msg, type = 'ok') { setNotice(msg); setNoticeType(type); }
+  function showNotice(msg, type = 'ok') {
+    setNotice(msg); setNoticeType(type);
+    setOpsLog((l) => [...l.slice(-199), { at: new Date(), msg, type }]);
+  }
 
   // In-app dialog system — replaces window.confirm / window.prompt
   function uiConfirm(message, { title = 'CONFIRM', danger = false, confirmLabel = 'CONFIRM' } = {}) {
@@ -1538,6 +1567,7 @@ export default function App() {
   async function applyUpdate() {
     setUpdating(true);
     setUpdateInfo(null);
+    setTimeout(() => setUpdating(false), 5000);
     try {
       await api(token, '/api/update/apply', { method: 'POST' });
       // Server restarts mid-run — poll the log for the outcome; request failures
@@ -1920,7 +1950,7 @@ export default function App() {
         <nav className="sb-nav" aria-label="Suite sections">
           {NAV_ITEMS.map((item) => (
             <button key={item.id} className={`nav-item ${tab === item.id ? 'active' : ''}`} aria-current={tab === item.id ? 'page' : undefined} onClick={() => setTab(item.id)}>
-              <span className="nav-icon" aria-hidden="true">{item.icon}</span>
+              <span className="nav-icon" aria-hidden="true"><NavIcon name={item.icon} /></span>
               <span>{item.label}</span>
             </button>
           ))}
@@ -1977,7 +2007,7 @@ export default function App() {
         {/* top bar */}
         <div className="topbar">
           <span className="topbar-title">
-            {NAV_ITEMS.find((n) => n.id === tab)?.icon}&nbsp;
+            <NavIcon name={NAV_ITEMS.find((n) => n.id === tab)?.icon} size={13} />&nbsp;
             {NAV_ITEMS.find((n) => n.id === tab)?.label}
           </span>
           {notice && (
@@ -2863,6 +2893,38 @@ export default function App() {
                             run(async () => { const r = await api(token, '/api/recipients', { method: 'DELETE' }); showNotice(`${r.deleted} recipients deleted.`); await refresh(); });
                           }
                         }}>CLEAR LIST</button>
+                      </div>
+                    </div>
+                    <div className="ops-console" aria-live="polite">
+                      <div className="ops-head">
+                        <span>ACTIVITY</span>
+                        <div className="btn-row">
+                          <button className="btn-xs" disabled={busy || !(verifyResults || []).length} onClick={() => {
+                            const csv = ['email,hasMx,provider,disposable,roleBased', ...(verifyResults || []).map((v) => `${v.email},${v.hasMx ? 1 : 0},${(v.provider || '').replaceAll(',', ' ')},${v.disposable ? 1 : 0},${v.roleBased ? 1 : 0}`)].join(String.fromCharCode(10));
+                            const b = new Blob([csv], { type: 'text/csv' });
+                            const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(b), download: 'verify-results.csv' });
+                            a.click(); URL.revokeObjectURL(b);
+                          }}>EXPORT</button>
+                          <button className="btn-xs" disabled={busy || !(verifyResults || []).some((v) => !v.hasMx || v.disposable || v.roleBased)} onClick={async () => {
+                            if (await uiConfirm(`Suppress ${(verifyResults || []).filter((v) => !v.hasMx || v.disposable || v.roleBased).length} flagged addresses?`, { title: 'SUPPRESS FLAGGED', danger: true, confirmLabel: 'SUPPRESS' })) {
+                              run(async () => {
+                                const emails = verifyResults.filter((v) => !v.hasMx || v.disposable || v.roleBased).map((v) => v.email);
+                                const r = await api(token, '/api/hygiene/suppress', { method: 'POST', body: { emails } });
+                                showNotice(`Suppressed ${r.suppressed} flagged addresses.`);
+                                await refresh();
+                              });
+                            }
+                          }}>SUPPRESS FLAGGED</button>
+                          {!!opsLog.length && <button className="btn-xs" onClick={() => setOpsLog([])}>CLEAR</button>}
+                        </div>
+                      </div>
+                      <div className="ops-lines">
+                        {opsLog.slice(-30).map((l, i) => (
+                          <div key={i} className={`ops-line ${l.type === 'err' ? 'ops-err' : ''}`}>
+                            <span className="dim">{l.at.toLocaleTimeString()}</span> {l.type === 'err' ? '✗' : '✓'} {l.msg}
+                          </div>
+                        ))}
+                        {!opsLog.length && <div className="ops-line dim">No actions yet — VERIFY DNS, SORT, PULL or IMPORT logs here live.</div>}
                       </div>
                     </div>
                     <div className="filter-row">
@@ -4211,11 +4273,17 @@ sudo tail -f /var/log/maillog`}</pre>
               {tab === 'dashboard' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                   <div className="dash-head">
-                    <div>
+                    <div className="dash-head-left">
                       <div className="dash-title">OPERATIONS</div>
-                      <div className="dim-txt">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })} · {state.confirmed} confirmed recipients · {state.campaigns.length} campaigns</div>
+                      <div className="dim-txt">{clockNow.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })} · {state.confirmed} confirmed recipients · {(state.campaigns || []).length} campaigns · {(state.smtpAccounts || []).filter((a) => a.enabled).length} live senders</div>
                     </div>
-                    <span className="dash-mode-pill">{sendMode.toUpperCase()}</span>
+                    <div className="dash-head-right">
+                      <div className="dash-clock">
+                        <span className="dash-clock-time">{clockNow.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                        <span className="dash-clock-tz">{Intl.DateTimeFormat().resolvedOptions().timeZone || 'local'} · GMT{(() => { const o = -clockNow.getTimezoneOffset() / 60; return `${o >= 0 ? '+' : ''}${o}`; })()}</span>
+                      </div>
+                      <span className="dash-mode-pill">{sendMode.toUpperCase()}</span>
+                    </div>
                   </div>
 
                   {(state.reputationAlerts || []).length > 0 && (
@@ -4256,6 +4324,7 @@ sudo tail -f /var/log/maillog`}</pre>
                   </div>
 
                   <div className="dash-grid">
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                     <div className="pane">
                       <div className="pane-head"><span>CAMPAIGNS</span></div>
                       <div className="tbl-wrap" style={{ maxHeight: 380 }}>
@@ -4285,6 +4354,12 @@ sudo tail -f /var/log/maillog`}</pre>
                       </div>
                     </div>
 
+                    <div className="pane">
+                      <div className="pane-head"><span>LIVE CONSOLE</span><span className="dim">streaming sends · opens · clicks · bounces</span></div>
+                      <LiveConsole events={state.events} />
+                    </div>
+                    </div>
+
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                       <div className="pane">
                         <div className="pane-head"><span>ENGINE STATUS</span></div>
@@ -4301,11 +4376,19 @@ sudo tail -f /var/log/maillog`}</pre>
 
                       <div className="pane">
                         <div className="pane-head"><span>QUICK ACTIONS</span></div>
-                        <div className="btn-row" style={{ flexWrap: 'wrap' }}>
-                          <button className="btn-sm" onClick={() => setTab('compose')}>[ NEW LETTER ]</button>
-                          <button className="btn-sm" onClick={() => setTab('recipients')}>[ IMPORT LIST ]</button>
-                          <button className="btn-sm" onClick={() => setTab('send')}>[ SEND / HISTORY ]</button>
-                          <button className="btn-sm" onClick={() => setTab('smtp')}>[ EMAIL SETUP ]</button>
+                        <div className="qa-grid">
+                          <button className="qa-btn" onClick={() => setTab('compose')}><span className="qa-ic">✉</span>NEW LETTER</button>
+                          <button className="qa-btn" onClick={() => setTab('send')}><span className="qa-ic">▶</span>LAUNCH</button>
+                          <button className="qa-btn" onClick={() => setTab('recipients')}><span className="qa-ic">@</span>IMPORT LIST</button>
+                          <button className="qa-btn" onClick={() => setTab('sorter')}><span className="qa-ic">⇅</span>SORT LIST</button>
+                          <button className="qa-btn" onClick={() => setTab('smtp')}><span className="qa-ic">⚙</span>POOL</button>
+                          <button className="qa-btn" disabled={busy} onClick={() => run(async () => {
+                            const r = await api(token, '/api/smtp/verify-all', { method: 'POST' });
+                            const okCount = (r.results || []).filter((x) => x.ok).length;
+                            showNotice(`Verify done — ${okCount}/${(r.results || []).length} live.`);
+                          })}><span className="qa-ic">✓</span>VERIFY ALL</button>
+                          <button className="qa-btn" onClick={() => setTab('delivery')}><span className="qa-ic">⚡</span>SETTINGS</button>
+                          <button className="qa-btn" onClick={() => setChatOpen(true)}><span className="qa-ic">✦</span>ASK AI</button>
                         </div>
                       </div>
 
@@ -4320,10 +4403,6 @@ sudo tail -f /var/log/maillog`}</pre>
                         {!(state.bounces || []).length && <p className="dim-txt">No bounces recorded.</p>}
                       </div>
                     </div>
-                  </div>
-                  <div className="pane">
-                    <div className="pane-head"><span>LIVE CONSOLE</span><span className="dim">streaming sends · opens · clicks · bounces</span></div>
-                    <LiveConsole events={state.events} />
                   </div>
                 </div>
               )}

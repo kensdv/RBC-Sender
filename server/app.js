@@ -1174,6 +1174,15 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     return { removed: result.changes || 0, prefixesChecked: rolePrefixes.length };
   });
 
+  app.post('/api/hygiene/suppress', async (request) => {
+    const emails = Array.isArray(request.body && request.body.emails) ? request.body.emails : [];
+    if (!emails.length) return { suppressed: 0 };
+    let suppressed = 0;
+    const stmt = db.prepare("UPDATE recipients SET suppressed = 1 WHERE email = ?");
+    for (const e of emails) { suppressed += (stmt.run(String(e)) .changes || 0); }
+    return { suppressed };
+  });
+
   app.post('/api/hygiene/remove-disposable-addresses', async (request) => {
     const disposableDomains = [
       'tempmail.org', 'guerillamail.com', 'mailinator.com', '10minutemail.com',
