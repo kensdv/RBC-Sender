@@ -223,6 +223,30 @@ try {
   console.warn('  ! sorter.gif failed:', e.message);
 }
 
+// ══ dashboard-4k.png — 3840×2160 hero shot with marketing figures ══
+try {
+  await page.setViewport({ width: 3840, height: 2160, deviceScaleFactor: 1 });
+  await clickTab('dashboard');
+  await sleep(2000);
+  await scrollTop();
+  await maskIp();
+  await page.evaluate(() => {
+    const figs = { 'TOTAL SENT': '5,400', 'FAILED': '329', 'IN QUEUE': '0', 'RECIPIENTS': '5,400', 'BOUNCES': '109' };
+    document.querySelectorAll('.kpi-card').forEach((card) => {
+      const lbl = card.querySelector('.kpi-lbl')?.textContent.trim();
+      const val = card.querySelector('.kpi-val');
+      if (val && figs[lbl] !== undefined) val.textContent = figs[lbl];
+    });
+  }).catch(() => {});
+  await sleep(400);
+  await maskIp();
+  await page.screenshot({ path: `${OUT}/dashboard-4k.png` });
+  written.push('dashboard-4k.png');
+  console.log('  ✓ dashboard-4k.png — 3840×2160');
+} catch (e) {
+  console.warn('  ! dashboard-4k.png failed:', e.message);
+}
+
 await browser.close();
 console.log('written:', written.join(', ') || '(nothing)');
 console.log('done →', OUT);
