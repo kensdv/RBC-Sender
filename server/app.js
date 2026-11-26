@@ -669,7 +669,17 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       endpoint, aiKey, model, timeoutMs: 60000,
       messages: [{ role: 'system', content: systemPrompt }, ...history],
     });
-    return { reply: cleanAiOutput(String(content)).slice(0, 50000), model: usedModel };
+    const reply = cleanAiOutput(String(content)).slice(0, 50000);
+    // Intent → apply-target hint so the client can offer the right apply buttons.
+    const lastUser = history[history.length - 1].content;
+    const genAsk = /\b(write|re.?write|generate|improve|fix|draft|create|make|compose|polish|shorten|lengthen|translate|give me|come up with|suggest)\b/i.test(lastUser);
+    let target = 'none';
+    if (genAsk) {
+      if (/preheader|pre-header|preview (text|line|snippet)|inbox preview/i.test(lastUser)) target = 'preheader';
+      else if (/subject|headline|title line/i.test(lastUser)) target = 'subject';
+      else target = 'body';
+    }
+    return { reply, model: usedModel, target };
   });
 
   // ── Spam Score Checker ──

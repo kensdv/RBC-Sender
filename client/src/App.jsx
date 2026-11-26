@@ -1433,13 +1433,18 @@ export default function App() {
         }),
         new Promise((_, rej) => setTimeout(() => rej(new Error('RBC Helper timed out — provider not responding')), 150000)),
       ]);
-      setChatMsgs([...msgs, { role: 'assistant', content: r.reply || '(empty reply)' }]);
+      setChatMsgs([...msgs, { role: 'assistant', content: r.reply || '(empty reply)', target: r.target || 'none' }]);
       if (r.model && r.model !== chatModel) setChatModel(r.model);
     } catch (err) {
       setChatMsgs([...msgs, { role: 'assistant', content: `⚠ ${err.message || 'chat failed'}` }]);
     } finally {
       setChatBusy(false);
     }
+  }
+
+  function applyChat(content, field) {
+    updateDraft(field === 'body' ? 'html' : field, content);
+    showNotice(`Applied to ${field === 'body' ? 'HTML body' : field === 'text' ? 'text body' : field}.`);
   }
 
   function login(e) {
@@ -3807,6 +3812,18 @@ sudo tail -f /var/log/maillog`}</pre>
             {chatMsgs.map((m, i) => (
               <div key={i} className={`chat-msg ${m.role === 'user' ? 'chat-user' : 'chat-ai'}`}>
                 <div className="chat-msg-text">{m.content}</div>
+                {m.role === 'assistant' && m.target && m.target !== 'none' && (
+                  <div className="chat-apply-row">
+                    {[['subject', 'SUBJECT'], ['preheader', 'PREHEADER'], ['body', 'BODY'], ['text', 'TEXT']].map(([f, label]) => (
+                      <button
+                        key={f}
+                        className={`chat-apply${m.target === f ? ' on' : ''}`}
+                        title={m.target === f ? 'suggested target' : ''}
+                        onClick={() => applyChat(m.content, f)}
+                      >→ {label}</button>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
             {chatBusy && <div className="chat-msg chat-ai"><div className="chat-msg-text dim">thinking…</div></div>}

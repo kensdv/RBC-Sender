@@ -1148,3 +1148,27 @@ code {
   border-top: 1px solid rgba(0, 255, 65, 0.25);
   flex-shrink: 0;
 }
+.chat-apply-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 5px;
+  flex-wrap: wrap;
+}
+.chat-apply {
+  background: transparent;
+  border: 1px solid rgba(0, 255, 65, 0.25);
+  color: var(--txt-dim);
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 1px;
+  padding: 3px 7px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.chat-apply:hover { border-color: var(--green); color: var(--green); }
+.chat-apply.on {
+  border-color: var(--green);
+  color: #001500;
+  background: var(--green);
+  font-weight: 700;
+}
