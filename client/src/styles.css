@@ -592,5 +592,83 @@ code {
 /* ── BOUNCES / CAMPAIGN HISTORY extra ── */
 .camp-row-status { display: flex; align-items: center; gap: 6px; }
 
+/* ── AI ASSISTANT PANEL ── */
+.ai-panel {
+  background: rgba(6, 16, 6, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 255, 65, 0.2);
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ai-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--green);
+  text-shadow: 0 0 5px rgba(0, 255, 65, 0.5);
+}
+.ai-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ai-prompt-input {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(0, 255, 65, 0.2);
+  border-radius: 4px;
+  padding: 6px 8px;
+  color: var(--green);
+  font-family: inherit;
+  font-size: 11px;
+  resize: vertical;
+  min-height: 36px;
+}
+.ai-prompt-input:focus {
+  outline: none;
+  border-color: var(--green);
+  box-shadow: 0 0 4px rgba(0, 255, 65, 0.3);
+}
+.ai-prompt-input::placeholder {
+  color: rgba(0, 255, 65, 0.4);
+}
+.ai-response-area {
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(0, 255, 65, 0.15);
+  border-radius: 4px;
+  padding: 8px;
+  margin-top: 4px;
+}
+.ai-response-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--cyan);
+  margin-bottom: 6px;
+}
+.ai-response-text {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(0, 255, 65, 0.1);
+  border-radius: 3px;
+  padding: 6px;
+  font-size: 10px;
+  color: var(--green);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.head-actions {
+  display: flex;
+  gap: 6px;
+}
+
 /* ── OVERFLOW FIX ── */
 .overflow-hidden-x { overflow-x: hidden; }

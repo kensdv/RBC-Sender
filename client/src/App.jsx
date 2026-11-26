@@ -105,6 +105,7 @@ const emptySettings = {
   engineClientId: '', engineClientSecret: '', engineTenant: '', engineRefreshToken: '', engineSendAs: '',
   engineMsRefreshToken: false, engineMsSendAs: '',
   attachFormats: [], imageRecompress: false,
+  aiEndpoint: '', aiKey: '', aiModel: '',
   sendDays: [], sendFromMin: 480, sendToMin: 1200, scheduleEnabled: true, capsEnabled: false,
   relaySecure: 0, relayUsername: '', relayPassword: '', relayPasswordSet: false, relayEhlo: '',
   maxPerHour: 5000, maxPerDay: 50000, warmupEnabled: false, warmupStartedAt: '',
@@ -896,6 +897,10 @@ export default function App() {
   const [dialog, setDialog] = useState(null);
   const [bodyMode, setBodyMode] = useState('html');
   const [extraTemplates, setExtraTemplates] = useState([]);
+  const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiResponse, setAiResponse] = useState('');
+  const [aiStreaming, setAiStreaming] = useState(false);
   const htmlRef = useRef(null);
   const pasteRef = useRef(null);
   const textRef = useRef(null);
@@ -1349,7 +1354,10 @@ export default function App() {
                   <div className="pane">
                     <div className="pane-head">
                       <span>{selectedId ? `EDIT DRAFT #${selectedId}` : 'NEW LETTER'}</span>
-                      <button className="btn-sm" disabled={busy} onClick={() => run(async () => { await saveDraft(); showNotice('Draft saved.'); })}>[ SAVE ]</button>
+                      <div className="head-actions">
+                        <button className="btn-sm" disabled={busy} onClick={() => setAiAssistantOpen(!aiAssistantOpen)}>[ AI ASSIST ]</button>
+                        <button className="btn-sm" disabled={busy} onClick={() => run(async () => { await saveDraft(); showNotice('Draft saved.'); })}>[ SAVE ]</button>
+                      </div>
                     </div>
 
                     <label className="field-label">CAMPAIGN NAME</label>
@@ -1360,6 +1368,67 @@ export default function App() {
 
                     <label className="field-label">PREHEADER <span className="dim">(inbox preview text)</span></label>
                     <input className="w-input" value={draft.preheader} onChange={(e) => updateDraft('preheader', e.target.value)} placeholder="Preview text recipients see next to the subject..." />
+
+                    {/* AI ASSISTANT PANEL */}
+                    {aiAssistantOpen && (
+                      <div className="ai-panel">
+                        <div className="ai-panel-head">
+                          <span>AI ASSISTANT</span>
+                          <button className="btn-sm" onClick={() => setAiAssistantOpen(false)}>[ × ]</button>
+                        </div>
+                        <div className="ai-presets">
+                          <button className="btn-sm" onClick={() => setAiPrompt('Rewrite the subject line for higher open rate.')}>[ REWRITE SUBJECT ]</button>
+                          <button className="btn-sm" onClick={() => setAiPrompt('Personalize the body content using [Firstname], [Lastname], [Company] placeholders.')}>[ PERSONALIZE BODY ]</button>
+                          <button className="btn-sm" onClick={() => setAiPrompt('Optimize this email for inbox placement and avoid spam triggers.')}>[ OPTIMIZE FOR INBOX ]</button>
+                          <button className="btn-sm" onClick={() => setAiPrompt('Fix any spam triggers in the content.')}>[ FIX SPAM TRIGGERS ]</button>
+                        </div>
+                        <textarea
+                          className="ai-prompt-input"
+                          value={aiPrompt}
+                          onChange={(e) => setAiPrompt(e.target.value)}
+                          placeholder="Custom prompt... e.g., 'Make the tone more urgent' or 'Add a call-to-action'"
+                          rows={2}
+                        />
+                        <button
+                          className="btn-sm"
+                          disabled={aiStreaming || !aiPrompt}
+                          onClick={async () => {
+                            setAiStreaming(true);
+                            setAiResponse('');
+                            try {
+                              const res = await api(token, '/api/ai/assist', {
+                                method: 'POST',
+                                body: { prompt: aiPrompt, subject: draft.subject, html: draft.html, text: draft.text },
+                              });
+                              setAiResponse(res.result || '');
+                            } catch (err) {
+                              setAiResponse(`Error: ${err.message || 'AI request failed'}`);
+                            } finally {
+                              setAiStreaming(false);
+                            }
+                          }}
+                        >
+                          {aiStreaming ? '[ GENERATING... ]' : '[ GENERATE ]'}
+                        </button>
+                        {aiResponse && (
+                          <div className="ai-response-area">
+                            <div className="ai-response-head">
+                              <span>RESULT</span>
+                              <button
+                                className="btn-sm"
+                                onClick={() => {
+                                  updateDraft('html', aiResponse);
+                                  showNotice('Applied to HTML body.');
+                                }}
+                              >
+                                [ APPLY TO BODY ]
+                              </button>
+                            </div>
+                            <pre className="ai-response-text">{aiResponse}</pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* AUDIENCE TARGETING */}
                     {(() => {
@@ -2347,6 +2416,26 @@ sudo tail -f /var/log/maillog`}</pre>
                         </div>
                       </>
                     )}
+                  </div>
+
+                  {/* AI ASSISTANT */}
+                  <div className="cfg-block">
+                    <div className="cfg-block-title">[ AI ASSISTANT ]</div>
+                    <p className="dim-txt">Connect an AI API to improve letter content directly from the COMPOSE panel. Key is stored encrypted.</p>
+                    <div className="form-grid">
+                      <div>
+                        <label className="field-label">AI ENDPOINT</label>
+                        <input className="w-input" value={settings.aiEndpoint} onChange={(e) => updateSettings('aiEndpoint', e.target.value)} placeholder="https://api.openai.com/v1/chat/completions" />
+                      </div>
+                      <div>
+                        <label className="field-label">MODEL</label>
+                        <input className="w-input" value={settings.aiModel} onChange={(e) => updateSettings('aiModel', e.target.value)} placeholder="gpt-4o" />
+                      </div>
+                      <div>
+                        <label className="field-label">API KEY {settings.aiKey === true ? <span className="dim">(configured — enter to rotate)</span> : null}</label>
+                        <input className="w-input" type="password" value={typeof settings.aiKey === 'string' ? settings.aiKey : ''} onChange={(e) => updateSettings('aiKey', e.target.value)} placeholder={settings.aiKey === true ? '(unchanged)' : 'sk-...'} />
+                      </div>
+                    </div>
                   </div>
 
                   {/* Email options */}
