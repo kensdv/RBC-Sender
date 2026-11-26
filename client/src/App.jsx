@@ -2760,6 +2760,22 @@ export default function App() {
                         </div>
                       </div>
 
+                      {!!(sorterResult.judged || []).length && (
+                        <div className="pane">
+                          <div className="pane-head"><span>WEBMAIL JUDGERS — STACK DETECTED ({sorterResult.judged.length})</span></div>
+                          <table className="w-table"><thead><tr><th>DOMAIN</th><th>STACK</th><th>EMAILS</th><th>MX</th></tr></thead><tbody>
+                            {sorterResult.judged.map((j) => (
+                              <tr key={j.domain}>
+                                <td>{j.domain}</td>
+                                <td className={j.stack === 'OWA/Exchange' ? 'cyan-txt' : j.stack === 'Zimbra' ? 'green-txt' : 'dim'}>{j.stack.toUpperCase()}</td>
+                                <td>{j.count}</td>
+                                <td className="dim">{j.mx || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody></table>
+                        </div>
+                      )}
+
                       <div className="two-col">
                         {!!(sorterResult.topDomains || []).length && (
                           <div className="pane">

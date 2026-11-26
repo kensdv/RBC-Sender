@@ -1781,17 +1781,38 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
 
   // Self-hosted webmail (Zimbra, OWA/Exchange) shows the same generic
   // mail.domain.com MX — probe the domain's web root for signatures.
+  // Webmail judger — probes mail./webmail. hosts and stack-specific paths.
+  // Returns 'OWA/Exchange' | 'Zimbra' | 'Roundcube' | null.
   async function probeWebmail(domain) {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 5000);
-      const res = await fetch(`https://${domain}/`, { signal: ctrl.signal, redirect: 'follow' });
-      clearTimeout(timer);
-      const body = (await res.text()).slice(0, 200000);
-      const url = res.url || '';
-      if (/zimbra/i.test(body) || /\/zimbra/i.test(url)) return 'Zimbra';
-      if (/owa\/auth|Microsoft\.Exchange|outlook\.office/i.test(body) || /\/owa(\/|$|\?)/i.test(url)) return 'OWA/Exchange';
-    } catch {}
+    const tryFetch = async (url, ms = 4000) => {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), ms);
+        const res = await fetch(url, { signal: ctrl.signal, redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } });
+        clearTimeout(timer);
+        return { url: res.url || url, body: (await res.text()).slice(0, 300000), headers: res.headers };
+      } catch { return null; }
+    };
+    const judge = (r) => {
+      if (!r) return null;
+      const hay = `${r.url}\n${r.body}`;
+      if (r.headers.get('x-owa-version') || /\/owa(\/|$|\?)|owa\/auth|outlook web app|microsoft\.exchange|OwaPage|exchange server/i.test(hay)) return 'OWA/Exchange';
+      if (/\/roundcube|roundcube|rcmail_|_task=mail|rcmbrowser/i.test(hay)) return 'Roundcube';
+      if (/\/zimbra|zimbra|zimbraMail|ZM_LOGIN|skin=/i.test(hay)) return 'Zimbra';
+      return null;
+    };
+    const targets = [
+      `https://mail.${domain}/owa/auth/logon.aspx`,
+      `https://mail.${domain}/owa/`,
+      `https://webmail.${domain}/`,
+      `https://mail.${domain}/`,
+      `https://${domain}/owa/`,
+      `https://${domain}/`,
+    ];
+    for (const t of targets) {
+      const hit = judge(await tryFetch(t));
+      if (hit) return hit;
+    }
     return null;
   }
 
@@ -1891,10 +1912,15 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       .map(([domain, count]) => ({ domain, count, provider: (mxCache[domain] || {}).provider || '—' }));
     const topTlds = Object.entries(tldCounts).sort((a, b) => b[1] - a[1]).slice(0, 10)
       .map(([tld, count]) => ({ tld, count }));
+    const WEBMAIL_STACKS = new Set(['OWA/Exchange', 'Zimbra', 'Roundcube']);
+    const judged = Object.entries(mxCache)
+      .filter(([, info]) => WEBMAIL_STACKS.has(info.provider))
+      .map(([domain, info]) => ({ domain, stack: info.provider, count: domainCounts[domain] || 0, mx: info.mx }))
+      .sort((a, b) => b.count - a.count);
     return {
       total: found.length, unique: emails.length, dupes,
       buckets: ordered, invalid, disposable, roleBased,
-      providers, topDomains, topTlds, freemailCount, businessCount,
+      providers, topDomains, topTlds, freemailCount, businessCount, judged,
       clean: valid.filter((e) => !roleBased.includes(e) && (buckets['No MX'] || []).indexOf(e) === -1 && (buckets['Unsorted (domain cap)'] || []).indexOf(e) === -1),
     };
   });
