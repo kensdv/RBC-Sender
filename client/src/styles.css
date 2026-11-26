@@ -1068,18 +1068,47 @@ code {
   right: 18px;
   bottom: 18px;
   z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   background: #001500;
   border: 1px solid var(--green);
   color: var(--green);
   font-family: inherit;
-  font-size: 13px;
-  letter-spacing: 1px;
-  padding: 10px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  padding: 9px 16px;
   border-radius: 6px;
   cursor: pointer;
   box-shadow: 0 0 14px rgba(47, 224, 107, 0.35);
 }
 .chat-fab:hover { background: rgba(47, 224, 107, 0.12); }
+.chat-fab .rbc-mascot { animation-duration: 1.4s; }
+
+/* ── Rubicon AI mascot — dancing alien droid ── */
+.rbc-mascot { display: inline-block; vertical-align: middle; overflow: visible;
+  animation: ms-bounce 1.8s cubic-bezier(.36,0,.64,1) infinite; }
+@keyframes ms-bounce {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  25% { transform: translateY(-6px) rotate(3deg); }
+  50% { transform: translateY(0) rotate(-3deg); }
+  75% { transform: translateY(-4px) rotate(2deg); }
+}
+.rbc-mascot .ms-antenna { animation: ms-wiggle 0.9s ease-in-out infinite alternate; transform-origin: 32px 14px; }
+@keyframes ms-wiggle { from { transform: rotate(-10deg); } to { transform: rotate(10deg); } }
+.rbc-mascot .ms-antenna-tip { animation: ms-blink-tip 1.2s ease-in-out infinite; }
+@keyframes ms-blink-tip { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.rbc-mascot .ms-eye-l, .rbc-mascot .ms-eye-r { animation: ms-eyes 3.4s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
+@keyframes ms-eyes { 0%, 46%, 54%, 100% { transform: scaleY(1); } 50% { transform: scaleY(0.12); } }
+.rbc-mascot .ms-arm-l { animation: ms-armL 1.8s ease-in-out infinite; transform-origin: 12px 47px; }
+.rbc-mascot .ms-arm-r { animation: ms-armR 1.8s ease-in-out infinite; transform-origin: 52px 47px; }
+@keyframes ms-armL { 0%, 100% { transform: rotate(0deg); } 30% { transform: rotate(-24deg); } 70% { transform: rotate(14deg); } }
+@keyframes ms-armR { 0%, 100% { transform: rotate(0deg); } 30% { transform: rotate(24deg); } 70% { transform: rotate(-14deg); } }
+.rbc-mascot .ms-leg-l { animation: ms-legL 0.9s ease-in-out infinite alternate; transform-origin: 27px 56px; }
+.rbc-mascot .ms-leg-r { animation: ms-legR 0.9s ease-in-out infinite alternate; transform-origin: 37px 56px; }
+@keyframes ms-legL { from { transform: rotate(-9deg); } to { transform: rotate(9deg); } }
+@keyframes ms-legR { from { transform: rotate(9deg); } to { transform: rotate(-9deg); } }
 .chat-panel {
   position: fixed;
   top: 0;

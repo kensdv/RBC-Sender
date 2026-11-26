@@ -1,6 +1,29 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api.js';
 
+function RbcMascot({ size = 34 }) {
+  return (
+    <svg className="rbc-mascot" width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
+      <line className="ms-antenna" x1="32" y1="14" x2="32" y2="6" stroke="var(--green)" strokeWidth="2.4" strokeLinecap="round" />
+      <circle className="ms-antenna-tip" cx="32" cy="5" r="2.6" fill="var(--cyan)" />
+      <rect className="ms-ear-l" x="5" y="26" width="6" height="12" rx="3" fill="var(--green)" opacity="0.85" />
+      <rect className="ms-ear-r" x="53" y="26" width="6" height="12" rx="3" fill="var(--green)" opacity="0.85" />
+      <rect className="ms-head" x="10" y="14" width="44" height="30" rx="14" fill="var(--panel2)" stroke="var(--green)" strokeWidth="2" />
+      <ellipse className="ms-eye-l" cx="23" cy="29" rx="4.4" ry="5.2" fill="var(--cyan)" />
+      <ellipse className="ms-eye-r" cx="41" cy="29" rx="4.4" ry="5.2" fill="var(--cyan)" />
+      <circle className="ms-pupil-l" cx="24" cy="30" r="1.6" fill="var(--bg)" />
+      <circle className="ms-pupil-r" cx="42" cy="30" r="1.6" fill="var(--bg)" />
+      <rect className="ms-mouth" x="25" y="37" width="14" height="3" rx="1.5" fill="var(--green)" />
+      <rect className="ms-arm-l" x="2" y="45" width="10" height="4" rx="2" fill="var(--green)" />
+      <rect className="ms-arm-r" x="52" y="45" width="10" height="4" rx="2" fill="var(--green)" />
+      <rect className="ms-body" x="22" y="44" width="20" height="12" rx="5" fill="var(--panel2)" stroke="var(--green)" strokeWidth="2" />
+      <circle cx="32" cy="50" r="2.4" fill="var(--yellow)" />
+      <line className="ms-leg-l" x1="27" y1="56" x2="25" y2="62" stroke="var(--green)" strokeWidth="2.6" strokeLinecap="round" />
+      <line className="ms-leg-r" x1="37" y1="56" x2="39" y2="62" stroke="var(--green)" strokeWidth="2.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function ChromosomeBackground() {
   const canvasRef = useRef(null);
   useEffect(() => {
@@ -2379,7 +2402,7 @@ export default function App() {
                   </div>
                   {awMode === 'letter' && (
                   <div className="pane">
-                    <div className="pane-head"><span>AI EMAIL WRITER</span></div>
+                    <div className="pane-head"><span><RbcMascot size={30} /> AI EMAIL WRITER — RUBICON AI</span></div>
                     <p className="dim-txt">Describe the letter — the AI drafts it against your current compose content, then apply straight into the draft. Pick a preset or write your own brief.</p>
                     <div className="ai-presets">
                       {[['COLD OUTREACH', 'Write a cold outreach email — short, professional, one clear call to action.'],
@@ -2731,6 +2754,13 @@ export default function App() {
                         catch (err) { showNotice(`Sort failed: ${err.message}`, 'err'); }
                         finally { setSorterBusy(false); }
                       }}>{sorterBusy ? '[ SORTING — MX lookups… ]' : '[ SORT LIST ]'}</button>
+                      <label className="btn-sm" style={{ margin: 0, cursor: 'pointer' }}>[ IMPORT FILE ]
+                        <input type="file" accept=".txt,.csv,.tsv,.eml,.lst,.json,.log,text/*,*/*" style={{ display: 'none' }} onChange={async (e) => {
+                          const f = e.target.files[0];
+                          if (f) setSorterInput((await f.text()).slice(0, 5000000));
+                          e.target.value = '';
+                        }} />
+                      </label>
                       {sorterInput.trim() && <button className="btn-sm" onClick={() => { setSorterInput(''); setSorterResult(null); }}>[ CLEAR ]</button>}
                     </div>
                   </div>
@@ -4525,12 +4555,12 @@ client_id:secret:tenant            app creds (no RT)
 
       {/* ── RHS AI CHATBOT ── */}
       {!chatOpen && (
-        <button className="chat-fab" title="AI chat" onClick={() => setChatOpen(true)}>✦ AI</button>
+        <button className="chat-fab" title="Rubicon AI" onClick={() => setChatOpen(true)}><RbcMascot size={22} /> RUBICON AI</button>
       )}
       {chatOpen && (
         <div className="chat-panel">
           <div className="chat-head">
-            <span>RBC HELPER AI</span>
+            <span>RUBICON AI</span>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               {chatModels?.length ? (
                 <select className="chat-model-sel" value={chatModel} onChange={(e) => setChatModel(e.target.value)}>
@@ -4585,7 +4615,7 @@ client_id:secret:tenant            app creds (no RT)
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
-              placeholder={chatModel ? `message ${chatModel}` : 'message…'}
+              placeholder="Talk to Rubicon AI…"
               disabled={chatBusy}
             />
             <button className="btn-sm" disabled={chatBusy || !chatInput.trim()} onClick={sendChat}>➤</button>

@@ -539,8 +539,6 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       }
       lastErr = `${res.status} — ${raw.slice(0, 300)}`;
       const retryable = [500, 502, 503, 429].includes(res.status);
-      const deadModel = res.status === 404 && /not.found|does not exist|no such/i.test(raw);
-      if (!retryable && !deadModel) fail(`AI request failed: ${lastErr}`);
       if (retryable && i === 0 && tries === 1) { await new Promise((r) => setTimeout(r, 2000)); continue; }
       i++;
       if (i >= candidates.length && candidates.length === 1) {
@@ -576,7 +574,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       const kw = (prompt + ' ' + subject).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3);
       const score = (t) => kw.reduce((n, w) => n + ((t.label + ' ' + t.subject).toLowerCase().includes(w) ? 1 : 0), 0);
       const best = EXTRA_TEMPLATES.map((t) => [score(t), t]).sort((a, b) => b[0] - a[0])[0];
-      if (best && best[0] > 0) exemplar = String(best[1].html || '').slice(0, 14000);
+      if (best && best[0] > 0) exemplar = String(best[1].html || '').slice(0, 8000);
     }
     const systemPrompt = `You are an email copywriting assistant specializing in deliverability, personalization, and inbox placement. Your job is to improve email content while preserving placeholders like [Firstname], [Lastname], [Company], ++rbc_*++, etc. The user will tell you what to do via the prompt field.${rules ? `\n\nSTANDING RULES set by the operator — follow these in every output, always:\n${rules}` : ''}
 
@@ -584,7 +582,7 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
     const userPrompt = `Current draft:\n\nSubject: ${subject || '(none)'}\n\nHTML body:\n${html || '(none)'}\n\nText body:\n${textBody || '(none)'}\n\nTask: ${prompt}${exemplar ? `\n\nREFERENCE EXEMPLAR — a real production letter from the library. Match its layout class, brand styling, color scheme and structure; adapt content to the task:\n\`\`\`html\n${exemplar}\n\`\`\`` : ''}`;
     const messages = [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }];
     const model = text(body.model || '', 'model', 200) || row.ai_model;
-    const { content, model: usedModel } = await aiChatRequest({ endpoint, aiKey, model, messages });
+    const { content, model: usedModel } = await aiChatRequest({ endpoint, aiKey, model, messages, timeoutMs: 60000 });
     let result = cleanAiOutput(String(content).slice(0, 50000), target);
     if (target === 'attachment') {
       const b64pdf = result.match(/JVBERi[A-Za-z0-9+/=]{200,}/)?.[0];
@@ -1903,7 +1901,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
 
   // Standalone sorter — paste raw emails, get provider buckets + flags. Does not touch the contacts table.
   app.post('/api/sorter', async (request) => {
-    const raw = String(request.body?.text || '').slice(0, 500000);
+    const raw = String(request.body?.text || '').slice(0, 5000000);
     const found = raw.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || [];
     const seen = new Set();
     const emails = [];
@@ -1914,7 +1912,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       seen.add(addr);
       emails.push(addr);
     }
-    if (emails.length > 2000) fail('Max 2,000 unique emails per sort', 400);
+    if (emails.length > 50000) fail('Max 50,000 unique emails per sort', 400);
     const invalid = [], disposable = [], roleBased = [], valid = [];
     for (const addr of emails) {
       const [local, domain] = addr.split('@');
@@ -1923,7 +1921,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       if (ROLE_LOCALS.has(local)) roleBased.push(addr);
       valid.push(addr);
     }
-    const domains = [...new Set(valid.map((e) => e.split('@')[1]))].slice(0, 120);
+    const domains = [...new Set(valid.map((e) => e.split('@')[1]))].slice(0, 600);
     const mxCache = {};
     const CONCURRENCY = 10;
     for (let i = 0; i < domains.length; i += CONCURRENCY) {
