@@ -8,9 +8,32 @@ function ChromosomeBackground() {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     let animId;
-    const resize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
-    resize();
+    const resize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; waterResize(); };
     window.addEventListener('resize', resize);
+
+    // ── Water field (liquid-glass): damped height-field ripple sim ──
+    const WSCALE = 6;
+    let wW = 0, wH = 0, bufA = null, bufB = null, wImg = null;
+    const waterCanvas = document.createElement('canvas');
+    const wctx = waterCanvas.getContext('2d');
+    function waterResize() {
+      wW = Math.max(4, Math.floor(canvas.width / WSCALE));
+      wH = Math.max(4, Math.floor(canvas.height / WSCALE));
+      bufA = new Float32Array(wW * wH);
+      bufB = new Float32Array(wW * wH);
+      waterCanvas.width = wW; waterCanvas.height = wH;
+      wImg = wctx.createImageData(wW, wH);
+    }
+    const drop = (x, y, s = 400) => {
+      const cx = Math.floor(x / WSCALE), cy = Math.floor(y / WSCALE);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const px = cx + dx, py = cy + dy;
+        if (px > 0 && px < wW - 1 && py > 0 && py < wH - 1) bufA[py * wW + px] += s / (Math.abs(dx) + Math.abs(dy) + 1);
+      }
+    };
+    const onPointer = (e) => { if (document.documentElement.dataset.theme === 'glass') drop(e.clientX, e.clientY, 240); };
+    window.addEventListener('pointermove', onPointer);
+    resize();
 
     // ── Neon galaxy: static stars + slow nebula glow pulses ──
     const STAR_COUNT = 400;
@@ -39,43 +62,69 @@ function ChromosomeBackground() {
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Base — deep phosphor, or deep aurora under the liquid-glass theme
       const glass = document.documentElement.dataset.theme === 'glass';
-      ctx.fillStyle = glass ? '#0b1220' : '#020402';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (glass) {
+        // ── LIQUID GLASS: transparent canvas, water ripple highlights only ──
+        if (Math.random() < 0.09) drop(Math.random() * canvas.width, Math.random() * canvas.height, 280 + Math.random() * 520);
+        for (let y = 1; y < wH - 1; y++) {
+          const row = y * wW;
+          for (let x = 1; x < wW - 1; x++) {
+            const i = row + x;
+            bufB[i] = ((bufA[i - 1] + bufA[i + 1] + bufA[i - wW] + bufA[i + wW]) * 0.5 - bufB[i]) * 0.985;
+          }
+        }
+        const tmp = bufA; bufA = bufB; bufB = tmp;
+        const px = wImg.data;
+        for (let i = wW + 1; i < wW * wH - wW - 1; i++) {
+          const gx = bufA[i + 1] - bufA[i - 1];
+          const gy = bufA[i + wW] - bufA[i - wW];
+          const mag = Math.min(110, Math.sqrt(gx * gx + gy * gy) * 1.35);
+          const j = i * 4;
+          px[j] = 150 + gx * 0.7; px[j + 1] = 220; px[j + 2] = 245; px[j + 3] = mag;
+        }
+        wctx.putImageData(wImg, 0, 0);
+        ctx.globalCompositeOperation = 'screen';
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(waterCanvas, 0, 0, wW, wH, 0, 0, canvas.width, canvas.height);
+        ctx.globalCompositeOperation = 'source-over';
+      } else {
+        // Base — deep phosphor
+        ctx.fillStyle = '#020402';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Nebula clouds — slow pulsing radial gradients
-      for (const n of nebulas) {
-        n.pulse += n.pulseSpd;
-        const amp = 0.7 + 0.3 * Math.sin(n.pulse);
-        const g = ctx.createRadialGradient(n.cx, n.cy, 0, n.cx, n.cy, n.r * amp);
-        g.addColorStop(0,   `rgba(${n.col},${n.alpha * amp})`);
-        g.addColorStop(0.5, `rgba(${n.col},${n.alpha * 0.4 * amp})`);
-        g.addColorStop(1,   'rgba(0,0,0,0)');
-        ctx.fillStyle = g;
-        ctx.beginPath(); ctx.arc(n.cx, n.cy, n.r * amp, 0, Math.PI * 2); ctx.fill();
-      }
+        // Nebula clouds — slow pulsing radial gradients
+        for (const n of nebulas) {
+          n.pulse += n.pulseSpd;
+          const amp = 0.7 + 0.3 * Math.sin(n.pulse);
+          const g = ctx.createRadialGradient(n.cx, n.cy, 0, n.cx, n.cy, n.r * amp);
+          g.addColorStop(0,   `rgba(${n.col},${n.alpha * amp})`);
+          g.addColorStop(0.5, `rgba(${n.col},${n.alpha * 0.4 * amp})`);
+          g.addColorStop(1,   'rgba(0,0,0,0)');
+          ctx.fillStyle = g;
+          ctx.beginPath(); ctx.arc(n.cx, n.cy, n.r * amp, 0, Math.PI * 2); ctx.fill();
+        }
 
-      // Stars — static positions, pulsing brightness
-      for (const s of stars) {
-        s.pulse += s.pulseSpd;
-        const a = s.alpha * (0.6 + 0.4 * Math.sin(s.pulse));
-        const col = s.cyan ? '0,220,255' : '0,255,65';
-        ctx.fillStyle = `rgba(${col},${a})`;
-        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
-        // Occasional bright cross for larger stars
-        if (s.r > 1 && Math.random() < 0.01) {
-          ctx.strokeStyle = `rgba(${col},${a * 0.8})`;
-          ctx.lineWidth = 0.6;
-          ctx.beginPath(); ctx.moveTo(s.x - s.r * 3, s.y); ctx.lineTo(s.x + s.r * 3, s.y); ctx.stroke();
-          ctx.beginPath(); ctx.moveTo(s.x, s.y - s.r * 3); ctx.lineTo(s.x, s.y + s.r * 3); ctx.stroke();
+        // Stars — static positions, pulsing brightness
+        for (const s of stars) {
+          s.pulse += s.pulseSpd;
+          const a = s.alpha * (0.6 + 0.4 * Math.sin(s.pulse));
+          const col = s.cyan ? '0,220,255' : '0,255,65';
+          ctx.fillStyle = `rgba(${col},${a})`;
+          ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+          // Occasional bright cross for larger stars
+          if (s.r > 1 && Math.random() < 0.01) {
+            ctx.strokeStyle = `rgba(${col},${a * 0.8})`;
+            ctx.lineWidth = 0.6;
+            ctx.beginPath(); ctx.moveTo(s.x - s.r * 3, s.y); ctx.lineTo(s.x + s.r * 3, s.y); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(s.x, s.y - s.r * 3); ctx.lineTo(s.x, s.y + s.r * 3); ctx.stroke();
+          }
         }
       }
 
       animId = requestAnimationFrame(draw);
     };
     draw();
-    return () => { cancelAnimationFrame(animId); window.removeEventListener('resize', resize); };
+    return () => { cancelAnimationFrame(animId); window.removeEventListener('resize', resize); window.removeEventListener('pointermove', onPointer); };
   }, []);
   return <canvas ref={canvasRef} style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }} />;
 }
@@ -1241,6 +1290,8 @@ export default function App() {
   const [recipPage, setRecipPage] = useState(1);
   const [bouncePage, setBouncePage] = useState(1);
   const [histPage, setHistPage] = useState(1);
+  const [campFilter, setCampFilter] = useState('all');
+  const [campSearch, setCampSearch] = useState('');
   const [acctPage, setAcctPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [templates, setTemplates] = useState([]);
@@ -1738,10 +1789,27 @@ export default function App() {
   const filteredRecip = engagementTier === 'all' ? allRecip : allRecip.filter((r) => { const s = r.engagement_score || 0; return (s >= 70 ? 'hot' : s >= 31 ? 'warm' : 'cold') === engagementTier; });
   const pagedRecip = filteredRecip.slice((recipPage - 1) * pageSize, recipPage * pageSize);
   const pagedBounces = (state?.bounces || []).slice((bouncePage - 1) * pageSize, bouncePage * pageSize);
-  const pagedCampaigns = (state?.campaigns || []).slice((histPage - 1) * pageSize, histPage * pageSize);
+  const filteredCampaigns = (state?.campaigns || []).filter((c) => {
+    if (campFilter === 'active' && !['queued', 'sending', 'scheduled'].includes(c.status)) return false;
+    if (campFilter === 'draft' && c.status !== 'draft') return false;
+    if (campFilter === 'done' && !['completed', 'failed', 'cancelled'].includes(c.status)) return false;
+    if (campSearch && !`${c.name} ${c.subject} ${c.id}`.toLowerCase().includes(campSearch.toLowerCase())) return false;
+    return true;
+  });
+  const pagedCampaigns = filteredCampaigns.slice((histPage - 1) * pageSize, histPage * pageSize);
   const pagedAccounts = (state?.smtpAccounts || []).slice((acctPage - 1) * pageSize, acctPage * pageSize);
   const draftEmpty = !draft.html.trim() && !draft.text.trim();
   const canQueue = !draftEmpty && draft.subject.trim().length > 0;
+  const engineCheck = {
+    smtp: { ok: !!state?.smtp?.configured || (state?.smtpAccounts?.length || 0) > 0, hint: 'add an SMTP account or server' },
+    direct: { ok: !!settings.directFromEmail, hint: 'set FROM EMAIL in SETTINGS' },
+    socks5: { ok: !!settings.directFromEmail && !!settings.socks5Proxy, hint: 'set proxy + FROM EMAIL in SETTINGS' },
+    relay: { ok: !!settings.relayHost && !!settings.directFromEmail, hint: 'set relay host + FROM EMAIL' },
+    graph: { ok: !!(settings.engineClientId && settings.engineClientSecret && settings.engineTenant), hint: 'enter Graph credentials in SETTINGS' },
+    gmail: { ok: !!(settings.engineClientId && settings.engineClientSecret && settings.engineRefreshToken), hint: 'enter Gmail OAuth credentials in SETTINGS' },
+    api: { ok: !!settings.apiProvider && (settings.apiKeySet || settings.apiProvider === 'custom') && !!settings.directFromEmail, hint: 'pick provider, add key + FROM EMAIL' },
+  };
+  const { ok: engineReady, hint: engineHint } = engineCheck[sendMode] || { ok: false, hint: 'configure the engine' };
   const chatSugg = [
     totals.failed > 0 ? `Why are ${totals.failed} sends failing?` : null,
     !(state?.smtpAccounts || []).length ? 'How do I import MS mailboxes?' : 'Check my account pool health',
@@ -4019,27 +4087,60 @@ sudo tail -f /var/log/maillog`}</pre>
                       </div>
                     ))}
                   </div>
-                  <div className="pane send-pane">
-                    <div>
-                      <div className="pane-head"><span>LAUNCH CAMPAIGN</span></div>
-                      <p className="dim-txt">Mode: <strong className="green-txt">{sendMode.toUpperCase()}</strong> — {state.confirmed} active recipients</p>
-                      <p className="dim-txt">Window: <strong>{settings.scheduleEnabled === false ? '24/7 — always on' : `${(settings.sendDays || []).length ? (settings.sendDays || []).map((d) => DAY_LABELS[d] || d).join('/') : 'daily'} ${fmtMin(settings.sendFromMin)}–${fmtMin(settings.sendToMin)} ${settings.timezone || 'UTC'}`}</strong>{' '}
+                  <div className="pane">
+                    <div className="pane-head"><span>CAMPAIGN SETUP</span><span className="dim">follow the steps — launch unlocks when ready</span></div>
+                    <div className="setup-steps">
+                      <div className={`setup-step ${canQueue ? 'ok' : ''}`}>
+                        <span className="setup-check">{canQueue ? '✓' : '!'}</span>
+                        <div className="setup-body">
+                          <span className="setup-lbl">1 · LETTER</span>
+                          <span className="setup-val">{draft.subject?.trim() ? `"${draft.subject.trim().slice(0, 60)}"` : draft.name || 'no subject — draft incomplete'}</span>
+                        </div>
+                        <button className="btn-xs" onClick={() => setTab('compose')}>[ LETTER ]</button>
+                      </div>
+                      <div className={`setup-step ${state.confirmed > 0 ? 'ok' : ''}`}>
+                        <span className="setup-check">{state.confirmed > 0 ? '✓' : '!'}</span>
+                        <div className="setup-body">
+                          <span className="setup-lbl">2 · AUDIENCE</span>
+                          <span className="setup-val">{state.confirmed} confirmed contacts{(draft.providers || []).length ? ` · targeted: ${(draft.providers || []).join(', ')}` : ' · all providers'}</span>
+                        </div>
+                        <button className="btn-xs" onClick={() => setTab('recipients')}>[ CONTACTS ]</button>
+                        <button className="btn-xs" onClick={() => setTab('sorter')}>[ SORTER ]</button>
+                      </div>
+                      <div className={`setup-step ${engineReady ? 'ok' : ''}`}>
+                        <span className="setup-check">{engineReady ? '✓' : '!'}</span>
+                        <div className="setup-body">
+                          <span className="setup-lbl">3 · ENGINE</span>
+                          <span className="setup-val">{engineReady ? `${sendMode.toUpperCase()} ready${sendMode === 'smtp' && state.smtpAccounts?.length ? ` · ${state.smtpAccounts.length} pool accounts` : ''}` : `${sendMode.toUpperCase()} not configured — ${engineHint}`}</span>
+                        </div>
+                        <button className="btn-xs" onClick={() => setTab('delivery')}>[ SETTINGS ]</button>
+                      </div>
+                      <div className="setup-step ok">
+                        <span className="setup-check">✓</span>
+                        <div className="setup-body">
+                          <span className="setup-lbl">4 · WINDOW</span>
+                          <span className="setup-val">{settings.scheduleEnabled === false ? '24/7 — always on' : `${(settings.sendDays || []).length ? (settings.sendDays || []).map((d) => DAY_LABELS[d] || d).join('/') : 'daily'} ${fmtMin(settings.sendFromMin)}–${fmtMin(settings.sendToMin)} ${settings.timezone || 'UTC'}`}</span>
+                        </div>
                         {settings.scheduleEnabled === false
-                          ? <button className="btn-xs" onClick={() => setTab('schedule')}>[ SET WINDOW ]</button>
+                          ? <button className="btn-xs" onClick={() => setTab('schedule')}>[ WINDOW ]</button>
                           : <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
                               const next = { ...settings, scheduleEnabled: false };
                               await api(token, '/api/settings', { method: 'PUT', body: next });
                               setSettings(next); showNotice('Send window OFF — queue sends 24/7.'); await refresh();
                             })}>[ 24/7 ]</button>}
-                      </p>
+                      </div>
                     </div>
-                    <div style={{display:'flex',gap:8,alignItems:'center'}}>
-                      <input className="w-input" style={{ maxWidth: 220 }} type="email" placeholder="test to…" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
+                    <div className="setup-launch">
+                      <input className="w-input" style={{ maxWidth: 240 }} placeholder="campaign name…" value={draft.name} onChange={(e) => updateDraft('name', e.target.value)} />
+                      <input className="w-input" style={{ maxWidth: 200 }} type="email" placeholder="test to…" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
                       <button className="btn-sm" disabled={busy || !testTo.includes('@')} onClick={() => run(async () => {
                         const r = await api(token, '/api/test-send', { method: 'POST', body: { to: testTo, subject: draft.subject, html: draft.html, text: draft.text, attachments: draft.attachments } });
                         showNotice(`Test sent (${r.messageId || 'ok'}) — check ${testTo}.`); setTestTo('');
                       })}>[ SEND TEST ]</button>
-                      <button className="btn-primary btn-send" disabled={busy || !state.confirmed || !canQueue} onClick={() => queue(false)}>[ SEND NOW ]</button>
+                      <input className="w-input" style={{ maxWidth: 210 }} type="datetime-local" value={scheduledFor} onChange={(e) => setScheduledFor(e.target.value)} title="Schedule for later — leave empty for now" />
+                      {scheduledFor
+                        ? <button className="btn-primary" disabled={busy || !state.confirmed || !canQueue} onClick={() => { try { new Date(scheduledFor).toISOString(); queue(true); } catch { showNotice('Invalid date.', 'err'); } }}>[ QUEUE SCHEDULED ]</button>
+                        : <button className="btn-primary btn-send" disabled={busy || !state.confirmed || !canQueue || !engineReady} onClick={() => queue(false)}>[ ▶ LAUNCH NOW ]</button>}
                     </div>
                   </div>
 
@@ -4049,7 +4150,15 @@ sudo tail -f /var/log/maillog`}</pre>
                   </div>
 
                   <div className="pane">
-                    <div className="pane-head"><span>CAMPAIGN HISTORY</span></div>
+                    <div className="pane-head">
+                      <span>CAMPAIGN LIBRARY <span className="dim">({filteredCampaigns.length})</span></span>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                        {[['all', 'ALL'], ['active', 'ACTIVE'], ['draft', 'DRAFTS'], ['done', 'FINISHED']].map(([v, l]) => (
+                          <button key={v} className={`btn-xs ${campFilter === v ? 'btn-solid' : ''}`} onClick={() => { setCampFilter(v); setHistPage(1); }}>{l}</button>
+                        ))}
+                        <input className="w-input" style={{ width: 180, padding: '4px 8px', fontSize: 11 }} placeholder="search name / subject…" value={campSearch} onChange={(e) => { setCampSearch(e.target.value); setHistPage(1); }} />
+                      </div>
+                    </div>
                     <div className="tbl-wrap">
                       <table className="w-table">
                         <thead><tr><th>#</th><th>NAME</th><th>STATUS</th><th>TOTAL</th><th>SENT</th><th>FAIL</th><th>QUEUE</th><th>ACTION</th></tr></thead>
@@ -4098,7 +4207,7 @@ sudo tail -f /var/log/maillog`}</pre>
                         </tbody>
                       </table>
                     </div>
-                    <Pager total={(state.campaigns || []).length} page={histPage} setPage={setHistPage} size={pageSize} setSize={setPageSize} />
+                    <Pager total={filteredCampaigns.length} page={histPage} setPage={setHistPage} size={pageSize} setSize={setPageSize} />
                   </div>
                 </div>
               )}

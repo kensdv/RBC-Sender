@@ -1357,3 +1357,25 @@ code {
 :root[data-theme='glass'] .share-bar { background: rgba(255, 255, 255, 0.08); }
 :root[data-theme='glass'] .share-row { border-bottom-color: rgba(255, 255, 255, 0.07); }
 :root[data-theme='glass'] .theme-toggle { color: var(--cyan) !important; }
+
+/* Campaign setup wizard */
+.setup-steps { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.setup-step { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); }
+.setup-step.ok { border-color: rgba(47,224,107,0.3); }
+.setup-check { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 900; flex-shrink: 0; background: rgba(255,204,0,0.12); color: var(--yellow); border: 1px solid rgba(255,204,0,0.3); }
+.setup-step.ok .setup-check { background: rgba(47,224,107,0.12); color: var(--green); border-color: rgba(47,224,107,0.4); }
+.setup-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.setup-lbl { font-size: 9px; letter-spacing: 1.5px; color: var(--txt-dim); }
+.setup-val { font-size: 12px; color: var(--txt); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setup-launch { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding-top: 12px; border-top: var(--glass-border); }
+
+/* Liquid glass — crystal-clear pass */
+:root[data-theme='glass'] body {
+  background:
+    radial-gradient(ellipse 90% 60% at 15% 0%, rgba(0,120,200,0.22), transparent 55%),
+    radial-gradient(ellipse 80% 60% at 85% 30%, rgba(90,40,200,0.18), transparent 60%),
+    radial-gradient(ellipse 100% 70% at 50% 100%, rgba(0,170,140,0.14), transparent 60%),
+    linear-gradient(165deg, #070e18 0%, #0a1a2e 45%, #081120 100%);
+  background-attachment: fixed;
+}
+:root[data-theme='glass'] { --glass-bg: rgba(255, 255, 255, 0.03); --glass-blur: blur(36px) saturate(200%); }
