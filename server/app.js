@@ -608,12 +608,58 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
       .map((m) => ({ role: m.role, content: String(m.content || '').slice(0, 8000) }))
       .filter((m) => m.content);
     if (!history.length || history[history.length - 1].role !== 'user') fail('messages must end with a user turn');
-    const systemPrompt = `You are a helpful assistant inside an email-sending control panel. Answer directly and concisely.${rules ? `\n\nSTANDING RULES set by the operator — follow these in every output, always:\n${rules}` : ''}`;
+
+    // Live sender state — RBC Helper answers from real data, not guesses.
+    const st = db.prepare(`SELECT send_mode, direct_from_name, direct_from_email, direct_reply_to,
+      engine_send_as, engine_tenant, relay_host, relay_port, socks5_proxy,
+      send_days_json, send_from_min, send_to_min, max_per_hour, max_per_day, warmup_enabled,
+      timezone, track_opens, track_clicks, test_email_enabled, test_every, test_destination,
+      parallel_sends, sleep_ms, encoding, text_only FROM send_settings WHERE id = 1`).get() || {};
+    const accounts = db.prepare(`SELECT label, auth_type, host, username, from_email, enabled,
+      daily_quota, sent_today, fails, cooldown_until, last_error, last_check FROM smtp_accounts ORDER BY id`).all();
+    const counts = {
+      recipients: db.prepare('SELECT COUNT(*) c FROM recipients').get().c,
+      suppressed: db.prepare('SELECT COUNT(*) c FROM recipients WHERE suppressed = 1').get().c,
+      queued: db.prepare("SELECT COUNT(*) c FROM deliveries WHERE status IN ('queued','sending')").get().c,
+      sent: db.prepare("SELECT COUNT(*) c FROM deliveries WHERE status = 'sent'").get().c,
+      failed: db.prepare("SELECT COUNT(*) c FROM deliveries WHERE status = 'failed'").get().c,
+      bounces: db.prepare('SELECT COUNT(*) c FROM bounces').get().c,
+    };
+    const mins = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    const stateLines = [
+      `send_mode: ${st.send_mode}`,
+      st.send_mode === 'graph' ? `engine send-as: ${st.engine_send_as || '(unset)'} tenant: ${st.engine_tenant || '(unset)'}` : '',
+      st.direct_from_email ? `identity: ${st.direct_from_name} <${st.direct_from_email}> reply-to: ${st.direct_reply_to || '-'}` : '',
+      st.relay_host ? `relay: ${st.relay_host}:${st.relay_port}` : '',
+      st.socks5_proxy ? `proxy: ${st.socks5_proxy}` : '',
+      `window: ${st.send_from_min != null ? mins(st.send_from_min) : '?'}-${st.send_to_min != null ? mins(st.send_to_min) : '?'} days: ${st.send_days_json || '[]'} tz: ${st.timezone}`,
+      `caps: ${st.max_per_hour}/h ${st.max_per_day}/day warmup: ${st.warmup_enabled ? 'on' : 'off'} parallel: ${st.parallel_sends} sleep_ms: ${st.sleep_ms}`,
+      `tracking: opens=${st.track_opens ? 'on' : 'off'} clicks=${st.track_clicks ? 'on' : 'off'} text_only=${st.text_only ? 'on' : 'off'} encoding=${st.encoding}`,
+      st.test_email_enabled ? `test-echo: every ${st.test_every} → ${st.test_destination}` : '',
+      `list: ${counts.recipients} recipients (${counts.suppressed} suppressed) · queue: ${counts.queued} queued, ${counts.sent} sent, ${counts.failed} failed · bounces: ${counts.bounces}`,
+      `pool (${accounts.length}): ` + (accounts.length
+        ? accounts.map((a) => `${a.enabled ? 'ON ' : 'OFF'}${a.label || a.from_email || a.username}[${a.auth_type || 'smtp'}${a.host ? ' ' + a.host : ''} ${a.username || ''} ${a.from_email || ''} q=${a.sent_today || 0}/${a.daily_quota || 0} fails=${a.fails || 0}${a.cooldown_until && a.cooldown_until > new Date().toISOString() ? ' COOLDOWN' : ''}${a.last_error ? ' err:' + String(a.last_error).slice(0, 80) : ''}]`).join(' | ')
+        : 'empty — legacy config used'),
+    ].filter(Boolean).join('\n');
+
+    const ctx = body.context || {};
+    const ctxLines = [
+      ctx.tab ? `operator's current screen: ${ctx.tab}` : '',
+      ctx.subject ? `draft subject: ${String(ctx.subject).slice(0, 300)}` : '',
+      ctx.html ? `draft html:\n${String(ctx.html).slice(0, 6000)}` : '',
+      ctx.text ? `draft text:\n${String(ctx.text).slice(0, 3000)}` : '',
+    ].filter(Boolean).join('\n');
+
+    const systemPrompt = `You are RBC Helper, the built-in assistant of the RBC Sender panel. You have full read access to this sender's live state (below) — answer from it, quote real numbers. Be concise and technical. When asked to write or rewrite email content, output the content itself and preserve placeholders like [Firstname], [Company], ++rbc_*++ exactly.
+
+LIVE STATE OF THIS SENDER:
+${stateLines}
+${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RULES set by the operator — follow these in every output, always:\n${rules}` : ''}`;
     const { content, model: usedModel } = await aiChatRequest({
       endpoint, aiKey, model,
       messages: [{ role: 'system', content: systemPrompt }, ...history],
     });
-    return { reply: String(content).slice(0, 50000), model: usedModel };
+    return { reply: cleanAiOutput(String(content)).slice(0, 50000), model: usedModel };
   });
 
   // ── Spam Score Checker ──

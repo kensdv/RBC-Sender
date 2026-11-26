@@ -1420,7 +1420,13 @@ export default function App() {
     setChatInput('');
     setChatBusy(true);
     try {
-      const r = await api(token, '/api/ai/chat', { method: 'POST', body: { messages: msgs, model: chatModel } });
+      const r = await api(token, '/api/ai/chat', {
+        method: 'POST',
+        body: {
+          messages: msgs, model: chatModel,
+          context: { tab, subject: draft.subject, html: draft.html, text: draft.text },
+        },
+      });
       setChatMsgs([...msgs, { role: 'assistant', content: r.reply || '(empty reply)' }]);
       if (r.model && r.model !== chatModel) setChatModel(r.model);
     } catch (err) {
@@ -1635,7 +1641,7 @@ export default function App() {
   return (
     <>
     <ChromosomeBackground />
-    <div className="layout">
+    <div className={`layout${chatOpen ? ' chat-open' : ''}`}>
 
       {/* ── SIDEBAR ── */}
       <aside className="sidebar">
@@ -3779,7 +3785,7 @@ sudo tail -f /var/log/maillog`}</pre>
       {chatOpen && (
         <div className="chat-panel">
           <div className="chat-head">
-            <span>AI CHAT</span>
+            <span>RBC HELPER</span>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               {chatModels?.length ? (
                 <select className="chat-model-sel" value={chatModel} onChange={(e) => setChatModel(e.target.value)}>

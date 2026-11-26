@@ -243,6 +243,11 @@ export function openDatabase(path) {
     db.prepare("INSERT INTO send_settings (id, ai_rules) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET ai_rules = CASE WHEN ai_rules = '' THEN excluded.ai_rules ELSE ai_rules END").run(DEFAULT_AI_RULES);
     db.prepare("INSERT INTO integrations (key, value) VALUES ('ai_rules_seeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'").run();
   }
+  // Retired persona ruleset → RBC Helper (the seeded blob made the model sign as SMITH/LORD).
+  const curRules = db.prepare("SELECT ai_rules FROM send_settings WHERE id = 1").get()?.ai_rules || '';
+  if (/LORD's ORDER|\bSMITH\b|🫡/i.test(curRules)) {
+    db.prepare('UPDATE send_settings SET ai_rules = ? WHERE id = 1').run(DEFAULT_AI_RULES);
+  }
   // Retired provider models → current replacements (endpoint-gated so custom setups are untouched).
   const staleModels = [
     ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b', 'api.groq.com'],

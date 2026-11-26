@@ -46,7 +46,9 @@ body {
 .layout {
   display: flex; height: 100vh; overflow: hidden;
   position: relative; z-index: 1;
+  transition: margin-right 0.25s ease;
 }
+.layout.chat-open { margin-right: 340px; }
 
 /* ── SIDEBAR ── */
 .sidebar {
