@@ -569,6 +569,18 @@ code {
 /* ── AUDIENCE BLOCK ── */
 .audience-block { display: flex; flex-direction: column; gap: 6px; }
 .provider-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.prov-chip {
+  background: rgba(47,224,107,0.04); border: 1px solid rgba(47,224,107,0.18);
+  color: var(--txt-dim); font: inherit; font-size: 12px; font-weight: 700;
+  letter-spacing: .08em; padding: 5px 12px; cursor: pointer; border-radius: 3px;
+  transition: all .12s; text-transform: uppercase;
+}
+.prov-chip:hover { border-color: var(--green); color: var(--txt); }
+.prov-chip-on {
+  background: var(--green); border-color: var(--green); color: #03180b;
+  box-shadow: 0 0 12px rgba(47,224,107,0.45); text-shadow: none;
+}
+.prov-chip-clear { border-style: dashed; color: var(--faint, var(--txt-dim)); }
 .provider-chip {
   font: inherit; font-size: 12px; font-weight: 600; letter-spacing: .08em;
   padding: 4px 10px; cursor: pointer; transition: none;
