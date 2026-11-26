@@ -176,7 +176,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       'x-content-type-options': 'nosniff',
       'referrer-policy': 'no-referrer',
       'x-frame-options': 'DENY',
-      'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     });
   });
 
@@ -1208,10 +1208,10 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
   // ── Analytics ──
   app.get('/api/analytics/overview', async (request) => {
     const last30Days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const opens = db.prepare('SELECT COUNT(*) as count FROM analytics_events WHERE kind = "open" AND occurred_at > ?').get(last30Days).count;
-    const clicks = db.prepare('SELECT COUNT(*) as count FROM analytics_events WHERE kind = "click" AND occurred_at > ?').get(last30Days).count;
+    const opens = db.prepare("SELECT COUNT(*) as count FROM analytics_events WHERE kind = 'open' AND occurred_at > ?").get(last30Days).count;
+    const clicks = db.prepare("SELECT COUNT(*) as count FROM analytics_events WHERE kind = 'click' AND occurred_at > ?").get(last30Days).count;
     const bounces = db.prepare('SELECT COUNT(*) as count FROM bounces WHERE created_at > ?').get(last30Days).count;
-    const complaints = db.prepare('SELECT COUNT(*) as count FROM bounces WHERE classification = "spam_complaint" AND created_at > ?').get(last30Days).count;
+    const complaints = db.prepare("SELECT COUNT(*) as count FROM bounces WHERE classification = 'spam_complaint' AND created_at > ?").get(last30Days).count;
     const campaigns = db.prepare('SELECT COUNT(*) as count FROM campaigns WHERE created_at > ?').get(last30Days).count;
     const recipients = db.prepare('SELECT COUNT(*) as count FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0').get().count;
     const heatmapRows = db.prepare('SELECT hour, SUM(opens) AS opens, SUM(clicks) AS clicks FROM engagement_heatmap GROUP BY hour').all();
