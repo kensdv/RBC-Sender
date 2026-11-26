@@ -1589,8 +1589,15 @@ export default function App() {
           <div>
             <span className="sb-wordmark">RBC<span>SENDER</span></span>
             {versionInfo && (
-              <div className="sb-ver">
-                v{versionInfo.version}{versionInfo.commit ? ` · ${versionInfo.commit.slice(0, 7)}` : ''}
+              <div className="sb-ver" title="Check for update" style={{ cursor: 'pointer' }} onClick={async () => {
+                try {
+                  const r = await api(token, '/api/update/check');
+                  setVersionInfo({ version: r.version, commit: r.local });
+                  if (!r.upToDate && r.remote) setUpdateInfo(r);
+                  else showNotice(`Up to date — ${String(r.local || '').slice(0, 7)}`);
+                } catch { showNotice('Update check failed.'); }
+              }}>
+                v{versionInfo.version}{versionInfo.commit ? ` · ${versionInfo.commit.slice(0, 7)}` : ''} ↻
               </div>
             )}
           </div>
