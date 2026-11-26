@@ -354,6 +354,19 @@ export function openDatabase(path) {
       );
     `);
   }
+  const assetCols = db.prepare('SELECT name FROM sqlite_master WHERE type="table" AND name="asset_library"').get();
+  if (!assetCols) {
+    db.exec(`
+      CREATE TABLE asset_library (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        data_url TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX asset_library_type_idx ON asset_library(type);
+    `);
+  }
   // campaigns.status CHECK predates the 'failed' state — rebuild the table once
   const campaignSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'campaigns'").get()?.sql || '';
   if (!campaignSql.includes("'failed'")) {

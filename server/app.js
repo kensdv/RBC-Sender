@@ -778,6 +778,31 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     return { markedInvalid: invalid.changes || 0 };
   });
 
+  // ── Asset Library ──
+  app.post('/api/assets', async (request) => {
+    const body = request.body || {};
+    const { name, type, dataUrl } = body;
+    if (!name || !type || !dataUrl) fail('name, type, dataUrl required');
+    const now = new Date().toISOString();
+    const result = db.prepare('INSERT INTO asset_library (name, type, data_url, created_at) VALUES (?, ?, ?, ?)')
+      .run(name, type, dataUrl, now);
+    return { id: result.lastInsertRowid };
+  });
+
+  app.get('/api/assets', async (request) => {
+    const type = request.query.type || '';
+    const rows = type
+      ? db.prepare('SELECT id, name, type, data_url, created_at FROM asset_library WHERE type = ? ORDER BY created_at DESC').all(type)
+      : db.prepare('SELECT id, name, type, data_url, created_at FROM asset_library ORDER BY created_at DESC').all();
+    return rows.map(r => ({ id: r.id, name: r.name, type: r.type, dataUrl: r.data_url, createdAt: r.created_at }));
+  });
+
+  app.delete('/api/assets/:id', async (request) => {
+    const assetId = Number(request.params.id);
+    db.prepare('DELETE FROM asset_library WHERE id = ?').run(assetId);
+    return { ok: true };
+  });
+
   // ── Campaign Templates ──
   app.post('/api/templates', async (request) => {
     const body = request.body || {};
