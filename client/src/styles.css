@@ -1467,3 +1467,30 @@ details.help-sec[open] summary::before { content: 'v '; }
 :root[data-theme='obsidian'] .sent-val,
 :root[data-theme='obsidian'] .loading { text-shadow: none; }
 :root[data-theme='obsidian'] .theme-toggle { color: var(--yellow) !important; }
+
+/* ── CAMPAIGN SETUP — pre-flight deck ── */
+.setup-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.setup-step {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(47,224,107,0.03); border: 1px solid rgba(47,224,107,0.14);
+  border-radius: 6px; padding: 12px 14px;
+}
+.setup-step.ok { border-color: rgba(47,224,107,0.4); background: rgba(47,224,107,0.06); }
+.setup-step:not(.ok) { border-color: rgba(245,166,35,0.35); }
+.setup-check {
+  flex: 0 0 26px; height: 26px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 900; font-size: 12px;
+  background: rgba(245,166,35,0.12); color: var(--yellow); border: 1px solid var(--yellow);
+}
+.setup-step.ok .setup-check { background: var(--green); color: #03180b; border-color: var(--green); box-shadow: 0 0 12px rgba(47,224,107,0.5); }
+.setup-body { flex: 1; min-width: 0; }
+.setup-lbl { display: block; font-size: 12px; font-weight: 900; letter-spacing: .16em; color: var(--green); }
+.setup-val { display: block; font-size: 12px; color: var(--txt-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setup-step .btn-xs { flex-shrink: 0; }
+
+.setup-deck { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; border-top: 1px solid rgba(47,224,107,0.12); padding-top: 14px; }
+.deck-field { min-width: 0; }
+.deck-row { display: flex; gap: 8px; }
+.deck-row .w-input { flex: 1; min-width: 0; }
+.deck-btn { flex-shrink: 0; white-space: nowrap; }

@@ -4306,7 +4306,7 @@ sudo tail -f /var/log/maillog`}</pre>
                     ))}
                   </div>
                   <div className="pane">
-                    <div className="pane-head"><span>CAMPAIGN SETUP</span></div>
+                    <div className="pane-head"><span>CAMPAIGN SETUP</span><span className="dim">pre-flight checklist — green means armed</span></div>
                     <div className="setup-steps">
                       <div className={`setup-step ${canQueue ? 'ok' : ''}`}>
                         <span className="setup-check">{canQueue ? '✓' : '!'}</span>
@@ -4314,7 +4314,7 @@ sudo tail -f /var/log/maillog`}</pre>
                           <span className="setup-lbl">1 · LETTER</span>
                           <span className="setup-val">{draft.subject?.trim() ? `"${draft.subject.trim().slice(0, 60)}"` : draft.name || 'no subject — draft incomplete'}</span>
                         </div>
-                        <button className="btn-xs" onClick={() => setTab('compose')}>[ LETTER ]</button>
+                        <button className="btn-xs" onClick={() => setTab('compose')}>LETTER</button>
                       </div>
                       <div className={`setup-step ${state.confirmed > 0 ? 'ok' : ''}`}>
                         <span className="setup-check">{state.confirmed > 0 ? '✓' : '!'}</span>
@@ -4322,8 +4322,8 @@ sudo tail -f /var/log/maillog`}</pre>
                           <span className="setup-lbl">2 · AUDIENCE</span>
                           <span className="setup-val">{state.confirmed} confirmed contacts{(draft.providers || []).length ? ` · targeted: ${(draft.providers || []).join(', ')}` : ' · all providers'}</span>
                         </div>
-                        <button className="btn-xs" onClick={() => setTab('recipients')}>[ CONTACTS ]</button>
-                        <button className="btn-xs" onClick={() => setTab('sorter')}>[ SORTER ]</button>
+                        <button className="btn-xs" onClick={() => setTab('recipients')}>CONTACTS</button>
+                        <button className="btn-xs" onClick={() => setTab('sorter')}>SORTER</button>
                       </div>
                       <div className={`setup-step ${engineReady ? 'ok' : ''}`}>
                         <span className="setup-check">{engineReady ? '✓' : '!'}</span>
@@ -4331,7 +4331,7 @@ sudo tail -f /var/log/maillog`}</pre>
                           <span className="setup-lbl">3 · ENGINE</span>
                           <span className="setup-val">{engineReady ? `${sendMode.toUpperCase()} ready${sendMode === 'smtp' && state.smtpAccounts?.length ? ` · ${state.smtpAccounts.length} pool accounts` : ''}` : `${sendMode.toUpperCase()} not configured — ${engineHint}`}</span>
                         </div>
-                        <button className="btn-xs" onClick={() => setTab('delivery')}>[ SETTINGS ]</button>
+                        <button className="btn-xs" onClick={() => setTab('delivery')}>SETTINGS</button>
                       </div>
                       <div className="setup-step ok">
                         <span className="setup-check">✓</span>
@@ -4340,25 +4340,38 @@ sudo tail -f /var/log/maillog`}</pre>
                           <span className="setup-val">{settings.scheduleEnabled === false ? '24/7 — always on' : `${(settings.sendDays || []).length ? (settings.sendDays || []).map((d) => DAY_LABELS[d] || d).join('/') : 'daily'} ${fmtMin(settings.sendFromMin)}–${fmtMin(settings.sendToMin)} ${settings.timezone || 'UTC'}`}</span>
                         </div>
                         {settings.scheduleEnabled === false
-                          ? <button className="btn-xs" onClick={() => setTab('schedule')}>[ WINDOW ]</button>
+                          ? <button className="btn-xs" onClick={() => setTab('schedule')}>WINDOW</button>
                           : <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
                               const next = { ...settings, scheduleEnabled: false };
                               await api(token, '/api/settings', { method: 'PUT', body: next });
                               setSettings(next); showNotice('Send window OFF — queue sends 24/7.'); await refresh();
-                            })}>[ 24/7 ]</button>}
+                            })}>24/7</button>}
                       </div>
                     </div>
-                    <div className="setup-launch">
-                      <input className="w-input" style={{ maxWidth: 240 }} placeholder="campaign name…" value={draft.name} onChange={(e) => updateDraft('name', e.target.value)} />
-                      <input className="w-input" style={{ maxWidth: 200 }} type="email" placeholder="test to…" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
-                      <button className="btn-sm" disabled={busy || !testTo.includes('@')} onClick={() => run(async () => {
-                        const r = await api(token, '/api/test-send', { method: 'POST', body: { to: testTo, subject: draft.subject, html: draft.html, text: draft.text, attachments: draft.attachments } });
-                        showNotice(`Test sent (${r.messageId || 'ok'}) — check ${testTo}.`); setTestTo('');
-                      })}>[ SEND TEST ]</button>
-                      <input className="w-input" style={{ maxWidth: 210 }} type="datetime-local" value={scheduledFor} onChange={(e) => setScheduledFor(e.target.value)} title="Schedule for later — leave empty for now" />
-                      {scheduledFor
-                        ? <button className="btn-primary" disabled={busy || !state.confirmed || !canQueue} onClick={() => { try { new Date(scheduledFor).toISOString(); queue(true); } catch { showNotice('Invalid date.', 'err'); } }}>[ QUEUE SCHEDULED ]</button>
-                        : <button className="btn-primary btn-send" disabled={busy || !state.confirmed || !canQueue || !engineReady} onClick={() => queue(false)}>[ ▶ LAUNCH NOW ]</button>}
+                    <div className="setup-deck">
+                      <div className="deck-field">
+                        <label className="field-label">CAMPAIGN NAME</label>
+                        <input className="w-input" placeholder="name this run…" value={draft.name} onChange={(e) => updateDraft('name', e.target.value)} />
+                      </div>
+                      <div className="deck-field">
+                        <label className="field-label">TEST FIRE — ONE SHOT TO YOURSELF</label>
+                        <div className="deck-row">
+                          <input className="w-input" type="email" placeholder="you@yourdomain.com" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
+                          <button className="btn-sm deck-btn" disabled={busy || !testTo.includes('@')} onClick={() => run(async () => {
+                            const r = await api(token, '/api/test-send', { method: 'POST', body: { to: testTo, subject: draft.subject, html: draft.html, text: draft.text, attachments: draft.attachments } });
+                            showNotice(`Test sent (${r.messageId || 'ok'}) — check ${testTo}.`); setTestTo('');
+                          })}>SEND TEST</button>
+                        </div>
+                      </div>
+                      <div className="deck-field">
+                        <label className="field-label">LAUNCH — NOW OR ON THE CLOCK</label>
+                        <div className="deck-row">
+                          <input className="w-input" type="datetime-local" value={scheduledFor} onChange={(e) => setScheduledFor(e.target.value)} title="Leave empty to fire now" />
+                          {scheduledFor
+                            ? <button className="btn-primary deck-btn" disabled={busy || !state.confirmed || !canQueue} onClick={() => { try { new Date(scheduledFor).toISOString(); queue(true); } catch { showNotice('Invalid date.', 'err'); } }}>QUEUE SCHEDULED</button>
+                            : <button className="btn-primary btn-send deck-btn" disabled={busy || !state.confirmed || !canQueue || !engineReady} onClick={() => queue(false)}>▶ LAUNCH NOW</button>}
+                        </div>
+                      </div>
                     </div>
                   </div>
 
