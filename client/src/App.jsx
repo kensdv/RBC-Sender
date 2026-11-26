@@ -3519,7 +3519,7 @@ sudo tail -f /var/log/maillog`}</pre>
                       <p className="dim-txt">Mode: <strong className="green-txt">{sendMode.toUpperCase()}</strong> — {state.confirmed} active recipients</p>
                       <p className="dim-txt">Window: <strong>{settings.scheduleEnabled === false ? '24/7 — always on' : `${(settings.sendDays || []).length ? (settings.sendDays || []).map((d) => DAY_LABELS[d] || d).join('/') : 'daily'} ${fmtMin(settings.sendFromMin)}–${fmtMin(settings.sendToMin)} ${settings.timezone || 'UTC'}`}</strong>{' '}
                         {settings.scheduleEnabled === false
-                          ? <button className="btn-xs" onClick={() => setTab('settings')}>[ SET WINDOW ]</button>
+                          ? <button className="btn-xs" onClick={() => setTab('schedule')}>[ SET WINDOW ]</button>
                           : <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
                               const next = { ...settings, scheduleEnabled: false };
                               await api(token, '/api/settings', { method: 'PUT', body: next });

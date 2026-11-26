@@ -660,7 +660,19 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
       ctx.text ? `draft text:\n${String(ctx.text).slice(0, 3000)}` : '',
     ].filter(Boolean).join('\n');
 
-    const systemPrompt = `You are RBC Helper, the built-in assistant of the RBC Sender panel. You have full read access to this sender's live state (below) — answer from it, quote real numbers. Be concise and technical. When asked to write or rewrite email content, output the content itself and preserve placeholders like [Firstname], [Company], ++rbc_*++ exactly.
+    const systemPrompt = `You are RBC Helper, the built-in assistant of the RBC Sender panel. You have full read access to this sender's live state (below) — answer from it, quote real numbers. Be concise and technical. When asked to write or rewrite email content, output the content itself and preserve placeholders like [Firstname], [Company], ++rbc_*++ exactly. When pointing the operator somewhere, name the exact tab and section from the LAYOUT MAP — never say "Settings" for things on the EMAIL tab.
+
+LAYOUT MAP (sidebar tabs):
+- DASHBOARD: overview, stats
+- LETTER: compose drafts — subject, preheader, body (HTML/text/blocks), AI assist panel, attachments, templates
+- MAIL LIST: recipients, import CSV/paste, suppression
+- EMAIL: OUTGOING CONNECTION (SMTP config + provider presets + guides), SENDING ACCOUNTS — ACCOUNT POOL rotation/failover with [ IMPORT MS RT ] and [ VERIFY ALL ] buttons in the pane head, ADD ACCOUNT form, SENDING HOURS, LIMITS & WARM-UP, INBOX (IMAP)
+- SETTINGS: SEND TYPE (SMTP auth / Direct MX / Relay / Proxy / Graph API / Gmail API), MICROSOFT GRAPH ENGINE creds, GMAIL engine, encoding/spoof/DKIM/headers, tracking, TIMEZONE, AI ASSISTANT (endpoint/key/model/rules + LIST MODELS)
+- SCHEDULE: sending window, timezone
+- SEND: queue launch, campaign history, pause/resume/retry
+- BOUNCES: bounce log + suppression
+- ANALYTICS: delivery stats
+NOTE: the [ IMPORT MS RT ] button is on the EMAIL tab inside ACCOUNT POOL — accepts client_id:refresh_token, email:cid:rt, cid:secret:tenant, or JSON, one per line.
 
 LIVE STATE OF THIS SENDER:
 ${stateLines}
@@ -705,8 +717,8 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       const dc = db.prepare("SELECT id FROM campaigns WHERE status = 'draft' ORDER BY id DESC LIMIT 1").get();
       if (dc) actions.push({ id: 'queue', label: `QUEUE CAMPAIGN #${dc.id}`, campaignId: dc.id });
     }
-    if (/open|go to|take me|show me|jump to/i.test(lu)) {
-      const tabHit = [['setting', 'settings'], ['smtp', 'smtp'], ['email', 'smtp'], ['compos', 'compose'], ['letter', 'compose'], ['list', 'recipients'], ['recipient', 'recipients'], ['send', 'send'], ['bounc', 'bounces'], ['analytic', 'analytics'], ['schedul', 'schedule'], ['dash', 'dashboard']].find(([k]) => lu.includes(k));
+    if (/open|go to|take me|show me|jump to|where|cant find|can't find|cannot find|missing|how do i (get|go|navigate)|navigate/i.test(lu)) {
+      const tabHit = [['import ms', 'smtp'], ['ms rt', 'smtp'], ['refresh token', 'smtp'], ['mailbox', 'smtp'], ['pool', 'smtp'], ['account', 'smtp'], ['smtp', 'smtp'], ['imap', 'smtp'], ['inbox', 'smtp'], ['import list', 'recipients'], ['import csv', 'recipients'], ['import contact', 'recipients'], ['import recipient', 'recipients'], ['list', 'recipients'], ['recipient', 'recipients'], ['contact', 'recipients'], ['graph', 'delivery'], ['setting', 'delivery'], ['config', 'delivery'], ['ai ', 'delivery'], ['model', 'delivery'], ['compos', 'compose'], ['letter', 'compose'], ['draft', 'compose'], ['send', 'send'], ['queue', 'send'], ['bounc', 'bounces'], ['analytic', 'analytics'], ['schedul', 'schedule'], ['window', 'schedule'], ['dash', 'dashboard']].find(([k]) => lu.includes(k));
       if (tabHit) actions.push({ id: 'goto', label: `OPEN ${tabHit[1].toUpperCase()}`, tab: tabHit[1] });
     }
     return { reply, model: usedModel, target, actions };
