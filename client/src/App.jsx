@@ -1264,7 +1264,7 @@ export default function App() {
       })
       .catch(() => {});
     check();
-    const iv = setInterval(check, 60 * 60 * 1000);
+    const iv = setInterval(check, 15 * 60 * 1000);
     return () => { alive = false; clearInterval(iv); };
   }, [token]);
 
