@@ -13,6 +13,7 @@ import { publicSmtp, publicSendSettings, getGraphAccessToken } from './mailer.js
 import { escapeHtml } from './placeholders.js';
 import { transaction } from './db.js';
 import { DEFAULT_AI_RULES } from './default-ai-rules.js';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { createEmitter, telegramStatus, saveTelegram, sendTelegram, formatEvent } from './telegram.js';
 import { listEvents } from './events.js';
 
@@ -24,6 +25,52 @@ const UPLOADS_DIR = fileURLToPath(new URL('../data/uploads/', import.meta.url));
 const APP_ROOT    = fileURLToPath(new URL('../', import.meta.url));
 mkdirSync(UPLOADS_DIR, { recursive: true });
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+// Strip persona markers/preamble models emit despite instruction; normalize per target.
+function cleanAiOutput(raw, target) {
+  let out = String(raw || '');
+  out = out.replace(/\[[^\]\n]*ORDER[^\]\n]*\][^\n🫡]*🫡?/gi, '');
+  out = out.replace(/🫡/g, '');
+  const fence = out.trim().match(/^```[a-z]*\s*\n([\s\S]*?)\n?\s*```\s*$/i);
+  if (fence) out = fence[1];
+  if (target === 'subject' || target === 'preheader') {
+    out = out.trim().replace(/^(subject|preheader|preview text|title)\s*:\s*/i, '');
+    out = out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)[0] || out.trim();
+    out = out.replace(/^["'`]+|["'`]+$/g, '').trim().slice(0, 250);
+  }
+  return out;
+}
+
+// Render AI-generated document text to a real PDF (standard fonts = WinAnsi; sanitize beyond latin-1).
+async function renderPdf(text) {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const margin = 54, lineHeight = 15, size = 11, maxChars = 88;
+  const sanitize = (s) => s.replace(/[^\x20-\x7E -ÿ]/g, '');
+  const lines = [];
+  for (const raw of String(text).split(/\r?\n/)) {
+    let line = sanitize(raw).trimEnd();
+    if (!line.trim()) { lines.push(''); continue; }
+    while (line.length > maxChars) {
+      const cut = line.lastIndexOf(' ', maxChars) > 30 ? line.lastIndexOf(' ', maxChars) : maxChars;
+      lines.push(line.slice(0, cut));
+      line = line.slice(cut).trimStart();
+    }
+    lines.push(line);
+  }
+  let page = doc.addPage([612, 792]);
+  let y = 792 - margin;
+  for (const ln of lines.slice(0, 4000)) {
+    if (y < margin) { page = doc.addPage([612, 792]); y = 792 - margin; }
+    try {
+      page.drawText(ln, { x: margin, y, size, font, color: rgb(0.12, 0.12, 0.12) });
+    } catch {
+      page.drawText(ln.replace(/[^\x20-\x7E]/g, '?'), { x: margin, y, size, font, color: rgb(0.12, 0.12, 0.12) });
+    }
+    y -= lineHeight;
+  }
+  return doc.save();
+}
 
 function sanitizeAttachments(input) {
   if (!Array.isArray(input)) return [];
@@ -427,7 +474,13 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const rules = row.ai_rules || DEFAULT_AI_RULES;
     if (!endpoint || !aiKey) fail('AI endpoint and key must be configured in SETTINGS');
     if (!model) fail('AI model must be configured in SETTINGS');
-    const systemPrompt = `You are an email copywriting assistant specializing in deliverability, personalization, and inbox placement. Your job is to improve email content while preserving placeholders like [Firstname], [Lastname], [Company], ++rbc_*++, etc. Return only the improved content — no explanations, no meta commentary. The user will tell you what to do via the prompt field.${rules ? `\n\nSTANDING RULES set by the operator — follow these in every output, always:\n${rules}` : ''}`;
+    const wantsAttachment = /\bpdf\b|\battach(?:ment|ed)?\b|\bdoc(?:ument)?\s*(file|attach)|\bfile\s*attach|invoice pdf|brochure|\bstatement\s*(pdf|file)/i.test(prompt);
+    const wantsPreheader = !wantsAttachment && /preheader|pre-header|preview (text|line|snippet)|inbox preview/i.test(prompt);
+    const wantsSubject = !wantsAttachment && !wantsPreheader && /subject|headline|title line/i.test(prompt);
+    const target = wantsAttachment ? 'attachment' : wantsPreheader ? 'preheader' : wantsSubject ? 'subject' : 'body';
+    const systemPrompt = `You are an email copywriting assistant specializing in deliverability, personalization, and inbox placement. Your job is to improve email content while preserving placeholders like [Firstname], [Lastname], [Company], ++rbc_*++, etc. The user will tell you what to do via the prompt field.${rules ? `\n\nSTANDING RULES set by the operator — follow these in every output, always:\n${rules}` : ''}
+
+OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact the task asks for and nothing else. A subject request returns exactly one subject line. A document request returns only the document body text. Never emit signature markers, bracketed greetings, salutations to the operator, identity declarations, or meta commentary. The strings "[LORD's ORDER" and "🫡" must never appear in output.`;
     const userPrompt = `Current draft:\n\nSubject: ${subject || '(none)'}\n\nHTML body:\n${html || '(none)'}\n\nText body:\n${textBody || '(none)'}\n\nTask: ${prompt}`;
     let res;
     try {
@@ -453,7 +506,13 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       ?? data.response
       ?? '';
     if (Array.isArray(content)) content = content.map((c) => (typeof c === 'string' ? c : c?.text || '')).join('');
-    return { result: String(content).slice(0, 50000) };
+    let result = cleanAiOutput(String(content).slice(0, 50000), target);
+    if (target === 'attachment') {
+      const b64pdf = result.match(/JVBERi[A-Za-z0-9+/=]{200,}/)?.[0];
+      const data = b64pdf || Buffer.from(await renderPdf(result)).toString('base64');
+      return { result, target, attachment: { filename: 'ai-document.pdf', contentType: 'application/pdf', data } };
+    }
+    return { result, target };
   });
 
   // Live model list from the provider — keeps model choice current when providers retire IDs.

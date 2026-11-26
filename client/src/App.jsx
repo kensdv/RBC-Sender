@@ -1174,6 +1174,8 @@ export default function App() {
   const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiResponse, setAiResponse] = useState('');
+  const [aiTarget, setAiTarget] = useState('body');
+  const [aiAttachment, setAiAttachment] = useState(null);
   const [aiStreaming, setAiStreaming] = useState(false);
   const [spamCheckOpen, setSpamCheckOpen] = useState(false);
   const [spamScore, setSpamScore] = useState(null);
@@ -1714,6 +1716,8 @@ export default function App() {
                           <button className="btn-sm" onClick={() => setAiPrompt('Personalize the body content using [Firstname], [Lastname], [Company] placeholders.')}>[ PERSONALIZE BODY ]</button>
                           <button className="btn-sm" onClick={() => setAiPrompt('Optimize this email for inbox placement and avoid spam triggers.')}>[ OPTIMIZE FOR INBOX ]</button>
                           <button className="btn-sm" onClick={() => setAiPrompt('Fix any spam triggers in the content.')}>[ FIX SPAM TRIGGERS ]</button>
+                          <button className="btn-sm" onClick={() => setAiPrompt('Write a preheader (inbox preview text, max 90 chars) for this email.')}>[ PREHEADER ]</button>
+                          <button className="btn-sm" onClick={() => setAiPrompt('Generate a professional PDF attachment document related to this letter (invoice, notice, or statement — pick whichever fits the content).')}>[ DRAFT PDF ]</button>
                         </div>
                         <textarea
                           className="ai-prompt-input"
@@ -1728,12 +1732,16 @@ export default function App() {
                           onClick={async () => {
                             setAiStreaming(true);
                             setAiResponse('');
+                            setAiAttachment(null);
+                            setAiTarget('body');
                             try {
                               const res = await api(token, '/api/ai/assist', {
                                 method: 'POST',
                                 body: { prompt: aiPrompt, subject: draft.subject, html: draft.html, text: draft.text },
                               });
                               setAiResponse(res.result || '');
+                              setAiTarget(res.target || 'body');
+                              setAiAttachment(res.attachment || null);
                             } catch (err) {
                               setAiResponse(`Error: ${err.message || 'AI request failed'}`);
                             } finally {
@@ -1746,16 +1754,37 @@ export default function App() {
                         {aiResponse && (
                           <div className="ai-response-area">
                             <div className="ai-response-head">
-                              <span>RESULT</span>
-                              <button
-                                className="btn-sm"
-                                onClick={() => {
-                                  updateDraft('html', aiResponse);
-                                  showNotice('Applied to HTML body.');
-                                }}
-                              >
-                                [ APPLY TO BODY ]
-                              </button>
+                              <span>RESULT <span className="dim" style={{ fontSize: 10 }}>→ {aiTarget}</span></span>
+                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                {aiTarget === 'attachment' && aiAttachment ? (
+                                  <button className="btn-sm" onClick={async () => {
+                                    try {
+                                      const up = await api(token, '/api/uploads', { method: 'POST', body: aiAttachment });
+                                      updateDraft('attachments', [...(draft.attachments || []), up]);
+                                      showNotice(`Attached ${up.filename} (${Math.round((up.size || 0) / 1024)}KB).`);
+                                    } catch (err) {
+                                      showNotice(`Attach failed: ${err.message}`);
+                                    }
+                                  }}>[ ATTACH TO LETTER ]</button>
+                                ) : (
+                                  <button className="btn-sm" onClick={() => {
+                                    const field = aiTarget === 'subject' ? 'subject' : aiTarget === 'preheader' ? 'preheader' : 'html';
+                                    updateDraft(field, aiResponse);
+                                    showNotice(`Applied to ${field === 'html' ? 'HTML body' : field}.`);
+                                  }}>[ APPLY → {aiTarget.toUpperCase()} ]</button>
+                                )}
+                                <select className="w-select" style={{ width: 'auto', padding: '2px 6px', fontSize: 10 }} value="" onChange={(e) => {
+                                  if (!e.target.value) return;
+                                  updateDraft(e.target.value, aiResponse);
+                                  showNotice(`Applied to ${e.target.options[e.target.selectedIndex].text}.`);
+                                }}>
+                                  <option value="">apply to…</option>
+                                  <option value="subject">subject</option>
+                                  <option value="preheader">preheader</option>
+                                  <option value="html">body</option>
+                                  <option value="text">text body</option>
+                                </select>
+                              </div>
                             </div>
                             <pre className="ai-response-text">{aiResponse}</pre>
                           </div>
