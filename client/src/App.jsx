@@ -1220,6 +1220,7 @@ export default function App() {
   const [previewDevice, setPreviewDevice] = useState('desktop');
   const [versionInfo, setVersionInfo] = useState(null);
   const [updateInfo, setUpdateInfo] = useState(null);
+  const [updateOpen, setUpdateOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [testTo, setTestTo] = useState('');
   const [relayTest, setRelayTest] = useState({ state: 'idle' });
@@ -1853,10 +1854,30 @@ export default function App() {
             <button key={item.id} className={`nav-item ${tab === item.id ? 'active' : ''}`} aria-current={tab === item.id ? 'page' : undefined} onClick={() => setTab(item.id)}>
               <span className="nav-icon" aria-hidden="true">{item.icon}</span>
               <span>{item.label}</span>
-              {item.id === 'help' && updateInfo ? <span className="nav-upd" title="Update available">⇧</span> : null}
             </button>
           ))}
         </nav>
+
+        {updateInfo && !updating && (
+          <div className="upd-side">
+            <button className="nav-item upd-nav" aria-label="Update available — open details" onClick={() => setUpdateOpen((o) => !o)}>
+              <span className="nav-icon" aria-hidden="true">⇧</span>
+              <span>UPDATE</span>
+            </button>
+            {updateOpen && (
+              <div className="upd-side-card">
+                <p>A new Rubicon build is ready — installs and restarts automatically.</p>
+                {!!(updateInfo.changes || []).length && (
+                  <ul>{updateInfo.changes.map((c, i) => <li key={i}>{c}</li>)}</ul>
+                )}
+                <div className="upd-side-actions">
+                  <button className="btn-primary" onClick={applyUpdate}>UPDATE</button>
+                  <button className="btn-sm" onClick={() => setUpdateInfo(null)}>DISMISS</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <button className="nav-item theme-toggle" aria-label="Toggle color theme" onClick={() => setTheme((t) => (t === 'phosphor' ? 'obsidian' : 'phosphor'))}>
           {theme === 'phosphor' ? '◑ OBSIDIAN' : '◒ PHOSPHOR'}
@@ -4309,24 +4330,6 @@ sudo tail -f /var/log/maillog`}</pre>
                 <div className="help-wrap">
                   <div className="pane">
                     <div className="pane-head"><span>HELP — RUBICON EMAIL SUITE MANUAL</span></div>
-
-                    <div className={"upd-card" + (updateInfo ? "" : " upd-card-ok")}>
-                      {updateInfo ? (
-                        <>
-                          <div className="upd-card-head">⇧ UPDATE AVAILABLE</div>
-                          <p className="help-p">A new version of Rubicon Email Suite is ready — installs and restarts automatically.</p>
-                          {!!(updateInfo.changes || []).length && (
-                            <ul className="help-list">{updateInfo.changes.map((c, i) => <li key={i}>{c}</li>)}</ul>
-                          )}
-                          <div className="upd-card-actions">
-                            <button className="btn-primary" onClick={applyUpdate}>[ UPDATE ]</button>
-                            <button className="btn-sm" onClick={() => setUpdateInfo(null)}>DISMISS</button>
-                          </div>
-                        </>
-                      ) : (
-                        <p className="help-p" style={{ margin: 0 }}>Suite is <strong>up to date</strong> — when a release drops, the update card lands here.</p>
-                      )}
-                    </div>
 
                     <details className="help-sec" open>
                       <summary>QUICK START</summary>
