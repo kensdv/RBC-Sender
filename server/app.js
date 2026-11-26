@@ -13,7 +13,6 @@ import { publicSmtp, publicSendSettings, getGraphAccessToken } from './mailer.js
 import { escapeHtml } from './placeholders.js';
 import { transaction } from './db.js';
 import { DEFAULT_AI_RULES } from './default-ai-rules.js';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { createEmitter, telegramStatus, saveTelegram, sendTelegram, formatEvent } from './telegram.js';
 import { listEvents } from './events.js';
 
@@ -42,7 +41,14 @@ function cleanAiOutput(raw, target) {
 }
 
 // Render AI-generated document text to a real PDF (standard fonts = WinAnsi; sanitize beyond latin-1).
+// pdf-lib loads lazily — a missing dep degrades to null instead of killing the server at boot.
 async function renderPdf(text) {
+  let PDFDocument, StandardFonts, rgb;
+  try {
+    ({ PDFDocument, StandardFonts, rgb } = await import('pdf-lib'));
+  } catch {
+    return null;
+  }
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const margin = 54, lineHeight = 15, size = 11, maxChars = 88;
@@ -509,8 +515,11 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
     let result = cleanAiOutput(String(content).slice(0, 50000), target);
     if (target === 'attachment') {
       const b64pdf = result.match(/JVBERi[A-Za-z0-9+/=]{200,}/)?.[0];
-      const data = b64pdf || Buffer.from(await renderPdf(result)).toString('base64');
-      return { result, target, attachment: { filename: 'ai-document.pdf', contentType: 'application/pdf', data } };
+      const pdfBytes = b64pdf ? null : await renderPdf(result);
+      const attachment = b64pdf || pdfBytes
+        ? { filename: 'ai-document.pdf', contentType: 'application/pdf', data: b64pdf || Buffer.from(pdfBytes).toString('base64') }
+        : { filename: 'ai-document.txt', contentType: 'text/plain', data: Buffer.from(result).toString('base64') };
+      return { result, target, attachment };
     }
     return { result, target };
   });
