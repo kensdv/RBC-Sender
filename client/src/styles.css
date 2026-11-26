@@ -1522,3 +1522,13 @@ details.help-sec[open] summary::before { content: 'v '; }
 .ops-line { padding: 2px 0; color: #b8ffd9; }
 .ops-line .dim { opacity: 0.6; margin-right: 6px; }
 .ops-err { color: #ff7d7d; }
+
+/* chat rich text */
+.chat-p { margin: 2px 0; }
+.chat-h { font-weight: 700; color: var(--green, #3dffa2); margin: 8px 0 3px; letter-spacing: 0.4px; }
+.chat-list { margin: 3px 0 3px 16px; padding: 0; }
+.chat-list li { margin: 1px 0; }
+.chat-code { background: rgba(0,0,0,0.45); border: 1px solid rgba(61,255,162,0.18); border-radius: 5px; padding: 7px 9px; margin: 6px 0; font-size: 11px; line-height: 1.45; overflow-x: auto; white-space: pre; font-family: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace; }
+.chat-ic { background: rgba(61,255,162,0.1); border: 1px solid rgba(61,255,162,0.2); border-radius: 3px; padding: 0 4px; font-size: 11px; font-family: 'Cascadia Code', Consolas, monospace; color: #9dffc8; }
+.chat-msg-text strong { color: #4dffab; font-weight: 700; }
+.chat-msg-text em { color: #e8fff1; font-style: italic; }
