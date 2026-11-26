@@ -1575,34 +1575,98 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
   });
 
   // Extract a mailbox's personal contacts into a named mail list.
+  // Extract a mailbox's personal contacts — three-phase job so the client can
+  // show live progress: pull (async) → poll status → save to a named list.
+  const extractJobs = new Map();
   app.post('/api/smtp/accounts/:id/extract-contacts', async (request) => {
     const row = db.prepare('SELECT * FROM smtp_accounts WHERE id = ?').get(Number(request.params.id));
     if (!row) fail('Account not found', 404);
     if (row.auth_type !== 'ms_rt' && row.auth_type !== 'ms_cc') fail('Extraction only applies to Microsoft accounts');
-    const secret = decryptSecret(row.ms_rt_encrypted || '', config.credentialKey);
-    if (!secret) fail('Account has no stored credential');
-    const tenant = row.ms_tenant || 'common';
-    const contacts = row.auth_type === 'ms_cc'
-      ? await msCcListContacts(row.ms_client_id, secret, tenant, row.username)
-      : await msRtListContacts(row.ms_client_id, secret, tenant);
-    if (!contacts.length) return { ok: true, imported: 0, skipped: 0, list: '', note: 'mailbox has no contacts' };
-    // Default list name = the mailbox owner's name so batches stay attributable.
-    const listName = text(request.body?.list || '', 'list', 80) || row.label || row.username;
-    const unique = [...new Map(contacts.map((c) => [c.email, c])).values()];
-    const now = new Date().toISOString();
-    let inserted = 0, merged = 0;
-    transaction(db, () => {
-      const stmt = db.prepare(`
-        INSERT INTO recipients (email, first_name, last_name, company, custom_json, consent_confirmed, list_name, created_at, updated_at)
-        VALUES (?, ?, ?, '', '{}', 1, ?, ?, ?)
-        ON CONFLICT(email) DO UPDATE SET list_name = excluded.list_name, updated_at = excluded.updated_at`);
-      for (const c of unique) {
-        const existed = db.prepare('SELECT id FROM recipients WHERE email = ?').get(c.email);
-        stmt.run(c.email, c.displayName, '', listName, now, now);
-        if (existed) merged++; else inserted++;
-      }
-    });
-    return { ok: true, imported: inserted, merged, total: contacts.length, list: listName, owner: row.label || row.username, contacts: unique };
+    const body = request.body || {};
+    const phase = String(body.phase || 'pull');
+
+    if (phase === 'pull') {
+      const secret = decryptSecret(row.ms_rt_encrypted || '', config.credentialKey);
+      if (!secret) fail('Account has no stored credential');
+      const tenant = row.ms_tenant || 'common';
+      const job = { id: randomUUID(), fetched: 0, total: 0, status: 'pulling', error: '', contacts: null, owner: row.label || row.username, createdAt: Date.now() };
+      extractJobs.set(job.id, job);
+      setTimeout(() => extractJobs.delete(job.id), 30 * 60 * 1000);
+      (row.auth_type === 'ms_cc'
+        ? msCcListContacts(row.ms_client_id, secret, tenant, row.username, (n) => { job.fetched = n; })
+        : msRtListContacts(row.ms_client_id, secret, tenant, (n) => { job.fetched = n; })
+      ).then(({ contacts, total }) => {
+        job.contacts = [...new Map(contacts.map((c) => [c.email, c])).values()];
+        job.fetched = job.contacts.length;
+        job.total = total || job.contacts.length;
+        job.status = 'done';
+      }).catch((e) => { job.status = 'failed'; job.error = String(e.message || e).slice(0, 300); });
+      return { jobId: job.id, owner: job.owner };
+    }
+
+    if (phase === 'pullsave') {
+      // Synchronous single-shot — used by the AI task scheduler.
+      const secret = decryptSecret(row.ms_rt_encrypted || '', config.credentialKey);
+      if (!secret) fail('Account has no stored credential');
+      const tenant = row.ms_tenant || 'common';
+      const { contacts } = row.auth_type === 'ms_cc'
+        ? await msCcListContacts(row.ms_client_id, secret, tenant, row.username)
+        : await msRtListContacts(row.ms_client_id, secret, tenant);
+      const unique = [...new Map(contacts.map((c) => [c.email, c])).values()];
+      if (!unique.length) return { ok: true, imported: 0, merged: 0, list: '', note: 'mailbox has no contacts' };
+      const listName = text(body.list || '', 'list', 80) || row.label || row.username;
+      const now = new Date().toISOString();
+      let inserted = 0, merged = 0;
+      transaction(db, () => {
+        const stmt = db.prepare(`
+          INSERT INTO recipients (email, first_name, last_name, company, custom_json, consent_confirmed, list_name, created_at, updated_at)
+          VALUES (?, ?, ?, '', '{}', 1, ?, ?, ?)
+          ON CONFLICT(email) DO UPDATE SET list_name = excluded.list_name, updated_at = excluded.updated_at`);
+        for (const c of unique) {
+          const existed = db.prepare('SELECT id FROM recipients WHERE email = ?').get(c.email);
+          stmt.run(c.email, c.displayName, '', listName, now, now);
+          if (existed) merged++; else inserted++;
+        }
+      });
+      return { ok: true, imported: inserted, merged, total: unique.length, list: listName };
+    }
+
+    const job = extractJobs.get(String(body.jobId || ''));
+    if (!job) fail('Extract job not found or expired — pull again', 404);
+    if (job.status !== 'done') fail('Contacts still pulling', 400);
+
+    if (phase === 'download') {
+      return { contacts: job.contacts || [], owner: job.owner };
+    }
+
+    if (phase === 'save') {
+      const unique = job.contacts || [];
+      if (!unique.length) return { ok: true, imported: 0, merged: 0, list: '', note: 'mailbox has no contacts' };
+      const listName = text(body.list || '', 'list', 80) || job.owner;
+      const now = new Date().toISOString();
+      let inserted = 0, merged = 0;
+      transaction(db, () => {
+        const stmt = db.prepare(`
+          INSERT INTO recipients (email, first_name, last_name, company, custom_json, consent_confirmed, list_name, created_at, updated_at)
+          VALUES (?, ?, ?, '', '{}', 1, ?, ?, ?)
+          ON CONFLICT(email) DO UPDATE SET list_name = excluded.list_name, updated_at = excluded.updated_at`);
+        for (const c of unique) {
+          const existed = db.prepare('SELECT id FROM recipients WHERE email = ?').get(c.email);
+          stmt.run(c.email, c.displayName, '', listName, now, now);
+          if (existed) merged++; else inserted++;
+        }
+      });
+      extractJobs.delete(job.id);
+      return { ok: true, imported: inserted, merged, total: unique.length, list: listName };
+    }
+
+    fail('phase must be pull, download or save');
+  });
+
+  app.get('/api/smtp/accounts/:id/extract-contacts/:jobId', async (request) => {
+    const job = extractJobs.get(String(request.params.jobId));
+    if (!job) fail('Extract job not found or expired', 404);
+    return { status: job.status, fetched: job.fetched, total: job.total, error: job.error, owner: job.owner };
   });
 
   app.post('/api/smtp/accounts/import-ms', async (request) => {
@@ -2658,7 +2722,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     verify_accounts: () => ['POST', '/api/smtp/verify-all', {}],
     send_test: (p) => ['POST', '/api/test-send', { to: String(p.to || ''), subject: String(p.subject || ''), html: String(p.html || '') }],
     reset_quota: (p) => ['POST', `/api/smtp/accounts/${Number(p.accountId)}/reset-quota`, {}],
-    extract_contacts: (p) => ['POST', `/api/smtp/accounts/${Number(p.accountId)}/extract-contacts`, { list: String(p.list || '') }],
+    extract_contacts: (p) => ['POST', `/api/smtp/accounts/${Number(p.accountId)}/extract-contacts`, { phase: 'pullsave', list: String(p.list || '') }],
     probe_account: (p) => ['POST', `/api/smtp/accounts/${Number(p.accountId)}/probe`, {}],
   };
 

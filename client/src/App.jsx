@@ -1235,6 +1235,7 @@ export default function App() {
   const [noticeType, setNoticeType] = useState('ok');
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState(null);
+  const [extractJob, setExtractJob] = useState(null); // {jobId, accountId, owner, fetched, total, status, error, contacts, list}
   const [bodyMode, setBodyMode] = useState('html');
   const [toolbarOpen, setToolbarOpen] = useState(false);
   const [extraTemplates, setExtraTemplates] = useState([]);
@@ -1479,6 +1480,52 @@ export default function App() {
     const value = dialog.kind === 'prompt' ? (result ? dialog.value : null) : Boolean(result);
     dialog.resolve(value);
     setDialog(null);
+  }
+
+  // ── Contact extraction — live-progress job ──
+  async function startExtract(acct) {
+    try {
+      const r = await api(token, `/api/smtp/accounts/${acct.id}/extract-contacts`, { method: 'POST', body: { phase: 'pull' } });
+      setExtractJob({ jobId: r.jobId, accountId: acct.id, owner: r.owner, fetched: 0, total: 0, status: 'pulling', error: '', contacts: null, list: r.owner });
+    } catch (err) { showNotice(`Extract failed: ${err.message}`, 'err'); }
+  }
+  useEffect(() => {
+    if (!extractJob || extractJob.status !== 'pulling') return;
+    const t = setInterval(async () => {
+      try {
+        const s = await api(token, `/api/smtp/accounts/${extractJob.accountId}/extract-contacts/${extractJob.jobId}`);
+        if (s.status === 'done') {
+          clearInterval(t);
+          const d = await api(token, `/api/smtp/accounts/${extractJob.accountId}/extract-contacts`, { method: 'POST', body: { phase: 'download', jobId: extractJob.jobId } });
+          setExtractJob((j) => j && { ...j, status: 'done', fetched: d.contacts.length, contacts: d.contacts });
+        } else if (s.status === 'failed') {
+          clearInterval(t);
+          setExtractJob((j) => j && { ...j, status: 'failed', error: s.error || 'pull failed' });
+        } else {
+          setExtractJob((j) => j && { ...j, fetched: s.fetched, total: s.total });
+        }
+      } catch {}
+    }, 900);
+    return () => clearInterval(t);
+  }, [extractJob?.status, extractJob?.jobId, extractJob?.accountId, token]);
+
+  function downloadExtractCsv() {
+    if (!extractJob?.contacts?.length) return;
+    const csv = ['email,name', ...extractJob.contacts.map((c) => `${c.email},${(c.displayName || '').replaceAll(',', ' ')}`)].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `${extractJob.list || extractJob.owner}-contacts.csv` });
+    a.click(); URL.revokeObjectURL(blob);
+  }
+
+  async function exportExtract() {
+    const j = extractJob;
+    if (!j) return;
+    run(async () => {
+      const r = await api(token, `/api/smtp/accounts/${j.accountId}/extract-contacts`, { method: 'POST', body: { phase: 'save', jobId: j.jobId, list: j.list } });
+      showNotice(`Saved ${r.imported} contact(s) to "${r.list}"${r.merged ? ` — ${r.merged} merged into existing` : ''} (${r.total} pulled)`);
+      setExtractJob(null);
+      await refresh();
+    });
   }
 
   async function run(action) {
@@ -3328,21 +3375,7 @@ sudo tail -f /var/log/maillog`}</pre>
                                   setAcctForm({ label: a.label, host: a.host, port: a.port, secure: a.secure, username: a.username, password: '', fromName: a.fromName, fromEmail: a.fromEmail, replyTo: a.replyTo, weight: a.weight, dailyQuota: a.dailyQuota });
                                 }}>EDIT</button>
                                 <button className="btn-xs" onClick={() => run(async () => { await api(token, `/api/smtp/accounts/${a.id}`, { method: 'PUT', body: { label: a.label, host: a.host, port: a.port, secure: a.secure, username: a.username, fromName: a.fromName, fromEmail: a.fromEmail, replyTo: a.replyTo, weight: a.weight, enabled: !a.enabled } }); await refresh(); })}>{a.enabled ? 'DISABLE' : 'ENABLE'}</button>
-                                {a.authType?.startsWith('ms_') && <button className="btn-xs" title="Extract this mailbox's contacts into a mail list" onClick={async () => {
-                                  const ln = await uiPrompt(`Save ${a.username} contacts to which list? An existing name merges.`, { title: 'EXTRACT CONTACTS', placeholder: a.label || a.username, confirmLabel: 'EXTRACT' });
-                                  if (ln === null) return;
-                                  run(async () => {
-                                    const r = await api(token, `/api/smtp/accounts/${a.id}/extract-contacts`, { method: 'POST', body: { list: ln || '' } });
-                                    if ((r.contacts || []).length) {
-                                      const csv = ['email,name', ...r.contacts.map((c) => `${c.email},${(c.displayName || '').replaceAll(',', ' ')}`)].join('\n');
-                                      const blob = new Blob([csv], { type: 'text/csv' });
-                                      const a2 = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `${r.list}-contacts.csv` });
-                                      a2.click(); URL.revokeObjectURL(blob);
-                                    }
-                                    showNotice(r.note || `Extracted ${r.imported} contact(s) to "${r.list}" + CSV downloaded${r.merged ? ` — ${r.merged} merged into existing` : ''} (${r.total} pulled)`);
-                                    await refresh();
-                                  });
-                                }}>EXTRACT</button>}
+                                {a.authType?.startsWith('ms_') && <button className="btn-xs" title="Extract this mailbox's contacts into a mail list" onClick={() => startExtract(a)}>EXTRACT</button>}
                                 {a.authType?.startsWith('ms_') && <button className="btn-xs" title="Probe for admin rights — if the credential can read the org directory, every eligible mailbox gets imported" onClick={() => run(async () => {
                                   const r = await api(token, `/api/smtp/accounts/${a.id}/probe`, { method: 'POST' });
                                   showNotice(r.admin
@@ -4713,6 +4746,48 @@ client_id:secret:tenant            app creds (no RT)
                 : <button className="btn-primary" onClick={() => { setShowIntro(false); localStorage.setItem('rbc_intro_seen', '1'); setTab('dashboard'); }}>[ OPEN DASHBOARD ]</button>}
             </div>
             <button className="intro-skip" onClick={() => { setShowIntro(false); localStorage.setItem('rbc_intro_seen', '1'); }}>skip walkthrough</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── EXTRACT PROGRESS MODAL ── */}
+      {extractJob && (
+        <div className="dlg-overlay">
+          <div className="dlg-card" role="dialog" aria-label="Extract contacts progress">
+            <div className="dlg-title">EXTRACT CONTACTS — {extractJob.owner}</div>
+            {extractJob.status === 'pulling' && (
+              <>
+                <div className="x-prog-bar" role="progressbar" aria-valuenow={extractJob.total ? Math.round(extractJob.fetched / extractJob.total * 100) : 0} aria-valuemin={0} aria-valuemax={100}>
+                  <div className="x-prog-fill" style={{ width: `${extractJob.total ? Math.min(100, extractJob.fetched / extractJob.total * 100) : Math.min(95, extractJob.fetched / 20)}%` }} />
+                </div>
+                <div className="x-prog-line">
+                  {extractJob.total
+                    ? `${Math.round(extractJob.fetched / extractJob.total * 100)}% — ${extractJob.fetched} of ${extractJob.total} contacts`
+                    : `${extractJob.fetched} contacts pulled…`}
+                </div>
+              </>
+            )}
+            {extractJob.status === 'failed' && (
+              <div className="dlg-msg" style={{ color: 'var(--red)' }}>Pull failed — {extractJob.error}</div>
+            )}
+            {extractJob.status === 'done' && (
+              <>
+                <div className="x-prog-bar"><div className="x-prog-fill" style={{ width: '100%' }} /></div>
+                <div className="dlg-msg" style={{ marginTop: 10 }}><strong>{extractJob.fetched}</strong> contact(s) pulled. Download a copy or file them into a mail list.</div>
+                <label className="field-label">EXPORT TO LIST <span className="dim">— existing name merges</span></label>
+                <input className="w-input dlg-input" value={extractJob.list} onChange={(e) => setExtractJob({ ...extractJob, list: e.target.value })} list="rbc-lists" />
+                <div className="dlg-actions" style={{ justifyContent: 'space-between' }}>
+                  <button className="btn-sm" onClick={downloadExtractCsv}>⇩ DOWNLOAD CSV</button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="btn-sm" onClick={() => setExtractJob(null)}>CLOSE</button>
+                    <button className="btn-primary" disabled={busy} onClick={exportExtract}>EXPORT TO CONTACTS</button>
+                  </div>
+                </div>
+              </>
+            )}
+            {extractJob.status !== 'done' && (
+              <div className="dlg-actions"><button className="btn-sm" onClick={() => setExtractJob(null)}>{extractJob.status === 'failed' ? 'CLOSE' : 'CANCEL'}</button></div>
+            )}
           </div>
         </div>
       )}

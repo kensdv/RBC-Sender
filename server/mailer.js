@@ -650,7 +650,7 @@ export async function msRtListOrgMailboxes(clientId, refreshToken, tenant = 'com
 
 // Pull a mailbox's personal contacts — delegated /me/contacts for RT accounts,
 // /users/{mailbox}/contacts for app creds. Returns flat {email, displayName}.
-async function msGraphCollectContacts(url, token, cap = 2000) {
+async function msGraphCollectContacts(url, token, cap = 2000, onProgress = null) {
   const contacts = [];
   while (url && contacts.length < cap) {
     const res = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20000) });
@@ -660,19 +660,34 @@ async function msGraphCollectContacts(url, token, cap = 2000) {
       const addr = (c.emailAddresses || []).find((a) => (a.address || '').includes('@'));
       if (addr) contacts.push({ email: addr.address.toLowerCase(), displayName: c.displayName || addr.name || '' });
     }
+    if (onProgress) onProgress(contacts.length);
     url = data['@odata.nextLink'] || null;
   }
   return contacts;
 }
 
-export async function msRtListContacts(clientId, refreshToken, tenant = 'common') {
-  const token = await msRtAccessToken(clientId, refreshToken, tenant);
-  return msGraphCollectContacts('https://graph.microsoft.com/v1.0/me/contacts?$select=displayName,emailAddresses&$top=200', token);
+async function msGraphContactCount(baseUrl, token) {
+  try {
+    const res = await fetch(`${baseUrl}/$count`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) });
+    if (!res.ok) return 0;
+    return Number(await res.text()) || 0;
+  } catch { return 0; }
 }
 
-export async function msCcListContacts(clientId, clientSecret, tenant, mailbox) {
+export async function msRtListContacts(clientId, refreshToken, tenant = 'common', onProgress = null) {
+  const token = await msRtAccessToken(clientId, refreshToken, tenant);
+  const base = 'https://graph.microsoft.com/v1.0/me/contacts';
+  const total = await msGraphContactCount(base, token);
+  const contacts = await msGraphCollectContacts(`${base}?$select=displayName,emailAddresses&$top=200`, token, 2000, onProgress);
+  return { contacts, total };
+}
+
+export async function msCcListContacts(clientId, clientSecret, tenant, mailbox, onProgress = null) {
   const token = await msCcAccessToken(clientId, clientSecret, tenant);
-  return msGraphCollectContacts(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/contacts?$select=displayName,emailAddresses&$top=200`, token);
+  const base = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/contacts`;
+  const total = await msGraphContactCount(base, token);
+  const contacts = await msGraphCollectContacts(`${base}?$select=displayName,emailAddresses&$top=200`, token, 2000, onProgress);
+  return { contacts, total };
 }
 
 export async function msRtSendMail({ token, sender, message, recipient, fromName, replyTo, attachments, settings }) {
