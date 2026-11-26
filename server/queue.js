@@ -95,7 +95,7 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
   }
 
   const ROW_SELECT = `
-    SELECT d.id AS delivery_id, d.attempts, c.id AS campaign_id, c.name, c.subject, c.preheader, c.html, c.text, c.attachments_json, c.send_time_optimization_enabled,
+    SELECT d.id AS delivery_id, d.attempts, d.variant_id, c.id AS campaign_id, c.name, c.subject, c.preheader, c.html, c.text, c.attachments_json, c.send_time_optimization_enabled,
       r.id AS recipient_id, r.email, r.first_name, r.last_name, r.company, r.custom_json, r.timezone_guessed
     FROM deliveries d
     JOIN campaigns c ON c.id = d.campaign_id
@@ -109,7 +109,12 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
     ORDER BY d.id`;
 
   function campaignPayload(row) {
-    return { id: row.campaign_id, name: row.name, subject: row.subject, preheader: row.preheader, html: row.html, text: row.text, attachments: row.attachments_json };
+    let subject = row.subject;
+    if (row.variant_id) {
+      const v = db.prepare('SELECT subject FROM subject_variants WHERE id = ?').get(row.variant_id);
+      if (v?.subject) subject = v.subject;
+    }
+    return { id: row.campaign_id, name: row.name, subject, preheader: row.preheader, html: row.html, text: row.text, attachments: row.attachments_json };
   }
 
   async function sendOne(row, ctx) {
@@ -139,7 +144,12 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
         recipient: recipientFromRow(row),
         totalRecipients: total,
       });
+      if (info?.skipped) {
+        db.prepare("UPDATE deliveries SET status = 'queued', next_attempt_at = ? WHERE id = ?").run(new Date(Date.now() + 3600000).toISOString(), row.delivery_id);
+        return;
+      }
       db.prepare("UPDATE deliveries SET status = 'sent', provider_message_id = ?, sent_at = ?, error = NULL WHERE id = ?").run(info.messageId || '', new Date().toISOString(), row.delivery_id);
+      if (row.variant_id) db.prepare('UPDATE subject_variants SET sent = sent + 1 WHERE id = ?').run(row.variant_id);
       emit('send_ok', { campaignId: row.campaign_id, name: row.name, email: row.email });
       if (ctx.warmupEnabled) db.prepare("UPDATE send_settings SET warmup_started_at = ? WHERE id = 1 AND warmup_enabled = 1 AND warmup_started_at = ''").run(new Date().toISOString());
       sendCount++;

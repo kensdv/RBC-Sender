@@ -56,6 +56,8 @@ function recipientView(row) {
     suppressed: Boolean(row.suppressed), suppressionReason: row.suppression_reason, createdAt: row.created_at,
     engagement_score: row.engagement_score || 0,
     timezone_guessed: row.timezone_guessed || '',
+    validSyntax: row.valid_syntax !== 0,
+    bounceCount: row.bounce_count || 0,
   };
 }
 
@@ -167,11 +169,12 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     `).all().map(campaignView);
     const hold = worker.diagnose ? worker.diagnose() : null;
     if (hold) for (const c of campaigns) if (['queued', 'scheduled', 'sending'].includes(c.status) && c.queued > 0) c.hold = hold;
-    const bounces = db.prepare('SELECT id, email, kind, reason, created_at AS createdAt FROM bounces ORDER BY id DESC LIMIT 500').all();
+    const bounces = db.prepare('SELECT id, email, kind, reason, classification, suppression_action, created_at AS createdAt FROM bounces ORDER BY id DESC LIMIT 500').all();
     const confirmed = db.prepare('SELECT COUNT(*) AS count FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0').get().count;
+    const reputationAlerts = db.prepare('SELECT target, source, listed_at AS listedAt FROM reputation_alerts WHERE resolved_at IS NULL ORDER BY listed_at DESC').all();
     seedPoolFromLegacy();
     const smtpAccounts = db.prepare('SELECT * FROM smtp_accounts ORDER BY id').all().map(accountView);
-    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db), recipients, recipientTotal, campaigns, bounces, confirmed, publicBaseUrl: config.publicBaseUrl, events: listEvents(120), telegram: telegramStatus(db, config) };
+    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db), recipients, recipientTotal, campaigns, bounces, confirmed, publicBaseUrl: config.publicBaseUrl, events: listEvents(120), telegram: telegramStatus(db, config), reputationAlerts };
   });
 
   app.put('/api/smtp', async (request) => {
@@ -553,15 +556,19 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const campaignId = Number(request.params.id);
     const body = request.body || {};
     const { subjects } = body;
-    if (!Array.isArray(subjects) || subjects.length < 2) fail('subjects must be an array with at least 2 variants');
+    if (!Array.isArray(subjects) || subjects.length < 1) fail('subjects must be a non-empty array');
     const campaign = db.prepare('SELECT id FROM campaigns WHERE id = ?').get(campaignId);
     if (!campaign) fail('Campaign not found');
     const now = new Date().toISOString();
-    db.prepare('DELETE FROM subject_variants WHERE campaign_id = ?').run(campaignId);
+    let created = 0;
     for (const subject of subjects) {
-      db.prepare('INSERT INTO subject_variants (campaign_id, subject, created_at) VALUES (?, ?, ?)').run(campaignId, subject, now);
+      const exists = db.prepare('SELECT id FROM subject_variants WHERE campaign_id = ? AND subject = ?').get(campaignId, subject);
+      if (!exists) {
+        db.prepare('INSERT INTO subject_variants (campaign_id, subject, created_at) VALUES (?, ?, ?)').run(campaignId, subject, now);
+        created++;
+      }
     }
-    return { created: subjects.length };
+    return { created };
   });
 
   app.get('/api/campaigns/:id/subject-variants', async (request) => {
@@ -598,62 +605,75 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
   });
 
   // ── Send Time Optimization ──
+  const TLD_TIMEZONES = {
+    'us': 'America/New_York', 'ca': 'America/Toronto', 'mx': 'America/Mexico_City',
+    'br': 'America/Sao_Paulo', 'ar': 'America/Argentina/Buenos_Aires',
+    'uk': 'Europe/London', 'de': 'Europe/Berlin', 'fr': 'Europe/Paris', 'es': 'Europe/Madrid',
+    'it': 'Europe/Rome', 'nl': 'Europe/Amsterdam', 'se': 'Europe/Stockholm', 'no': 'Europe/Oslo',
+    'dk': 'Europe/Copenhagen', 'fi': 'Europe/Helsinki', 'pl': 'Europe/Warsaw', 'cz': 'Europe/Prague',
+    'hu': 'Europe/Budapest', 'at': 'Europe/Vienna', 'ch': 'Europe/Zurich', 'be': 'Europe/Brussels',
+    'ie': 'Europe/Dublin', 'pt': 'Europe/Lisbon', 'gr': 'Europe/Athens', 'ru': 'Europe/Moscow',
+    'ua': 'Europe/Kiev', 'tr': 'Europe/Istanbul', 'il': 'Asia/Jerusalem', 'ae': 'Asia/Dubai',
+    'sa': 'Asia/Riyadh', 'ir': 'Asia/Tehran', 'pk': 'Asia/Karachi', 'in': 'Asia/Kolkata',
+    'bd': 'Asia/Dhaka', 'np': 'Asia/Kathmandu', 'th': 'Asia/Bangkok', 'vn': 'Asia/Ho_Chi_Minh',
+    'ph': 'Asia/Manila', 'id': 'Asia/Jakarta', 'my': 'Asia/Kuala_Lumpur', 'sg': 'Asia/Singapore',
+    'cn': 'Asia/Shanghai', 'hk': 'Asia/Hong_Kong', 'tw': 'Asia/Taipei', 'jp': 'Asia/Tokyo',
+    'kr': 'Asia/Seoul', 'au': 'Australia/Sydney', 'nz': 'Pacific/Auckland', 'za': 'Africa/Johannesburg',
+    'eg': 'Africa/Cairo', 'ng': 'Africa/Lagos', 'ke': 'Africa/Nairobi', 'ma': 'Africa/Casablanca',
+    'dz': 'Africa/Algiers', 'tn': 'Africa/Tunis', 'ly': 'Africa/Tripoli', 'et': 'Africa/Addis_Ababa',
+    'gh': 'Africa/Accra', 'ug': 'Africa/Kampala', 'tz': 'Africa/Dar_es_Salaam', 'rw': 'Africa/Kigali',
+    'cd': 'Africa/Kinshasa', 'ao': 'Africa/Luanda', 'mz': 'Africa/Maputo', 'zw': 'Africa/Harare',
+    'bw': 'Africa/Gaborone', 'na': 'Africa/Windhoek', 'zm': 'Africa/Lusaka', 'mw': 'Africa/Blantyre',
+    'mg': 'Indian/Antananarivo', 'mu': 'Indian/Mauritius', 'sc': 'Indian/Mahe', 'km': 'Indian/Comoro',
+    'dj': 'Africa/Djibouti', 'so': 'Africa/Mogadishu', 'er': 'Africa/Asmara', 'sd': 'Africa/Khartoum',
+    'ss': 'Africa/Juba', 'td': 'Africa/Ndjamena', 'cf': 'Africa/Bangui', 'cm': 'Africa/Douala',
+    'ga': 'Africa/Libreville', 'cg': 'Africa/Brazzaville', 'gq': 'Africa/Malabo', 'st': 'Africa/Sao_Tome',
+    'bi': 'Africa/Bujumbura', 'sl': 'Africa/Freetown', 'lr': 'Africa/Monrovia', 'ci': 'Africa/Abidjan',
+    'bf': 'Africa/Ouagadougou', 'ne': 'Africa/Niamey', 'ml': 'Africa/Bamako', 'sn': 'Africa/Dakar',
+    'gm': 'Africa/Banjul', 'gw': 'Africa/Bissau', 'gn': 'Africa/Conakry', 'cv': 'Atlantic/Cape_Verde',
+    'mr': 'Africa/Nouakchott', 'eh': 'Africa/El_Aaiun', 'am': 'Asia/Yerevan', 'az': 'Asia/Baku',
+    'ge': 'Asia/Tbilisi', 'kg': 'Asia/Bishkek', 'kz': 'Asia/Almaty', 'tj': 'Asia/Dushanbe',
+    'tm': 'Asia/Ashgabat', 'uz': 'Asia/Tashkent', 'af': 'Asia/Kabul', 'mn': 'Asia/Ulaanbaatar',
+    'bt': 'Asia/Thimphu', 'lk': 'Asia/Colombo', 'mv': 'Indian/Maldives', 'kh': 'Asia/Phnom_Penh',
+    'la': 'Asia/Vientiane', 'mm': 'Asia/Yangon', 'bn': 'Asia/Brunei', 'tl': 'Asia/Dili',
+    'fj': 'Pacific/Fiji', 'pg': 'Pacific/Port_Moresby', 'sb': 'Pacific/Guadalcanal', 'vu': 'Pacific/Efate',
+    'nc': 'Pacific/Noumea', 'pf': 'Pacific/Tahiti', 'ki': 'Pacific/Tarawa', 'tv': 'Pacific/Funafuti',
+    'nr': 'Pacific/Yaren', 'pw': 'Pacific/Palau',
+    'fm': 'Pacific/Pohnpei', 'mh': 'Pacific/Majuro', 'nu': 'Pacific/Niue', 'ck': 'Pacific/Rarotonga',
+    'as': 'Pacific/Pago_Pago', 'gu': 'Pacific/Guam', 'mp': 'Pacific/Saipan', 'um': 'Pacific/Wake',
+  };
+  function guessTimezoneForEmail(address) {
+    const domain = String(address || '').split('@')[1] || '';
+    const tld = domain.split('.').pop().toLowerCase();
+    return TLD_TIMEZONES[tld] || 'UTC';
+  }
+
   app.post('/api/campaigns/:id/enable-send-time-optimization', async (request) => {
     const campaignId = Number(request.params.id);
     const body = request.body || {};
     const { enabled } = body;
     db.prepare('UPDATE campaigns SET send_time_optimization_enabled = ? WHERE id = ?').run(enabled ? 1 : 0, campaignId);
-    return { ok: true, enabled: Boolean(enabled) };
+    let guessed = 0;
+    if (enabled) {
+      const missing = db.prepare("SELECT id, email FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0 AND (timezone_guessed IS NULL OR timezone_guessed = '')").all();
+      const stmt = db.prepare('UPDATE recipients SET timezone_guessed = ? WHERE id = ?');
+      for (const r of missing) { stmt.run(guessTimezoneForEmail(r.email), r.id); guessed++; }
+    }
+    return { ok: true, enabled: Boolean(enabled), timezonesGuessed: guessed };
+  });
+
+  app.post('/api/recipients/guess-timezones', async (request) => {
+    const missing = db.prepare("SELECT id, email FROM recipients WHERE timezone_guessed IS NULL OR timezone_guessed = ''").all();
+    const stmt = db.prepare('UPDATE recipients SET timezone_guessed = ? WHERE id = ?');
+    for (const r of missing) stmt.run(guessTimezoneForEmail(r.email), r.id);
+    return { guessed: missing.length };
   });
 
   app.post('/api/recipients/:id/guess-timezone', async (request) => {
     const recipientId = Number(request.params.id);
     const recipient = db.prepare('SELECT email FROM recipients WHERE id = ?').get(recipientId);
     if (!recipient) fail('Recipient not found');
-    const domain = recipient.email.split('@')[1] || '';
-    const tld = domain.split('.').pop().toLowerCase();
-    const timezoneMap = {
-      'us': 'America/New_York', 'ca': 'America/Toronto', 'mx': 'America/Mexico_City',
-      'br': 'America/Sao_Paulo', 'ar': 'America/Argentina/Buenos_Aires',
-      'uk': 'Europe/London', 'de': 'Europe/Berlin', 'fr': 'Europe/Paris', 'es': 'Europe/Madrid',
-      'it': 'Europe/Rome', 'nl': 'Europe/Amsterdam', 'se': 'Europe/Stockholm', 'no': 'Europe/Oslo',
-      'dk': 'Europe/Copenhagen', 'fi': 'Europe/Helsinki', 'pl': 'Europe/Warsaw', 'cz': 'Europe/Prague',
-      'hu': 'Europe/Budapest', 'at': 'Europe/Vienna', 'ch': 'Europe/Zurich', 'be': 'Europe/Brussels',
-      'ie': 'Europe/Dublin', 'pt': 'Europe/Lisbon', 'gr': 'Europe/Athens', 'ru': 'Europe/Moscow',
-      'ua': 'Europe/Kiev', 'tr': 'Europe/Istanbul', 'il': 'Asia/Jerusalem', 'ae': 'Asia/Dubai',
-      'sa': 'Asia/Riyadh', 'ir': 'Asia/Tehran', 'pk': 'Asia/Karachi', 'in': 'Asia/Kolkata',
-      'bd': 'Asia/Dhaka', 'np': 'Asia/Kathmandu', 'th': 'Asia/Bangkok', 'vn': 'Asia/Ho_Chi_Minh',
-      'ph': 'Asia/Manila', 'id': 'Asia/Jakarta', 'my': 'Asia/Kuala_Lumpur', 'sg': 'Asia/Singapore',
-      'cn': 'Asia/Shanghai', 'hk': 'Asia/Hong_Kong', 'tw': 'Asia/Taipei', 'jp': 'Asia/Tokyo',
-      'kr': 'Asia/Seoul', 'au': 'Australia/Sydney', 'nz': 'Pacific/Auckland', 'za': 'Africa/Johannesburg',
-      'eg': 'Africa/Cairo', 'ng': 'Africa/Lagos', 'ke': 'Africa/Nairobi', 'ma': 'Africa/Casablanca',
-      'dz': 'Africa/Algiers', 'tn': 'Africa/Tunis', 'ly': 'Africa/Tripoli', 'et': 'Africa/Addis_Ababa',
-      'gh': 'Africa/Accra', 'ug': 'Africa/Kampala', 'tz': 'Africa/Dar_es_Salaam', 'rw': 'Africa/Kigali',
-      'cd': 'Africa/Kinshasa', 'ao': 'Africa/Luanda', 'mz': 'Africa/Maputo', 'zw': 'Africa/Harare',
-      'bw': 'Africa/Gaborone', 'na': 'Africa/Windhoek', 'zm': 'Africa/Lusaka', 'mw': 'Africa/Blantyre',
-      'mg': 'Indian/Antananarivo', 'mu': 'Indian/Mauritius', 'sc': 'Indian/Mahe', 'km': 'Indian/Comoro',
-      'dj': 'Africa/Djibouti', 'so': 'Africa/Mogadishu', 'er': 'Africa/Asmara', 'sd': 'Africa/Khartoum',
-      'ss': 'Africa/Juba', 'td': 'Africa/Ndjamena', 'cf': 'Africa/Bangui', 'cm': 'Africa/Douala',
-      'ga': 'Africa/Libreville', 'cg': 'Africa/Brazzaville', 'gq': 'Africa/Malabo', 'st': 'Africa/Sao_Tome',
-      'bi': 'Africa/Bujumbura', 'sl': 'Africa/Freetown', 'lr': 'Africa/Monrovia', 'ci': 'Africa/Abidjan',
-      'bf': 'Africa/Ouagadougou', 'ne': 'Africa/Niamey', 'ml': 'Africa/Bamako', 'sn': 'Africa/Dakar',
-      'gm': 'Africa/Banjul', 'gw': 'Africa/Bissau', 'gn': 'Africa/Conakry', 'cv': 'Atlantic/Cape_Verde',
-      'mr': 'Africa/Nouakchott', 'eh': 'Africa/El_Aaiun', 'am': 'Asia/Yerevan', 'az': 'Asia/Baku',
-      'ge': 'Asia/Tbilisi', 'kg': 'Asia/Bishkek', 'kz': 'Asia/Almaty', 'tj': 'Asia/Dushanbe',
-      'tm': 'Asia/Ashgabat', 'uz': 'Asia/Tashkent', 'af': 'Asia/Kabul', 'mn': 'Asia/Ulaanbaatar',
-      'bt': 'Asia/Thimphu', 'lk': 'Asia/Colombo', 'mv': 'Indian/Maldives', 'kh': 'Asia/Phnom_Penh',
-      'la': 'Asia/Vientiane', 'mm': 'Asia/Yangon', 'bn': 'Asia/Brunei', 'tl': 'Asia/Dili',
-      'fj': 'Pacific/Fiji', 'pg': 'Pacific/Port_Moresby', 'sb': 'Pacific/Guadalcanal', 'vu': 'Pacific/Efate',
-      'nc': 'Pacific/Noumea', 'pf': 'Pacific/Tahiti', 'ws': 'Pacific/Apia', 'to': 'Pacific/Tongatapu',
-      'ki': 'Pacific/Tarawa', 'tv': 'Pacific/Funafuti', 'nr': 'Pacific/Yaren', 'pw': 'Pacific/Palau',
-      'fm': 'Pacific/Pohnpei', 'mh': 'Pacific/Majuro', 'nu': 'Pacific/Niue', 'ck': 'Pacific/Rarotonga',
-      'as': 'Pacific/Pago_Pago', 'gu': 'Pacific/Guam', 'mp': 'Pacific/Saipan', 'um': 'Pacific/Wake',
-      'com': 'UTC', 'net': 'UTC', 'org': 'UTC', 'io': 'UTC', 'co': 'UTC', 'ai': 'UTC', 'app': 'UTC',
-      'dev': 'UTC', 'me': 'UTC', 'tv': 'UTC', 'ws': 'UTC', 'info': 'UTC', 'biz': 'UTC', 'name': 'UTC',
-      'mobi': 'UTC', 'tel': 'UTC', 'asia': 'UTC', 'cat': 'UTC', 'eu': 'UTC', 'jobs': 'UTC', 'travel': 'UTC',
-      'pro': 'UTC', 'xxx': 'UTC', 'post': 'UTC', 'aero': 'UTC', 'museum': 'UTC', 'coop': 'UTC'
-    };
-    const guessedTz = timezoneMap[tld] || 'UTC';
+    const guessedTz = guessTimezoneForEmail(recipient.email);
     db.prepare('UPDATE recipients SET timezone_guessed = ? WHERE id = ?').run(guessedTz, recipientId);
     return { timezone: guessedTz };
   });
@@ -686,15 +706,17 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     return { score: newScore, events: events.length };
   });
 
-  app.post('/api/recipients/engagement-decay', async (request) => {
-    const now = new Date().toISOString();
+  function runEngagementDecay() {
     const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const stale = db.prepare('SELECT id, engagement_score FROM recipients WHERE last_engaged_at < ? OR last_engaged_at IS NULL').all(cutoff);
-    for (const r of stale) {
-      const newScore = Math.max(0, (r.engagement_score || 0) - 1);
-      db.prepare('UPDATE recipients SET engagement_score = ? WHERE id = ?').run(newScore, r.id);
-    }
-    return { decayed: stale.length };
+    const stmt = db.prepare('UPDATE recipients SET engagement_score = ? WHERE id = ?');
+    for (const r of stale) stmt.run(Math.max(0, (r.engagement_score || 0) - 1), r.id);
+    return stale.length;
+  }
+  setInterval(() => { try { runEngagementDecay(); } catch {} }, 24 * 60 * 60 * 1000).unref();
+
+  app.post('/api/recipients/engagement-decay', async (request) => {
+    return { decayed: runEngagementDecay() };
   });
 
   app.get('/api/recipients/engagement-tiers', async (request) => {
@@ -741,23 +763,42 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
 
   // ── List Hygiene ──
   app.post('/api/hygiene/remove-role-addresses', async (request) => {
-    const rolePrefixes = ['postmaster', 'abuse', 'security', 'admin', 'support', 'info', 'sales', 'contact', 'billing', 'webmaster', 'hostmaster', 'noc', 'root', 'mailer-daemon', 'noreply', 'no-reply', 'mail', 'email', 'office', 'help', 'marketing', 'newsletter', 'feedback', 'orders', 'returns', 'shipping', 'hr', 'careers', 'jobs', 'recruitment', 'recruiting', 'hr@', 'jobs@', 'careers@', 'info@', 'support@', 'help@', 'sales@', 'marketing@', 'contact@', 'enquiries@', 'enquiry@', 'general@', 'office@', 'admin@', 'webmaster@', 'postmaster@', 'abuse@', 'security@', 'privacy@', 'legal@', 'compliance@', 'billing@', 'accounts@', 'finance@', 'payments@', 'orders@', 'returns@', 'shipping@', 'receiving@', 'delivery@', 'tracking@', 'customercare@', 'customer.care@', 'customerservice@', 'customer.service@', 'service@', 'services@', 'tech@', 'it@', 'dev@', 'ops@', 'team@', 'hello@', 'hi@', 'hey@', 'welcome@', 'start@', 'begin@', 'onboarding@', 'setup@', 'configure@', 'install@', 'upgrade@', 'update@', 'news@', 'newsletter@', 'announce@', 'announcement@', 'updates@', 'notifications@', 'alert@', 'alerts@', 'warning@', 'warnings@', 'error@', 'errors@', 'bug@', 'bugs@', 'feedback@', 'review@', 'reviews@', 'rating@', 'ratings@', 'survey@', 'surveys@', 'poll@', 'polls@', 'vote@', 'votes@', 'contest@', 'contests@', 'giveaway@', 'giveaways@', 'promo@', 'promos@', 'offer@', 'offers@', 'deal@', 'deals@', 'discount@', 'discounts@', 'sale@', 'sales@', 'special@', 'specials@', 'vip@', 'premium@', 'exclusive@', 'member@', 'members@', 'club@', 'community@', 'forum@', 'forums@', 'discussion@', 'discussions@', 'chat@', 'talk@', 'connect@', 'network@', 'social@', 'friends@', 'family@', 'love@', 'dating@', 'meet@', 'match@', 'partner@', 'partners@', 'collab@', 'collabs@', 'sponsor@', 'sponsors@', 'advertise@', 'ads@', 'ad@', 'advertising@', 'media@', 'press@', 'pr@', 'public@', 'relations@', 'events@', 'event@', 'calendar@', 'booking@', 'reservation@', 'reservations@', 'appointment@', 'appointments@', 'schedule@', 'scheduling@', 'signup@', 'register@', 'registration@', 'join@', 'subscribe@', 'unsubscribe@', 'opt-in@', 'optin@', 'opt-out@', 'optout@', 'confirm@', 'confirmation@', 'verify@', 'verification@', 'activate@', 'activation@', 'validate@', 'validation@', 'check@', 'test@', 'testing@', 'demo@', 'trial@', 'sample@', 'example@', 'helpdesk@', 'ticket@', 'tickets@', 'support@', 'assistance@', 'aid@', 'assistance@', 'guide@', 'tutorial@', 'docs@', 'documentation@', 'manual@', 'manuals@', 'faq@', 'faqs@', 'knowledge@', 'kb@', 'library@', 'resources@', 'downloads@', 'files@', 'assets@', 'images@', 'videos@', 'audio@', 'media@', 'gallery@', 'photos@', 'pics@', 'pictures@', 'art@', 'design@', 'creative@', 'studio@', 'labs@', 'research@', 'development@', 'engineering@', 'science@', 'tech@', 'innovation@', 'solutions@', 'products@', 'services@', 'solutions@', 'platform@', 'api@', 'developers@', 'code@', 'scripts@', 'automation@', 'bots@', 'ai@', 'ml@', 'data@', 'analytics@', 'insights@', 'reports@', 'metrics@', 'stats@', 'statistics@', 'performance@', 'optimization@', 'seo@', 'sem@', 'ppc@', 'cpc@', 'cpm@', 'ctr@', 'roi@', 'kpi@', 'metrics@', 'measurement@', 'tracking@', 'monitoring@', 'logging@', 'audit@', 'security@', 'privacy@', 'compliance@', 'legal@', 'terms@', 'tos@', 'policy@', 'policies@', 'gdpr@', 'ccpa@', 'hipaa@', 'sox@', 'pci@', 'iso@', 'certification@', 'compliance@', 'governance@', 'risk@', 'threat@', 'vulnerability@', 'incident@', 'response@', 'forensics@', 'investigation@', 'claims@', 'disputes@', 'complaints@', 'feedback@', 'quality@', 'assurance@', 'qa@', 'testing@', 'validation@', 'verification@', 'inspection@', 'audit@', 'review@', 'approval@', 'signoff@', 'acceptance@', 'rejection@', 'return@', 'refund@', 'exchange@', 'warranty@', 'guarantee@', 'service@', 'level@', 'agreement@', 'sla@', 'contract@', 'contracts@', 'negotiation@', 'procurement@', 'purchasing@', 'buying@', 'sourcing@', 'supplier@', 'vendors@', 'vendor@', 'partners@', 'alliance@', 'reseller@', 'distributor@', 'channel@', 'sales@', 'leads@', 'prospects@', 'opportunities@', 'pipeline@', 'funnel@', 'conversion@', 'acquisition@', 'retention@', 'churn@', 'loyalty@', 'advocacy@', 'referral@', 'referrals@', 'affiliate@', 'affiliates@', 'influencer@', 'influencers@', 'ambassador@', 'ambassadors@', 'evangelist@', 'evangelists@', 'community@', 'user@', 'users@', 'customer@', 'customers@', 'client@', 'clients@', 'account@', 'accounts@', 'profile@', 'profiles@', 'settings@', 'preferences@', 'customization@', 'personalization@', 'experience@', 'ux@', 'ui@', 'interface@', 'usability@', 'accessibility@', 'inclusion@', 'diversity@', 'equity@', 'belonging@', 'culture@', 'values@', 'mission@', 'vision@', 'strategy@', 'goals@', 'objectives@', 'targets@', 'milestones@', 'deliverables@', 'outcomes@', 'results@', 'impact@', 'effectiveness@', 'efficiency@', 'productivity@', 'performance@', 'excellence@', 'quality@', 'innovation@', 'creativity@', 'disruption@', 'transformation@', 'change@', 'management@', 'leadership@', 'executive@', 'c-suite@', 'clevel@', 'directors@', 'managers@', 'supervisors@', 'teamleaders@', 'coordinators@', 'specialists@', 'analysts@', 'consultants@', 'advisors@', 'experts@', 'professionals@', 'practitioners@', 'operators@', 'technicians@', 'engineers@', 'developers@', 'designers@', 'architects@', 'scientists@', 'researchers@', 'academics@', 'educators@', 'trainers@', 'coaches@', 'mentors@', 'guides@', 'facilitators@', 'moderators@', 'administrators@', 'operators@', 'owners@', 'founders@', 'entrepreneurs@', 'startups@', 'companies@', 'organizations@', 'institutions@', 'enterprises@', 'corporations@', 'businesses@', 'ventures@', 'projects@', 'initiatives@', 'programs@', 'campaigns@', 'launches@', 'releases@', 'updates@', 'versions@', 'editions@', 'releases@', 'patches@', 'fixes@', 'hotfixes@', 'securitypatches@', 'updates@', 'upgrades@', 'migrations@', 'transitions@', 'rollouts@', 'deployments@', 'implementations@', 'integrations@', 'connectivity@', 'interoperability@', 'compatibility@', 'standards@', 'protocols@', 'interfaces@', 'apis@', 'sdks@', 'frameworks@', 'libraries@', 'toolkits@', 'components@', 'modules@', 'plugins@', 'extensions@', 'addons@', 'features@', 'functionality@', 'capabilities@', 'functionality@', 'functionality@'];
-    const result = db.prepare(`
-      DELETE FROM recipients WHERE email LIKE ? OR email LIKE ? OR email LIKE ? OR email LIKE ?
-    `).run('postmaster@%', 'abuse@%', 'security@%', 'admin@%');
-    const totalRoleAddresses = rolePrefixes.length;
-    return { removed: result.changes || 0, totalRoleAddresses };
+    const rolePrefixes = ['postmaster', 'abuse', 'security', 'admin', 'support', 'info', 'sales', 'contact', 'billing', 'webmaster', 'hostmaster', 'noc', 'root', 'mailer-daemon', 'noreply', 'no-reply', 'mail', 'email', 'office', 'help', 'marketing', 'newsletter', 'feedback', 'orders', 'returns', 'shipping', 'hr', 'careers', 'jobs', 'privacy', 'legal', 'compliance', 'accounts', 'finance', 'payments', 'service', 'services', 'it', 'dev', 'ops', 'team', 'hello', 'hi', 'hey', 'welcome', 'news', 'announce', 'updates', 'notifications', 'alerts', 'bugs', 'review', 'reviews', 'survey', 'promo', 'offers', 'deal', 'deals', 'vip', 'members', 'community', 'events', 'booking', 'press', 'pr', 'media', 'advertise', 'advertising', 'partner', 'partners', 'sponsor', 'sponsors'];
+    const placeholders = rolePrefixes.map(() => '?').join(',');
+    const result = db.prepare(
+      "DELETE FROM recipients WHERE LOWER(substr(email, 1, instr(email, '@') - 1)) IN (" + placeholders + ')'
+    ).run(...rolePrefixes);
+    return { removed: result.changes || 0, prefixesChecked: rolePrefixes.length };
   });
 
   app.post('/api/hygiene/remove-disposable-addresses', async (request) => {
-    const result = db.prepare(`
-      DELETE FROM recipients WHERE email LIKE ? OR email LIKE ? OR email LIKE ? OR email LIKE ?
-      OR email LIKE ? OR email LIKE ? OR email LIKE ? OR email LIKE ?
-      OR email LIKE ? OR email LIKE ?
-    `).run('%@tempmail.org', '%@guerillamail.com', '%@mailinator.com', '%@10minutemail.com',
-      '%@trashmail.com', '%@fakeinbox.com', '%@yopmail.com', '%@maildrop.cc',
-      '%@dispostable.com', '%@getnada.com');
-    return { removed: result.changes || 0 };
+    const disposableDomains = [
+      'tempmail.org', 'guerillamail.com', 'mailinator.com', '10minutemail.com',
+      'trashmail.com', 'fakeinbox.com', 'yopmail.com', 'maildrop.cc',
+      'dispostable.com', 'getnada.com', 'temp-mail.org', 'throwawaymail.com',
+      'sharklasers.com', 'guerrillamail.net', 'guerrillamail.org', 'guerrillamail.biz',
+      'grr.la', 'spam4.me', 'tempinbox.com', 'emailondeck.com', 'moakt.com',
+      'mohmal.com', 'tempmailo.com', 'burnermail.io', 'inboxkitten.com',
+      'mailnesia.com', 'mintemail.com', 'mytrashmail.com', 'trashmail.net',
+      'wegwerfmail.de', 'wegwerfmail.net', 'tempmail.net', 'tmpmail.org',
+      'emailtemporanea.com', 'fakemail.net', 'filzmail.com', 'jetable.org',
+    ];
+    const placeholders = disposableDomains.map(() => '?').join(',');
+    const result = db.prepare(
+      'DELETE FROM recipients WHERE LOWER(substr(email, instr(email, \'@\') + 1)) IN (' + placeholders + ')'
+    ).run(...disposableDomains);
+    return { removed: result.changes || 0, domainsChecked: disposableDomains.length };
+  });
+
+  app.post('/api/hygiene/remove-duplicates', async (request) => {
+    const dupes = db.prepare(`
+      SELECT id FROM recipients WHERE id NOT IN (
+        SELECT MIN(id) FROM recipients GROUP BY LOWER(email)
+      )
+    `).all();
+    const stmt = db.prepare('DELETE FROM recipients WHERE id = ?');
+    for (const d of dupes) stmt.run(d.id);
+    return { removed: dupes.length };
   });
 
   app.post('/api/hygiene/find-duplicates', async (request) => {
@@ -807,7 +848,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
   app.post('/api/templates', async (request) => {
     const body = request.body || {};
     const { name, subject, preheader, html, text, attachments_json } = body;
-    if (!name || !subject) fail('name and subject required');
+    if (!name) fail('name required');
     const now = new Date().toISOString();
     const result = db.prepare(`
       INSERT INTO campaign_templates (name, subject, preheader, html, text, attachments_json, created_at)
@@ -845,7 +886,9 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const complaints = db.prepare('SELECT COUNT(*) as count FROM bounces WHERE classification = "spam_complaint" AND created_at > ?').get(last30Days).count;
     const campaigns = db.prepare('SELECT COUNT(*) as count FROM campaigns WHERE created_at > ?').get(last30Days).count;
     const recipients = db.prepare('SELECT COUNT(*) as count FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0').get().count;
-    const heatmap = db.prepare('SELECT hour, opens, clicks FROM engagement_heatmap').all();
+    const heatmapRows = db.prepare('SELECT hour, SUM(opens) AS opens, SUM(clicks) AS clicks FROM engagement_heatmap GROUP BY hour').all();
+    const heatmap = {};
+    for (const r of heatmapRows) heatmap[r.hour] = { opens: r.opens, clicks: r.clicks };
     const topDomains = db.prepare(`
       SELECT
         substr(r.email, instr(r.email, '@') + 1) as domain,
@@ -946,12 +989,14 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
 
   app.post('/api/recipients/:id/retry-soft-bounce', async (request) => {
     const recipientId = Number(request.params.id);
-    const body = request.body || {};
-    const { bounceCount } = body;
-    if (!bounceCount) fail('bounceCount required');
+    const recipient = db.prepare('SELECT id, email, bounce_count FROM recipients WHERE id = ?').get(recipientId);
+    if (!recipient) fail('Recipient not found');
+    const bounceCount = Number(request.body?.bounceCount) || recipient.bounce_count || 1;
     const backoffMinutes = Math.pow(2, Math.min(bounceCount, 5)); // 1, 2, 4, 8, 16, 32 max
     const nextAttempt = new Date(Date.now() + backoffMinutes * 60 * 1000).toISOString();
-    return { nextAttempt, backoffMinutes };
+    const res = db.prepare("UPDATE deliveries SET status = 'queued', next_attempt_at = ?, error = NULL WHERE recipient_id = ? AND status = 'failed'").run(nextAttempt, recipientId);
+    if (res.changes) worker.kick();
+    return { nextAttempt, backoffMinutes, rescheduled: res.changes };
   });
 
   // ── SMTP account pool ──
@@ -1431,8 +1476,8 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     let providers = [];
     try { providers = JSON.parse(campaign.providers_json || '[]').filter((p) => typeof p === 'string' && p); } catch {}
     const recipients = providers.length
-      ? db.prepare(`SELECT id FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0 AND json_extract(COALESCE(custom_json,'{}'), '$.provider') IN (${providers.map(() => '?').join(',')})`).all(...providers)
-      : db.prepare('SELECT id FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0').all();
+      ? db.prepare(`SELECT id FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0 AND valid_syntax = 1 AND json_extract(COALESCE(custom_json,'{}'), '$.provider') IN (${providers.map(() => '?').join(',')})`).all(...providers)
+      : db.prepare('SELECT id FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0 AND valid_syntax = 1').all();
     if (!recipients.length) fail(providers.length ? 'No confirmed, unsuppressed recipients in the selected provider categories' : 'No confirmed, unsuppressed recipients are available');
     let scheduledFor = null;
     if (request.body?.scheduledFor) {
@@ -1441,11 +1486,16 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       if (timestamp < Date.now() - 60000) fail('Scheduled date cannot be in the past');
       scheduledFor = new Date(timestamp).toISOString();
     }
+    const variants = db.prepare('SELECT id, is_winner FROM subject_variants WHERE campaign_id = ? ORDER BY id').all(id);
+    const winner = variants.find((v) => v.is_winner);
     transaction(db, () => {
       const flipped = db.prepare("UPDATE campaigns SET status = 'queued', scheduled_for = ?, updated_at = ? WHERE id = ? AND status = 'draft'").run(scheduledFor, new Date().toISOString(), id);
       if (!flipped.changes) fail('Campaign is no longer a draft', 409);
-      const statement = db.prepare('INSERT INTO deliveries (campaign_id, recipient_id) VALUES (?, ?)');
-      for (const recipient of recipients) statement.run(id, recipient.id);
+      const statement = db.prepare('INSERT INTO deliveries (campaign_id, recipient_id, variant_id) VALUES (?, ?, ?)');
+      recipients.forEach((recipient, i) => {
+        const variantId = winner ? winner.id : (variants.length ? variants[i % variants.length].id : null);
+        statement.run(id, recipient.id, variantId);
+      });
       if (scheduledFor) db.prepare("UPDATE campaigns SET status = 'scheduled' WHERE id = ?").run(id);
     });
     worker.kick();
@@ -1558,7 +1608,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const bounceId = bounceResult.lastInsertRowid;
 
     // Update recipient bounce/complaint counts
-    const recipient = db.prepare('SELECT id, bounce_count, complaint_count FROM recipients WHERE email = ?').get(address);
+    const recipient = db.prepare('SELECT id, bounce_count, complaint_count, last_complaint_at FROM recipients WHERE email = ?').get(address);
     if (recipient) {
       const newBounceCount = (recipient.bounce_count || 0) + 1;
       const newComplaintCount = kind === 'complaint' ? (recipient.complaint_count || 0) + 1 : (recipient.complaint_count || 0);
@@ -1584,24 +1634,27 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const campaignId = Number(request.query?.c) || null;
     if (address && tokensEqual(token, unsubscribeToken(address, config.unsubscribeSecret))) {
       try {
+        const recipient = db.prepare('SELECT id, engagement_score, engagement_events_json FROM recipients WHERE email = ?').get(address);
         db.prepare('INSERT INTO tracking_events (campaign_id, email, kind, created_at) VALUES (?, ?, ?, ?)').run(campaignId, address, 'open', new Date().toISOString());
-        db.prepare('INSERT INTO analytics_events (campaign_id, kind, occurred_at, metadata_json) VALUES (?, ?, ?, ?)').run(campaignId, 'open', new Date().toISOString(), JSON.stringify({ email: address }));
+        db.prepare('INSERT INTO analytics_events (campaign_id, kind, recipient_id, occurred_at, metadata_json) VALUES (?, ?, ?, ?, ?)').run(campaignId, 'open', recipient?.id || null, new Date().toISOString(), JSON.stringify({ email: address }));
         const opens = db.prepare("SELECT COUNT(*) AS c FROM tracking_events WHERE kind = 'open' AND email = ? AND campaign_id IS ?").get(address, campaignId).c;
         if (opens === 1) {
           const camp = campaignId ? db.prepare('SELECT name FROM campaigns WHERE id = ?').get(campaignId) : null;
           emit('open', { campaignId, email: address, name: camp?.name });
         }
-        const recipient = db.prepare('SELECT id FROM recipients WHERE email = ?').get(address);
         if (recipient) {
+          const events = JSON.parse(recipient.engagement_events_json || '[]');
+          events.push({ kind: 'open', at: new Date().toISOString() });
+          const newScore = Math.min(100, (recipient.engagement_score || 0) + 10);
+          db.prepare('UPDATE recipients SET engagement_score = ?, engagement_events_json = ?, last_engaged_at = ? WHERE id = ?')
+            .run(newScore, JSON.stringify(events), new Date().toISOString(), recipient.id);
+          const variant = campaignId ? db.prepare('SELECT variant_id FROM deliveries WHERE campaign_id = ? AND recipient_id = ?').get(campaignId, recipient.id) : null;
+          if (variant?.variant_id) db.prepare('UPDATE subject_variants SET opens = opens + 1 WHERE id = ?').run(variant.variant_id);
+        }
+        if (campaignId) {
           const hour = new Date().getHours();
           db.prepare('INSERT INTO engagement_heatmap (campaign_id, hour, opens, clicks, created_at) VALUES (?, ?, 1, 0, ?) ON CONFLICT(campaign_id, hour) DO UPDATE SET opens = opens + 1')
             .run(campaignId, hour, new Date().toISOString());
-          const rec = db.prepare('SELECT engagement_score, engagement_events_json FROM recipients WHERE id = ?').get(recipient.id);
-          const events = JSON.parse(rec.engagement_events_json || '[]');
-          events.push({ kind: 'open', at: new Date().toISOString() });
-          const newScore = Math.min(100, (rec.engagement_score || 0) + 10);
-          db.prepare('UPDATE recipients SET engagement_score = ?, engagement_events_json = ?, last_engaged_at = ? WHERE id = ?')
-            .run(newScore, JSON.stringify(events), new Date().toISOString(), recipient.id);
         }
       } catch {}
     }
@@ -1615,21 +1668,24 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const target = Buffer.from(String(request.query?.u || ''), 'base64url').toString('utf8');
     if (address && tokensEqual(token, unsubscribeToken(address, config.unsubscribeSecret)) && /^https?:\/\//i.test(target)) {
       try {
+        const recipient = db.prepare('SELECT id, engagement_score, engagement_events_json FROM recipients WHERE email = ?').get(address);
         db.prepare('INSERT INTO tracking_events (campaign_id, email, kind, target, created_at) VALUES (?, ?, ?, ?, ?)').run(campaignId, address, 'click', target.slice(0, 2000), new Date().toISOString());
-        db.prepare('INSERT INTO analytics_events (campaign_id, kind, occurred_at, metadata_json) VALUES (?, ?, ?, ?)').run(campaignId, 'click', new Date().toISOString(), JSON.stringify({ email: address, target }));
+        db.prepare('INSERT INTO analytics_events (campaign_id, kind, recipient_id, occurred_at, metadata_json) VALUES (?, ?, ?, ?, ?)').run(campaignId, 'click', recipient?.id || null, new Date().toISOString(), JSON.stringify({ email: address, target }));
         const camp = campaignId ? db.prepare('SELECT name FROM campaigns WHERE id = ?').get(campaignId) : null;
         emit('click', { campaignId, email: address, target, name: camp?.name });
-        const recipient = db.prepare('SELECT id FROM recipients WHERE email = ?').get(address);
         if (recipient) {
+          const events = JSON.parse(recipient.engagement_events_json || '[]');
+          events.push({ kind: 'click', at: new Date().toISOString() });
+          const newScore = Math.min(100, (recipient.engagement_score || 0) + 15);
+          db.prepare('UPDATE recipients SET engagement_score = ?, engagement_events_json = ?, last_engaged_at = ? WHERE id = ?')
+            .run(newScore, JSON.stringify(events), new Date().toISOString(), recipient.id);
+          const variant = campaignId ? db.prepare('SELECT variant_id FROM deliveries WHERE campaign_id = ? AND recipient_id = ?').get(campaignId, recipient.id) : null;
+          if (variant?.variant_id) db.prepare('UPDATE subject_variants SET clicks = clicks + 1 WHERE id = ?').run(variant.variant_id);
+        }
+        if (campaignId) {
           const hour = new Date().getHours();
           db.prepare('INSERT INTO engagement_heatmap (campaign_id, hour, opens, clicks, created_at) VALUES (?, ?, 0, 1, ?) ON CONFLICT(campaign_id, hour) DO UPDATE SET clicks = clicks + 1')
             .run(campaignId, hour, new Date().toISOString());
-          const rec = db.prepare('SELECT engagement_score, engagement_events_json FROM recipients WHERE id = ?').get(recipient.id);
-          const events = JSON.parse(rec.engagement_events_json || '[]');
-          events.push({ kind: 'click', at: new Date().toISOString() });
-          const newScore = Math.min(100, (rec.engagement_score || 0) + 15);
-          db.prepare('UPDATE recipients SET engagement_score = ?, engagement_events_json = ?, last_engaged_at = ? WHERE id = ?')
-            .run(newScore, JSON.stringify(events), new Date().toISOString(), recipient.id);
         }
       } catch {}
       return reply.redirect(target, 302);

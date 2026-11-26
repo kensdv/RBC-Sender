@@ -257,7 +257,9 @@ export function openDatabase(path) {
   const bounceCols = new Set(db.prepare('PRAGMA table_info(bounces)').all().map((c) => c.name));
   if (!bounceCols.has('classification')) db.exec("ALTER TABLE bounces ADD COLUMN classification TEXT NOT NULL DEFAULT ''");
   if (!bounceCols.has('suppression_action')) db.exec("ALTER TABLE bounces ADD COLUMN suppression_action TEXT NOT NULL DEFAULT ''");
-  const variantCols = db.prepare('SELECT name FROM sqlite_master WHERE type="table" AND name="subject_variants"').get();
+  const deliveryCols = new Set(db.prepare('PRAGMA table_info(deliveries)').all().map((c) => c.name));
+  if (!deliveryCols.has('variant_id')) db.exec("ALTER TABLE deliveries ADD COLUMN variant_id INTEGER");
+  const variantCols = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='subject_variants'").get();
   if (!variantCols) {
     db.exec(`
       CREATE TABLE subject_variants (
@@ -273,7 +275,7 @@ export function openDatabase(path) {
       CREATE INDEX subject_variants_campaign_idx ON subject_variants(campaign_id);
     `);
   }
-  const engagementCols = db.prepare('SELECT name FROM sqlite_master WHERE type="table" AND name="engagement_heatmap"').get();
+  const engagementCols = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='engagement_heatmap'").get();
   if (!engagementCols) {
     db.exec(`
       CREATE TABLE engagement_heatmap (
@@ -288,7 +290,7 @@ export function openDatabase(path) {
       CREATE INDEX engagement_heatmap_campaign_idx ON engagement_heatmap(campaign_id);
     `);
   }
-  const analyticsCols = db.prepare('SELECT name FROM sqlite_master WHERE type="table" AND name="analytics_events"').get();
+  const analyticsCols = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='analytics_events'").get();
   if (!analyticsCols) {
     db.exec(`
       CREATE TABLE analytics_events (
@@ -303,7 +305,7 @@ export function openDatabase(path) {
       CREATE INDEX analytics_kind_idx ON analytics_events(kind, occurred_at);
     `);
   }
-  const repCols = db.prepare('SELECT name FROM sqlite_master WHERE type="table" AND name="reputation_alerts"').get();
+  const repCols = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='reputation_alerts'").get();
   if (!repCols) {
     db.exec(`
       CREATE TABLE reputation_alerts (
@@ -317,7 +319,7 @@ export function openDatabase(path) {
       CREATE INDEX reputation_alerts_idx ON reputation_alerts(target, source);
     `);
   }
-  const disposableCols = db.prepare('SELECT name FROM sqlite_master WHERE type="table" AND name="disposable_domains"').get();
+  const disposableCols = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='disposable_domains'").get();
   if (!disposableCols) {
     db.exec(`
       CREATE TABLE disposable_domains (
@@ -339,7 +341,7 @@ export function openDatabase(path) {
       ('getnada.com', CURRENT_TIMESTAMP)
     `);
   }
-  const templateCols = db.prepare('SELECT name FROM sqlite_master WHERE type="table" AND name="campaign_templates"').get();
+  const templateCols = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='campaign_templates'").get();
   if (!templateCols) {
     db.exec(`
       CREATE TABLE campaign_templates (
@@ -354,7 +356,7 @@ export function openDatabase(path) {
       );
     `);
   }
-  const assetCols = db.prepare('SELECT name FROM sqlite_master WHERE type="table" AND name="asset_library"').get();
+  const assetCols = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='asset_library'").get();
   if (!assetCols) {
     db.exec(`
       CREATE TABLE asset_library (

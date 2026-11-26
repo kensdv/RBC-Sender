@@ -1243,6 +1243,17 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
+    if (!token || tab !== 'analytics') return;
+    let alive = true;
+    setAnalyticsLoading(true);
+    api(token, '/api/analytics/overview')
+      .then((res) => { if (alive) setAnalyticsData(res); })
+      .catch((err) => { if (alive) showNotice(`Analytics error: ${err.message}`); })
+      .finally(() => { if (alive) setAnalyticsLoading(false); });
+    return () => { alive = false; };
+  }, [token, tab]);
+
+  useEffect(() => {
     if (!token) return;
     let alive = true;
     const check = () => api(token, '/api/update/check')
@@ -1661,9 +1672,10 @@ export default function App() {
 
                     <div className="template-row">
                       <select className="w-select" onChange={async (e) => {
-                        const templateId = e.target.value;
+                        const templateId = Number(e.target.value);
                         if (!templateId) return;
-                        const r = await api(token, `/api/templates/${templateId}`);
+                        const r = templates.find((t) => t.id === templateId);
+                        if (!r) { showNotice('Template not found — refresh the list.'); return; }
                         updateDraft('subject', r.subject);
                         updateDraft('preheader', r.preheader);
                         updateDraft('html', r.html);
@@ -2116,9 +2128,20 @@ export default function App() {
                           showNotice(`Found ${r.duplicates.length} duplicate groups.`);
                         })}>FIND DUPLICATES</button>
                         <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
+                          const r = await api(token, '/api/hygiene/remove-duplicates', { method: 'POST' });
+                          showNotice(`Removed ${r.removed} duplicate rows.`);
+                          await refresh();
+                        })}>REMOVE DUPLICATES</button>
+                        <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
                           const r = await api(token, '/api/hygiene/validate-syntax', { method: 'POST' });
                           showNotice(`Marked ${r.markedInvalid} invalid emails.`);
+                          await refresh();
                         })}>VALIDATE SYNTAX</button>
+                        <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
+                          const r = await api(token, '/api/recipients/guess-timezones', { method: 'POST' });
+                          showNotice(`Guessed ${r.guessed} recipient timezones.`);
+                          await refresh();
+                        })}>GUESS TZ</button>
                         {settings.engineMsRefreshToken === true && (
                           <button className="btn-xs" style={{ borderColor: 'rgba(0,120,215,0.6)', color: '#5bbcff' }} disabled={busy} onClick={() => run(async () => {
                             const r = await api(token, '/api/graph/contacts', { method: 'POST' });
@@ -2182,7 +2205,7 @@ export default function App() {
                                     {r.engagement_score || 0}
                                   </span>
                                 </td>
-                                <td><span className={`badge ${r.suppressed ? 'badge-fail' : 'badge-ok'}`}>{r.suppressed ? 'SUPPRESSED' : 'ACTIVE'}</span></td>
+                                <td><span className={`badge ${r.suppressed ? 'badge-fail' : r.validSyntax === false ? 'badge-def' : 'badge-ok'}`}>{r.suppressed ? 'SUPPRESSED' : r.validSyntax === false ? 'INVALID' : 'ACTIVE'}</span></td>
                                 <td>{r.suppressed
                                   ? <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Unsuppress ${r.email}? They will receive future campaigns again.`, { title: 'UNSUPPRESS RECIPIENT', confirmLabel: 'UNSUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/unsuppress`, { method: 'POST' }); setExtraRecipients((prev) => prev.map((x) => x.id === r.id ? { ...x, suppressed: false } : x)); await refresh(); }); }}>UNSUPPRESS</button>
                                   : <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Suppress ${r.email}?`, { title: 'SUPPRESS RECIPIENT', danger: true, confirmLabel: 'SUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/suppress`, { method: 'POST' }); setExtraRecipients((prev) => prev.map((x) => x.id === r.id ? { ...x, suppressed: true } : x)); await refresh(); }); }}>SUPPRESS</button>}
@@ -3104,14 +3127,22 @@ sudo tail -f /var/log/maillog`}</pre>
                   <div className="pane-head"><span>SUPPRESSION LOG</span></div>
                   <div className="tbl-wrap">
                     <table className="w-table">
-                      <thead><tr><th>EMAIL</th><th>TYPE</th><th>REASON</th><th>DATE</th></tr></thead>
+                      <thead><tr><th>EMAIL</th><th>TYPE</th><th>CLASS</th><th>REASON</th><th>DATE</th><th></th></tr></thead>
                       <tbody>
                         {state.bounces.map((b) => (
                           <tr key={b.id}>
                             <td>{b.email}</td>
                             <td><span className="badge badge-fail">{b.kind.toUpperCase()}</span></td>
+                            <td><span className={`badge ${b.classification === 'hard' || b.classification === 'complaint' ? 'badge-fail' : b.classification === 'spam' ? 'badge-def' : 'badge-ok'}`}>{(b.classification || 'technical').toUpperCase()}</span></td>
                             <td className="dim">{b.reason}</td>
                             <td className="dim">{new Date(b.createdAt).toLocaleString()}</td>
+                            <td>{b.classification === 'soft' && (() => {
+                              const rec = state.recipients.find((r) => r.email.toLowerCase() === b.email.toLowerCase());
+                              return rec ? <button className="btn-xs" onClick={() => run(async () => {
+                                const r = await api(token, `/api/recipients/${rec.id}/retry-soft-bounce`, { method: 'POST', body: {} });
+                                showNotice(r.rescheduled ? `${r.rescheduled} deliveries rescheduled (+${r.backoffMinutes}m backoff).` : 'No failed deliveries to retry.');
+                              })}>RETRY</button> : null;
+                            })()}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -3130,6 +3161,25 @@ sudo tail -f /var/log/maillog`}</pre>
                     </div>
                     <span className="dash-mode-pill">{sendMode.toUpperCase()}</span>
                   </div>
+
+                  {(state.reputationAlerts || []).length > 0 && (
+                    <div className="rep-banner">
+                      <span className="rep-banner-icon">⚠</span>
+                      <div className="rep-banner-body">
+                        <strong>REPUTATION ALERT — {state.reputationAlerts.length} active listing{state.reputationAlerts.length > 1 ? 's' : ''}</strong>
+                        {state.reputationAlerts.slice(0, 3).map((a, i) => (
+                          <div key={i} className="rep-alert-row">
+                            <span>{a.target} listed on {a.source}</span>
+                            <span className="dim">{new Date(a.listedAt).toLocaleDateString()}</span>
+                            <button className="btn-xs" onClick={() => run(async () => {
+                              await api(token, '/api/reputation/resolve', { method: 'POST', body: { target: a.target, source: a.source } });
+                              await refresh();
+                            })}>RESOLVE</button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="kpi-row">
                     {[
