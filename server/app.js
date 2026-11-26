@@ -625,7 +625,7 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
       send_days_json, send_from_min, send_to_min, max_per_hour, max_per_day, warmup_enabled,
       timezone, track_opens, track_clicks, test_email_enabled, test_every, test_destination,
       parallel_sends, sleep_ms, encoding, text_only FROM send_settings WHERE id = 1`).get() || {};
-    const accounts = db.prepare(`SELECT label, auth_type, host, username, from_email, enabled,
+    const accounts = db.prepare(`SELECT id, label, auth_type, host, username, from_email, enabled,
       daily_quota, sent_today, fails, cooldown_until, last_error, last_check FROM smtp_accounts ORDER BY id`).all();
     const counts = {
       recipients: db.prepare('SELECT COUNT(*) c FROM recipients').get().c,
@@ -679,7 +679,37 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       else if (/subject|headline|title line/i.test(lastUser)) target = 'subject';
       else target = 'body';
     }
-    return { reply, model: usedModel, target };
+
+    // Operational intent → actionable buttons the client wires to real endpoints.
+    const lu = lastUser.toLowerCase();
+    const actions = [];
+    if (/verify|handshake|check|test/i.test(lu) && /account|mailbox|sender|pool|smtp/i.test(lu)) {
+      actions.push({ id: 'verify_accounts', label: 'VERIFY ALL ACCOUNTS' });
+    }
+    if (/reset|clear|zero/i.test(lu) && /quota|limit|counter/i.test(lu)) {
+      const ids = accounts.filter((a) => a.daily_quota > 0).map((a) => a.id);
+      if (ids.length) actions.push({ id: 'reset_quotas', label: `RESET ${ids.length} QUOTA${ids.length > 1 ? 'S' : ''}`, ids });
+    }
+    const activeCampaign = db.prepare("SELECT id, status FROM campaigns WHERE status IN ('sending','queued','scheduled') ORDER BY id DESC LIMIT 1").get();
+    if (/pause|hold|halt|stop/i.test(lu) && /send|queue|campaign|blast/i.test(lu) && activeCampaign) {
+      actions.push({ id: 'pause', label: `PAUSE CAMPAIGN #${activeCampaign.id}`, campaignId: activeCampaign.id });
+    }
+    if (/resume|unpause|continue|restart/i.test(lu) && /send|queue|campaign|blast/i.test(lu) && activeCampaign) {
+      actions.push({ id: 'resume', label: `RESUME CAMPAIGN #${activeCampaign.id}`, campaignId: activeCampaign.id });
+    }
+    if (/retry|resend|re.?queue/i.test(lu) && /fail|bounce|error/i.test(lu)) {
+      const fc = db.prepare("SELECT c.id FROM campaigns c JOIN deliveries d ON d.campaign_id = c.id WHERE d.status = 'failed' ORDER BY c.id DESC LIMIT 1").get();
+      if (fc) actions.push({ id: 'retry', label: `RETRY FAILED (#${fc.id})`, campaignId: fc.id });
+    }
+    if (/queue|launch|blast|send out|kick off/i.test(lu) && /campaign|letter|draft|this/i.test(lu)) {
+      const dc = db.prepare("SELECT id FROM campaigns WHERE status = 'draft' ORDER BY id DESC LIMIT 1").get();
+      if (dc) actions.push({ id: 'queue', label: `QUEUE CAMPAIGN #${dc.id}`, campaignId: dc.id });
+    }
+    if (/open|go to|take me|show me|jump to/i.test(lu)) {
+      const tabHit = [['setting', 'settings'], ['smtp', 'smtp'], ['email', 'smtp'], ['compos', 'compose'], ['letter', 'compose'], ['list', 'recipients'], ['recipient', 'recipients'], ['send', 'send'], ['bounc', 'bounces'], ['analytic', 'analytics'], ['schedul', 'schedule'], ['dash', 'dashboard']].find(([k]) => lu.includes(k));
+      if (tabHit) actions.push({ id: 'goto', label: `OPEN ${tabHit[1].toUpperCase()}`, tab: tabHit[1] });
+    }
+    return { reply, model: usedModel, target, actions };
   });
 
   // ── Spam Score Checker ──

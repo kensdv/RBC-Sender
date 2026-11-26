@@ -1172,3 +1172,8 @@ code {
   background: var(--green);
   font-weight: 700;
 }
+.chat-act {
+  border-color: rgba(0, 200, 255, 0.4);
+  color: #7fd4ff;
+}
+.chat-act:hover { border-color: #7fd4ff; color: #bfeaff; }

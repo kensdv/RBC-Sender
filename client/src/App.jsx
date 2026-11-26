@@ -1433,7 +1433,7 @@ export default function App() {
         }),
         new Promise((_, rej) => setTimeout(() => rej(new Error('RBC Helper timed out — provider not responding')), 150000)),
       ]);
-      setChatMsgs([...msgs, { role: 'assistant', content: r.reply || '(empty reply)', target: r.target || 'none' }]);
+      setChatMsgs([...msgs, { role: 'assistant', content: r.reply || '(empty reply)', target: r.target || 'none', actions: r.actions || [] }]);
       if (r.model && r.model !== chatModel) setChatModel(r.model);
     } catch (err) {
       setChatMsgs([...msgs, { role: 'assistant', content: `⚠ ${err.message || 'chat failed'}` }]);
@@ -1445,6 +1445,28 @@ export default function App() {
   function applyChat(content, field) {
     updateDraft(field === 'body' ? 'html' : field, content);
     showNotice(`Applied to ${field === 'body' ? 'HTML body' : field === 'text' ? 'text body' : field}.`);
+  }
+
+  async function runChatAction(a) {
+    try {
+      if (a.id === 'goto') { setTab(a.tab); return; }
+      if (a.id === 'verify_accounts') {
+        showNotice('Verifying all accounts…');
+        const r = await api(token, '/api/smtp/verify-all', { method: 'POST' });
+        const results = r?.results || r;
+        const okCount = Array.isArray(results) ? results.filter((x) => x.ok).length : 0;
+        showNotice(`Verify done — ${okCount}/${Array.isArray(results) ? results.length : '?'} live.`);
+      } else if (a.id === 'reset_quotas') {
+        await Promise.all((a.ids || []).map((id) => api(token, `/api/smtp/accounts/${id}/reset-quota`, { method: 'POST' })));
+        showNotice(`Reset ${a.ids?.length || 0} quota(s).`);
+      } else if (['pause', 'resume', 'retry', 'queue'].includes(a.id)) {
+        const r = await api(token, `/api/campaigns/${a.campaignId}/${a.id}`, { method: 'POST', body: {} });
+        showNotice(`${a.id === 'queue' ? `Queued ${r?.queued ?? ''}` : `Campaign #${a.campaignId} ${a.id}d`}.`);
+      }
+      refresh();
+    } catch (err) {
+      showNotice(`Action failed: ${err.message}`);
+    }
   }
 
   function login(e) {
@@ -3821,6 +3843,13 @@ sudo tail -f /var/log/maillog`}</pre>
                         title={m.target === f ? 'suggested target' : ''}
                         onClick={() => applyChat(m.content, f)}
                       >→ {label}</button>
+                    ))}
+                  </div>
+                )}
+                {m.role === 'assistant' && m.actions?.length > 0 && (
+                  <div className="chat-apply-row">
+                    {m.actions.map((a, j) => (
+                      <button key={j} className="chat-apply chat-act" onClick={() => runChatAction(a)}>⚡ {a.label}</button>
                     ))}
                   </div>
                 )}
