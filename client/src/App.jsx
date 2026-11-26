@@ -134,7 +134,7 @@ const emptySettings = {
   fromNames: [], subjectsList: [], redirectUrl: '',
   spoofFromName: '', spoofFromEmail: '', spoofReplyTo: '', returnPath: '',
   msgidDomain: '', xMailer: '', fakeReceived: false,
-  dkimEnabled: false, dkimDomain: '', dkimSelector: '', dkimConfigured: false, dkimPrivateKey: '',
+  dkimEnabled: false, dkimDomain: '', dkimSelector: '', dkimConfigured: false, dkimPrivateKey: '', dkimPublicKey: '',
   textOnly: false, trackOpens: false, trackClicks: false, clickTrackerUrl: '',
   parallelSends: 1, htmlRandomize: false, spamBypass: false,
   subjectB64: false, fromnameB64: false, disclaimerText: '',
@@ -3903,17 +3903,34 @@ sudo tail -f /var/log/maillog`}</pre>
                         </div>
                         <label className="field-label">PRIVATE KEY <span className="dim">(PEM format — leave blank to keep existing)</span></label>
                         <textarea className="w-textarea code-ta" rows={5} value={settings.dkimPrivateKey || ''} onChange={(e) => updateSettings('dkimPrivateKey', e.target.value)} placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----" />
+                        <div className="btn-row" style={{ margin: '8px 0' }}>
+                          <button className="btn-sm" disabled={busy} onClick={() => run(async () => {
+                            let domain = (settings.dkimDomain || '').trim().toLowerCase();
+                            if (!domain) {
+                              domain = await uiPrompt('Domain to sign mail with?', { title: 'DKIM DOMAIN', placeholder: 'yourdomain.com', confirmLabel: 'GENERATE' });
+                              if (domain === null) return;
+                              domain = domain.trim().toLowerCase();
+                            }
+                            const selector = (settings.dkimSelector || '').trim().toLowerCase() || 'rbc';
+                            const r = await api(token, '/api/settings/dkim-generate', { method: 'POST', body: { domain, selector } });
+                            updateSettings('dkimDomain', r.domain); updateSettings('dkimSelector', r.selector);
+                            updateSettings('dkimPublicKey', r.publicKey); updateSettings('dkimConfigured', true);
+                            updateSettings('dkimPrivateKey', '');
+                            showNotice(`DKIM key generated — ${r.selector}.${r.domain}. Publish the TXT records below.`);
+                          })}>✦ GENERATE DKIM KEY</button>
+                          {!!settings.dkimPublicKey && <button className="btn-sm" onClick={() => { navigator.clipboard.writeText(`v=DKIM1; k=rsa; p=${settings.dkimPublicKey}`); showNotice('DKIM TXT value copied.'); }}>COPY TXT VALUE</button>}
+                        </div>
                         <div className="dkim-dns-guide">
                           <label className="field-label">DNS RECORDS TO PUBLISH <span className="dim">(at your DNS provider)</span></label>
                           <div className="dns-rec">
                             <div className="dns-type">TXT</div>
-                            <div className="dns-name">{settings.dkimSelector || 'selector'}.{settings.dkimDomain || 'yourdomain.com'}</div>
-                            <div className="dns-val">v=DKIM1; k=rsa; p=&lt;public-key-base64&gt;</div>
+                            <div className="dns-name">{settings.dkimSelector || 'selector'}._domainkey.{settings.dkimDomain || 'yourdomain.com'}</div>
+                            <div className="dns-val">{settings.dkimPublicKey ? `v=DKIM1; k=rsa; p=${settings.dkimPublicKey}` : 'v=DKIM1; k=rsa; p=<public-key-base64>'}</div>
                           </div>
                           <div className="dns-rec">
                             <div className="dns-type">TXT</div>
                             <div className="dns-name">{settings.dkimDomain || 'yourdomain.com'}</div>
-                            <div className="dns-val">v=DKIM1; k=rsa; p=&lt;public-key-base64&gt;</div>
+                            <div className="dns-val">{settings.dkimPublicKey ? `v=DKIM1; k=rsa; p=${settings.dkimPublicKey}` : 'v=DKIM1; k=rsa; p=<public-key-base64>'}</div>
                             <div className="dim-txt">(same key at root — covers unsigned subdomains)</div>
                           </div>
                           <p className="dim-txt">Derive the public key from your private key: <code>openssl rsa -in priv.pem -pubout</code> then base64 the DER body. For full alignment add a DMARC TXT record on <code>_dmarc.{settings.dkimDomain || 'yourdomain.com'}</code>: <code>v=DMARC1; p=none;</code></p>

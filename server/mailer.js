@@ -1,4 +1,4 @@
-import { randomUUID, createHash, createHmac } from 'node:crypto';
+import { createPrivateKey, createPublicKey, randomUUID, createHash, createHmac } from 'node:crypto';
 import { resolveMx } from 'node:dns/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
@@ -312,7 +312,7 @@ export function publicSmtp(db) {
   };
 }
 
-export function publicSendSettings(db) {
+export function publicSendSettings(db, config = null) {
   const row = settingsRow(db);
   let customHeaders = [];
   try { customHeaders = JSON.parse(row.custom_headers_json || '[]'); } catch {}
@@ -366,6 +366,14 @@ export function publicSendSettings(db) {
     dkimDomain: row.dkim_domain || '',
     dkimSelector: row.dkim_selector || '',
     dkimConfigured: Boolean(row.dkim_key_encrypted),
+    dkimPublicKey: (() => {
+      if (!row.dkim_key_encrypted) return '';
+      try {
+        if (!config) return '';
+        const pem = decryptSecret(row.dkim_key_encrypted, config.credentialKey);
+        return Buffer.from(createPublicKey(createPrivateKey(pem)).export({ type: 'spki', format: 'der' })).toString('base64');
+      } catch { return ''; }
+    })(),
     textOnly: Boolean(row.text_only),
     trackOpens: Boolean(row.track_opens),
     trackClicks: Boolean(row.track_clicks),
@@ -1629,7 +1637,7 @@ export function createMailer({ db, config }) {
     },
 
     getSendSettings(db_) {
-      return publicSendSettings(db_ || db);
+      return publicSendSettings(db_ || db, config);
     },
 
     getEffectiveRatePerMinute() {

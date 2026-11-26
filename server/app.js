@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { resolve, basename, dirname, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createPublicKey, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { execSync } from 'node:child_process';
 import { gunzipSync } from 'node:zlib';
 import net from 'node:net';
@@ -263,7 +263,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const reputationAlerts = db.prepare('SELECT target, source, listed_at AS listedAt FROM reputation_alerts WHERE resolved_at IS NULL ORDER BY listed_at DESC').all();
     seedPoolFromLegacy();
     const smtpAccounts = db.prepare('SELECT * FROM smtp_accounts ORDER BY id').all().map(accountView);
-    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db), recipientTotal, providerCounts, lists, campaigns, bounces, confirmed, rates, aiTasks: db.prepare('SELECT id, text, run_at, repeat, status, last_result FROM ai_tasks ORDER BY run_at').all(), publicBaseUrl: config.publicBaseUrl, events: listEvents(120), telegram: telegramStatus(db, config), reputationAlerts };
+    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db, config), recipientTotal, providerCounts, lists, campaigns, bounces, confirmed, rates, aiTasks: db.prepare('SELECT id, text, run_at, repeat, status, last_result FROM ai_tasks ORDER BY run_at').all(), publicBaseUrl: config.publicBaseUrl, events: listEvents(120), telegram: telegramStatus(db, config), reputationAlerts };
   });
 
   app.put('/api/smtp', async (request) => {
@@ -1783,12 +1783,29 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
   });
 
   // Send settings (delivery config)
-  app.get('/api/settings', async () => ({ sendSettings: publicSendSettings(db) }));
+  app.get('/api/settings', async () => ({ sendSettings: publicSendSettings(db, config) }));
+
+  app.post('/api/settings/dkim-generate', async (request, reply) => {
+    const domain = String(request.body?.domain || '').trim().toLowerCase();
+    const selector = String(request.body?.selector || '').trim().toLowerCase() || 'rbc';
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return reply.code(400).send({ error: 'Valid DKIM domain required (e.g. yourdomain.com)' });
+    if (!/^[a-z0-9_-]+$/.test(selector)) return reply.code(400).send({ error: 'Selector: letters, digits, - and _ only' });
+    const { privateKey, publicKey } = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    });
+    const pubDer = createPublicKey(publicKey).export({ type: 'spki', format: 'der' });
+    const pubB64 = Buffer.from(pubDer).toString('base64');
+    db.prepare('UPDATE send_settings SET dkim_enabled=1, dkim_domain=?, dkim_selector=?, dkim_key_encrypted=?, updated_at=? WHERE id=1')
+      .run(domain, selector, encryptSecret(privateKey, config.credentialKey), new Date().toISOString());
+    return { ok: true, domain, selector, publicKey: pubB64 };
+  });
 
   app.put('/api/settings', async (request) => {
     // publicSendSettings exposes secret fields as boolean flags (aiKey: true) —
     // never let those sentinel values blend into the write body.
-    const { aiKey: _aiKeyFlag, ...publicDefaults } = publicSendSettings(db);
+    const { aiKey: _aiKeyFlag, ...publicDefaults } = publicSendSettings(db, config);
     const body = { ...publicDefaults, ...(request.body || {}) };
     const allowedModes = ['smtp', 'direct', 'relay', 'socks5', 'graph', 'gmail', 'api'];
     const sendMode = allowedModes.includes(body.sendMode) ? body.sendMode : 'smtp';
@@ -1998,7 +2015,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       }
       db.prepare("INSERT INTO integrations (key, value) VALUES ('provider_rates', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(rates));
     }
-    return { sendSettings: publicSendSettings(db) };
+    return { sendSettings: publicSendSettings(db, config) };
   });
 
   app.post('/api/recipients/import', async (request) => {
@@ -2341,7 +2358,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     if (campaign.status !== 'draft') fail('Only a draft campaign can be queued');
     if (!campaign.subject?.trim()) fail('Campaign has no subject');
     if (!campaign.html?.trim() && !campaign.text?.trim()) fail('Campaign has no content');
-    const settings = publicSendSettings(db);
+    const settings = publicSendSettings(db, config);
     if (settings.sendMode === 'smtp' && !db.prepare('SELECT 1 FROM smtp_settings WHERE id = 1').get() && !db.prepare('SELECT 1 FROM smtp_accounts LIMIT 1').get()) fail('Configure SMTP before queueing');
     if (settings.sendMode === 'relay' && !settings.relayHost) fail('Configure relay host before queueing');
     if ((settings.sendMode === 'direct' || settings.sendMode === 'socks5' || settings.sendMode === 'relay') && !settings.directFromEmail) fail('Configure direct sending from-email before queueing');
