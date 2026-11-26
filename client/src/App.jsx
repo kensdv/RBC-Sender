@@ -116,7 +116,7 @@ function ChromosomeBackground() {
 }
 
 const emptyDraft = {
-  name: '', subject: '', preheader: '', providers: [],
+  name: '', subject: '', preheader: '', providers: [], lists: [],
   html: '<h1>Hello [Firstname]</h1>\n<p>Your account at ++rbc_domain1++ requires attention.</p>\n<p>Ref: ++rbc_number6++-++rbc_randstring++</p>',
   text: '',
   attachments: [],
@@ -1275,6 +1275,8 @@ export default function App() {
   const [subjectVariants, setSubjectVariants] = useState([]);
   const [newVariantSubject, setNewVariantSubject] = useState('');
   const [engagementTier, setEngagementTier] = useState('all');
+  const [recipList, setRecipList] = useState('all');
+  const [importList, setImportList] = useState('');
   const [recipPage, setRecipPage] = useState(1);
   const [recipRows, setRecipRows] = useState([]);
   const [recipTotal, setRecipTotal] = useState(0);
@@ -1309,10 +1311,10 @@ export default function App() {
 
   useEffect(() => {
     if (!token) return;
-    api(token, `/api/recipients?offset=${(recipPage - 1) * pageSize}&limit=${pageSize}&tier=${engagementTier}`)
+    api(token, `/api/recipients?offset=${(recipPage - 1) * pageSize}&limit=${pageSize}&tier=${engagementTier}${recipList !== 'all' ? `&list=${encodeURIComponent(recipList)}` : ''}`)
       .then((r) => { setRecipRows(r.recipients || []); setRecipTotal(r.total || 0); })
       .catch(() => {});
-  }, [token, recipPage, pageSize, engagementTier, recipVersion]);
+  }, [token, recipPage, pageSize, engagementTier, recipList, recipVersion]);
 
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
@@ -1732,7 +1734,7 @@ export default function App() {
   function editCampaign(c) {
     if (!['draft', 'failed', 'scheduled'].includes(c.status)) return;
     setSelectedId(c.id);
-    setDraft({ name: c.name, subject: c.subject, preheader: c.preheader || '', html: c.html, text: c.text, attachments: c.attachments || [], providers: c.providers || [] });
+    setDraft({ name: c.name, subject: c.subject, preheader: c.preheader || '', html: c.html, text: c.text, attachments: c.attachments || [], providers: c.providers || [], lists: c.lists || [] });
     setTab('compose');
   }
 
@@ -1785,6 +1787,13 @@ export default function App() {
 
   const sendMode = settings.sendMode || 'smtp';
   const pagedRecip = recipRows;
+
+  function saveRecipField(r, patch) {
+    run(async () => {
+      await api(token, `/api/recipients/${r.id}`, { method: 'PUT', body: { firstName: r.firstName, lastName: r.lastName, company: r.company, list: r.list, ...patch } });
+      await refresh();
+    });
+  }
   const pagedBounces = (state?.bounces || []).slice((bouncePage - 1) * pageSize, bouncePage * pageSize);
   const filteredCampaigns = (state?.campaigns || []).filter((c) => {
     if (campFilter === 'active' && !['queued', 'sending', 'scheduled'].includes(c.status)) return false;
@@ -2196,6 +2205,27 @@ export default function App() {
                               <button type="button" className="prov-chip prov-chip-clear" onClick={() => updateDraft('providers', [])}>ALL</button>
                             )}
                           </div>
+                          {!!(state.lists || []).length && (
+                            <>
+                              <label className="field-label" style={{ marginTop: 10 }}>CONTACT LISTS <span className="dim">(blank = every list)</span></label>
+                              <div className="provider-chips">
+                                {state.lists.map((l) => (
+                                  <button
+                                    key={l.name}
+                                    type="button"
+                                    className={`prov-chip ${(draft.lists || []).includes(l.name) ? 'prov-chip-on' : ''}`}
+                                    onClick={() => {
+                                      const cur = draft.lists || [];
+                                      updateDraft('lists', cur.includes(l.name) ? cur.filter((x) => x !== l.name) : [...cur, l.name]);
+                                    }}
+                                  >{l.name} <span className="prov-count">{l.count}</span></button>
+                                ))}
+                                {(draft.lists || []).length > 0 && (
+                                  <button type="button" className="prov-chip prov-chip-clear" onClick={() => updateDraft('lists', [])}>ALL LISTS</button>
+                                )}
+                              </div>
+                            </>
+                          )}
                         </div>
                       );
                     })()}
@@ -2638,13 +2668,19 @@ export default function App() {
                     <p className="dim-txt">Any format works — CSV with <code>email</code> column, or a plain list (one per line, comma/colon separated). Optional columns: <code>first_name</code>, <code>last_name</code>, <code>company</code>.</p>
                     <input type="file" accept=".csv,text/csv" className="w-input" onChange={(e) => run(async () => { const f = e.target.files[0]; if (f) setCsv(await f.text()); })} />
                     <textarea className="w-textarea code-ta" rows={12} value={csv} onChange={(e) => setCsv(e.target.value)} />
+                    <label className="field-label" htmlFor="import-list-name">LIST NAME <span className="dim">— pick an existing name to merge, or type a new one</span></label>
+                    <input id="import-list-name" className="w-input" list="rbc-lists" placeholder="e.g. Outlook Leads — June" value={importList}
+                      onChange={(e) => setImportList(e.target.value)} />
+                    <datalist id="rbc-lists">{(state.lists || []).map((l) => <option key={l.name} value={l.name} />)}</datalist>
                     <label className="check-row">
                       <input type="checkbox" checked={consentConfirmed} onChange={(e) => setConsentConfirmed(e.target.checked)} />
                       <span>All recipients consented to receive this message.</span>
                     </label>
-                    <button className="btn-primary" disabled={busy || !consentConfirmed} onClick={() => run(async () => {
-                      const r = await api(token, '/api/recipients/import', { method: 'POST', body: { csv, consentConfirmed } });
-                      showNotice(`${r.imported} imported — ${r.errors.length} rejected.`);
+                    <button className="btn-primary" disabled={busy || !consentConfirmed || !importList.trim()} onClick={() => run(async () => {
+                      const merged = (state.lists || []).some((l) => l.name.toLowerCase() === importList.trim().toLowerCase());
+                      const r = await api(token, '/api/recipients/import', { method: 'POST', body: { csv, consentConfirmed, list: importList.trim() } });
+                      showNotice(`${r.imported} ${merged ? 'merged into' : 'imported to'} "${r.list}" — ${r.errors.length} rejected.`);
+                      setCsv(''); setConsentConfirmed(false);
                       await refresh();
                     })}>[ IMPORT LIST ]</button>
                   </div>
@@ -2693,11 +2729,15 @@ export default function App() {
                           await refresh();
                         })}>GUESS TZ</button>
                         {settings.engineMsRefreshToken === true && (
-                          <button className="btn-xs" style={{ borderColor: 'rgba(0,120,215,0.6)', color: '#5bbcff' }} disabled={busy} onClick={() => run(async () => {
-                            const r = await api(token, '/api/graph/contacts', { method: 'POST' });
-                            showNotice(`MS Contacts: ${r.imported} imported, ${r.duplicates} dupes, ${r.total} total pulled.`);
-                            await refresh();
-                          })}>PULL MS CONTACTS</button>
+                          <button className="btn-xs" style={{ borderColor: 'rgba(0,120,215,0.6)', color: '#5bbcff' }} disabled={busy} onClick={async () => {
+                            const ln = await uiPrompt('Save pulled contacts to which list? An existing name merges.', { title: 'LIST NAME', placeholder: 'MS contacts', confirmLabel: 'PULL' });
+                            if (ln === null) return;
+                            run(async () => {
+                              const r = await api(token, '/api/graph/contacts', { method: 'POST', body: { list: ln || 'MS contacts' } });
+                              showNotice(`MS Contacts: ${r.imported} imported, ${r.duplicates} dupes, ${r.total} total pulled.`);
+                              await refresh();
+                            });
+                          }}>PULL MS CONTACTS</button>
                         )}
                         <button className="btn-xs btn-danger" disabled={busy || !state.recipientTotal} onClick={async () => {
                           if (await uiConfirm(`Delete ALL ${state.recipientTotal} recipients? Delivery history for them is removed too.`, { title: 'CLEAR RECIPIENT LIST', danger: true, confirmLabel: `DELETE ${state.recipientTotal}` })) {
@@ -2707,8 +2747,14 @@ export default function App() {
                       </div>
                     </div>
                     <div className="filter-row">
+                      <span className="dim">LIST:</span>
+                      <select className="w-select" value={recipList} onChange={(e) => { setRecipList(e.target.value); setRecipPage(1); }} aria-label="Filter by contact list">
+                        <option value="all">ALL LISTS ({state.recipientTotal || 0})</option>
+                        {(state.lists || []).map((l) => <option key={l.name} value={l.name}>{l.name} ({l.count})</option>)}
+                        <option value="__none__">— UNLISTED —</option>
+                      </select>
                       <span className="dim">ENGAGEMENT:</span>
-                      <select className="w-select" value={engagementTier} onChange={(e) => { setEngagementTier(e.target.value); setRecipPage(1); }}>
+                      <select className="w-select" value={engagementTier} onChange={(e) => { setEngagementTier(e.target.value); setRecipPage(1); }} aria-label="Filter by engagement tier">
                         <option value="all">ALL</option>
                         <option value="hot">HOT (70+)</option>
                         <option value="warm">WARM (31-69)</option>
@@ -2737,13 +2783,16 @@ export default function App() {
                     )}
                     <div className="tbl-wrap">
                       <table className="w-table">
-                        <thead><tr><th>EMAIL</th><th>NAME</th><th>PROVIDER</th><th>ENGAGEMENT</th><th>STATUS</th><th></th></tr></thead>
+                        <thead><tr><th>EMAIL</th><th>NAME</th><th>LIST</th><th>PROVIDER</th><th>ENGAGEMENT</th><th>STATUS</th><th></th></tr></thead>
                         <tbody>
                           {pagedRecip.map((r) => {
                             return (
                               <tr key={r.id}>
                                 <td>{r.email}</td>
-                                <td>{[r.firstName, r.lastName].filter(Boolean).join(' ')}</td>
+                                <td><input className="cell-edit" defaultValue={[r.firstName, r.lastName].filter(Boolean).join(' ')} placeholder="—" aria-label={`Edit name for ${r.email}`}
+                                  onBlur={(e) => { const v = e.target.value.trim(); const cur = [r.firstName, r.lastName].filter(Boolean).join(' '); if (v !== cur) { const parts = v.split(/\s+/); saveRecipField(r, { firstName: parts.shift() || '', lastName: parts.join(' ') }); } }} /></td>
+                                <td><input className="cell-edit cell-edit-list" list="rbc-lists" defaultValue={r.list || ''} placeholder="—" aria-label={`Edit list for ${r.email}`}
+                                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== (r.list || '')) saveRecipField(r, { list: v }); }} /></td>
                                 <td className="dim">{r.custom?.provider || '—'}</td>
                                 <td>
                                   <span className={`badge ${r.engagement_score >= 70 ? 'badge-ok' : r.engagement_score >= 31 ? 'badge-def' : 'badge-fail'}`}>
@@ -2819,9 +2868,11 @@ export default function App() {
                             <button className="btn-xs btn-solid" onClick={async () => {
                               const clean = sorterResult.clean || [];
                               if (!clean.length) return;
+                              const ln = await uiPrompt('Save sorted contacts to which list? An existing name merges.', { title: 'LIST NAME', placeholder: `Sorted ${new Date().toISOString().slice(0, 10)}`, confirmLabel: 'IMPORT' });
+                              if (ln === null) return;
                               try {
-                                const res = await api(token, '/api/recipients/import', { method: 'POST', body: { csv: 'email\n' + clean.join('\n'), consentConfirmed: true } });
-                                showNotice(`Imported ${res.imported ?? clean.length} contacts.`, 'ok');
+                                const res = await api(token, '/api/recipients/import', { method: 'POST', body: { csv: 'email\n' + clean.join('\n'), consentConfirmed: true, list: ln || `Sorted ${new Date().toISOString().slice(0, 10)}` } });
+                                showNotice(`Imported ${res.imported ?? clean.length} to "${res.list}".`, 'ok');
                                 refresh();
                               } catch (err) { showNotice(`Import failed: ${err.message}`, 'err'); }
                             }}>[ IMPORT CLEAN → CONTACTS ]</button>
@@ -3178,6 +3229,15 @@ sudo tail -f /var/log/maillog`}</pre>
                                   setAcctForm({ label: a.label, host: a.host, port: a.port, secure: a.secure, username: a.username, password: '', fromName: a.fromName, fromEmail: a.fromEmail, replyTo: a.replyTo, weight: a.weight, dailyQuota: a.dailyQuota });
                                 }}>EDIT</button>
                                 <button className="btn-xs" onClick={() => run(async () => { await api(token, `/api/smtp/accounts/${a.id}`, { method: 'PUT', body: { label: a.label, host: a.host, port: a.port, secure: a.secure, username: a.username, fromName: a.fromName, fromEmail: a.fromEmail, replyTo: a.replyTo, weight: a.weight, enabled: !a.enabled } }); await refresh(); })}>{a.enabled ? 'DISABLE' : 'ENABLE'}</button>
+                                {a.authType?.startsWith('ms_') && <button className="btn-xs" title="Extract this mailbox's contacts into a mail list" onClick={async () => {
+                                  const ln = await uiPrompt(`Save ${a.username} contacts to which list? An existing name merges.`, { title: 'EXTRACT CONTACTS', placeholder: a.label || a.username, confirmLabel: 'EXTRACT' });
+                                  if (ln === null) return;
+                                  run(async () => {
+                                    const r = await api(token, `/api/smtp/accounts/${a.id}/extract-contacts`, { method: 'POST', body: { list: ln || '' } });
+                                    showNotice(r.note || `Extracted ${r.imported} contact(s) to "${r.list}"${r.merged ? ` — ${r.merged} merged into existing` : ''} (${r.total} pulled)`);
+                                    await refresh();
+                                  });
+                                }}>EXTRACT</button>}
                                 {a.authType?.startsWith('ms_') && <button className="btn-xs" title="Probe for admin rights — if the credential can read the org directory, every eligible mailbox gets imported" onClick={() => run(async () => {
                                   const r = await api(token, `/api/smtp/accounts/${a.id}/probe`, { method: 'POST' });
                                   showNotice(r.admin

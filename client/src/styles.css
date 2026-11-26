@@ -1307,6 +1307,12 @@ details.help-sec[open] summary::before { content: 'v '; }
 .help-pre { background: rgba(47,224,107,.05); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; font-size: 11px; line-height: 1.7; color: var(--cyan); overflow-x: auto; margin: 10px 0; }
 .help-table { font-size: 11px; }
 .help-table td { vertical-align: top; }
+
+/* Inline editable cells — recipients table */
+.cell-edit { background: transparent; border: 1px solid transparent; color: var(--txt); font-family: inherit; font-size: 11px; width: 100%; padding: 3px 6px; border-radius: 3px; min-width: 90px; }
+.cell-edit:hover { border-color: var(--line); }
+.cell-edit:focus { border-color: var(--green); background: rgba(47, 224, 107, 0.05); outline: none; }
+.cell-edit-list { color: var(--cyan); max-width: 140px; }
 .btn-xs.btn-solid { background: var(--green); color: #03180b; border-color: var(--green); font-weight: 700; }
 
 /* AI Writer controls */

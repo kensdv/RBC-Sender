@@ -637,6 +637,33 @@ export async function msRtListOrgMailboxes(clientId, refreshToken, tenant = 'com
   return users;
 }
 
+// Pull a mailbox's personal contacts — delegated /me/contacts for RT accounts,
+// /users/{mailbox}/contacts for app creds. Returns flat {email, displayName}.
+async function msGraphCollectContacts(url, token, cap = 2000) {
+  const contacts = [];
+  while (url && contacts.length < cap) {
+    const res = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20000) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`contacts read failed ${res.status}: ${data.error?.message || res.statusText}`);
+    for (const c of data.value || []) {
+      const addr = (c.emailAddresses || []).find((a) => (a.address || '').includes('@'));
+      if (addr) contacts.push({ email: addr.address.toLowerCase(), displayName: c.displayName || addr.name || '' });
+    }
+    url = data['@odata.nextLink'] || null;
+  }
+  return contacts;
+}
+
+export async function msRtListContacts(clientId, refreshToken, tenant = 'common') {
+  const token = await msRtAccessToken(clientId, refreshToken, tenant);
+  return msGraphCollectContacts('https://graph.microsoft.com/v1.0/me/contacts?$select=displayName,emailAddresses&$top=200', token);
+}
+
+export async function msCcListContacts(clientId, clientSecret, tenant, mailbox) {
+  const token = await msCcAccessToken(clientId, clientSecret, tenant);
+  return msGraphCollectContacts(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/contacts?$select=displayName,emailAddresses&$top=200`, token);
+}
+
 export async function msRtSendMail({ token, sender, message, recipient, fromName, replyTo, attachments, settings }) {
   const toName = [recipient.firstName, recipient.lastName].filter(Boolean).join(' ');
   const addr = { emailAddress: { name: toName, address: recipient.email } };

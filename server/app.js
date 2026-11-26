@@ -10,7 +10,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { decryptSecret, encryptSecret, tokensEqual, unsubscribeToken } from './crypto.js';
 import { parseRecipientsCsv, parseLooseEmails } from './csv.js';
-import { publicSmtp, publicSendSettings, getGraphAccessToken, msRtMailboxInfo, msCcVerifyMailbox, msCcListMailboxes, msRtListOrgMailboxes } from './mailer.js';
+import { publicSmtp, publicSendSettings, getGraphAccessToken, msRtMailboxInfo, msCcVerifyMailbox, msCcListMailboxes, msRtListOrgMailboxes, msRtListContacts, msCcListContacts } from './mailer.js';
 import { escapeHtml } from './placeholders.js';
 import { transaction } from './db.js';
 import { DEFAULT_AI_RULES } from './default-ai-rules.js';
@@ -120,6 +120,7 @@ function recipientView(row) {
     company: row.company, custom, consentConfirmed: Boolean(row.consent_confirmed),
     suppressed: Boolean(row.suppressed), suppressionReason: row.suppression_reason, createdAt: row.created_at,
     engagement_score: row.engagement_score || 0,
+    list: row.list_name || '',
     timezone_guessed: row.timezone_guessed || '',
     validSyntax: row.valid_syntax !== 0,
     bounceCount: row.bounce_count || 0,
@@ -131,9 +132,11 @@ function campaignView(row) {
   try { attachments = JSON.parse(row.attachments_json || '[]'); } catch {}
   let providers = [];
   try { providers = JSON.parse(row.providers_json || '[]'); } catch {}
+  let lists = [];
+  try { lists = JSON.parse(row.lists_json || '[]'); } catch {}
   return {
     id: row.id, name: row.name, subject: row.subject, preheader: row.preheader || '', html: row.html, text: row.text,
-    attachments, providers, paused: Boolean(row.paused),
+    attachments, providers, lists, paused: Boolean(row.paused),
     status: row.status, scheduledFor: row.scheduled_for, createdAt: row.created_at,
     total: row.total || 0, sent: row.sent || 0, failed: row.failed || 0, queued: row.queued || 0,
     send_time_optimization_enabled: Boolean(row.send_time_optimization_enabled),
@@ -149,7 +152,10 @@ function campaignBody(body) {
   const providers = Array.isArray(body.providers)
     ? body.providers.map((p) => text(p, 'provider', 60)).filter(Boolean).slice(0, 30)
     : [];
-  return { name: text(body.name, 'name', 120) || subject, subject, preheader: text(body.preheader || '', 'preheader', 300), html, text: plainText, attachments, providers };
+  const lists = Array.isArray(body.lists)
+    ? body.lists.map((l) => text(l, 'list', 80)).filter(Boolean).slice(0, 30)
+    : [];
+  return { name: text(body.name, 'name', 120) || subject, subject, preheader: text(body.preheader || '', 'preheader', 300), html, text: plainText, attachments, providers, lists };
 }
 
 function unsubscribePage(message, action = '') {
@@ -225,6 +231,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const recipientTotal = db.prepare('SELECT COUNT(*) AS c FROM recipients').get().c;
     const providerCounts = {};
     for (const row of db.prepare(`SELECT COALESCE(NULLIF(TRIM(json_extract(custom_json,'$.provider')),''), 'Unclassified') AS p, COUNT(*) AS c FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0 GROUP BY p`).all()) providerCounts[row.p] = row.c;
+    const lists = db.prepare(`SELECT list_name AS name, COUNT(*) AS count FROM recipients WHERE list_name <> '' GROUP BY list_name ORDER BY list_name COLLATE NOCASE`).all();
     const campaigns = db.prepare(`
       SELECT c.*, COUNT(d.id) AS total,
         COALESCE(SUM(CASE WHEN d.status = 'sent' THEN 1 ELSE 0 END), 0) AS sent,
@@ -240,7 +247,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const reputationAlerts = db.prepare('SELECT target, source, listed_at AS listedAt FROM reputation_alerts WHERE resolved_at IS NULL ORDER BY listed_at DESC').all();
     seedPoolFromLegacy();
     const smtpAccounts = db.prepare('SELECT * FROM smtp_accounts ORDER BY id').all().map(accountView);
-    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db), recipientTotal, providerCounts, campaigns, bounces, confirmed, publicBaseUrl: config.publicBaseUrl, events: listEvents(120), telegram: telegramStatus(db, config), reputationAlerts };
+    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db), recipientTotal, providerCounts, lists, campaigns, bounces, confirmed, publicBaseUrl: config.publicBaseUrl, events: listEvents(120), telegram: telegramStatus(db, config), reputationAlerts };
   });
 
   app.put('/api/smtp', async (request) => {
@@ -436,7 +443,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
   });
 
   // ── Graph contacts pull → import ──
-  app.post('/api/graph/contacts', async () => {
+  app.post('/api/graph/contacts', async (request) => {
     const accessToken = await getGraphAccessToken(db, config).catch((e) => { fail(e.message, 400); });
     const contacts = [];
     let url = 'https://graph.microsoft.com/v1.0/me/contacts?$select=emailAddresses,givenName,surname,companyName&$top=100&$orderby=displayName';
@@ -461,18 +468,21 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       url = page['@odata.nextLink'] || null;
     }
     if (!contacts.length) return { imported: 0, duplicates: 0, errors: [], total: 0 };
+    const listName = text(request.body?.list || '', 'list', 80);
     // Deduplicate by email
     const unique = [...new Map(contacts.map((c) => [c.email, c])).values()]
       .filter((c) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email));
     const now = new Date().toISOString();
     transaction(db, () => {
       const stmt = db.prepare(`
-        INSERT INTO recipients (email, first_name, last_name, company, custom_json, consent_confirmed, created_at, updated_at)
-        VALUES (?, ?, ?, ?, '{}', 1, ?, ?)
+        INSERT INTO recipients (email, first_name, last_name, company, custom_json, consent_confirmed, list_name, created_at, updated_at)
+        VALUES (?, ?, ?, ?, '{}', 1, ?, ?, ?)
         ON CONFLICT(email) DO UPDATE SET first_name=excluded.first_name, last_name=excluded.last_name,
-          company=excluded.company, consent_confirmed=1, updated_at=excluded.updated_at
+          company=excluded.company, consent_confirmed=1,
+          list_name = CASE WHEN excluded.list_name <> '' THEN excluded.list_name ELSE recipients.list_name END,
+          updated_at=excluded.updated_at
       `);
-      for (const c of unique) stmt.run(c.email, c.firstName, c.lastName, c.company, now, now);
+      for (const c of unique) stmt.run(c.email, c.firstName, c.lastName, c.company, listName, now, now);
     });
     return { imported: unique.length, duplicates: contacts.length - unique.length, errors: [], total: contacts.length };
   });
@@ -1500,6 +1510,37 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     return { ok: true, admin: true, orgSize: org.length, imported: imported.length, results };
   });
 
+  // Extract a mailbox's personal contacts into a named mail list.
+  app.post('/api/smtp/accounts/:id/extract-contacts', async (request) => {
+    const row = db.prepare('SELECT * FROM smtp_accounts WHERE id = ?').get(Number(request.params.id));
+    if (!row) fail('Account not found', 404);
+    if (row.auth_type !== 'ms_rt' && row.auth_type !== 'ms_cc') fail('Extraction only applies to Microsoft accounts');
+    const secret = decryptSecret(row.ms_rt_encrypted || '', config.credentialKey);
+    if (!secret) fail('Account has no stored credential');
+    const tenant = row.ms_tenant || 'common';
+    const contacts = row.auth_type === 'ms_cc'
+      ? await msCcListContacts(row.ms_client_id, secret, tenant, row.username)
+      : await msRtListContacts(row.ms_client_id, secret, tenant);
+    if (!contacts.length) return { ok: true, imported: 0, skipped: 0, list: '', note: 'mailbox has no contacts' };
+    // Default list name = the mailbox owner's name so batches stay attributable.
+    const listName = text(request.body?.list || '', 'list', 80) || row.label || row.username;
+    const unique = [...new Map(contacts.map((c) => [c.email, c])).values()];
+    const now = new Date().toISOString();
+    let inserted = 0, merged = 0;
+    transaction(db, () => {
+      const stmt = db.prepare(`
+        INSERT INTO recipients (email, first_name, last_name, company, custom_json, consent_confirmed, list_name, created_at, updated_at)
+        VALUES (?, ?, ?, '', '{}', 1, ?, ?, ?)
+        ON CONFLICT(email) DO UPDATE SET list_name = excluded.list_name, updated_at = excluded.updated_at`);
+      for (const c of unique) {
+        const existed = db.prepare('SELECT id FROM recipients WHERE email = ?').get(c.email);
+        stmt.run(c.email, c.displayName, '', listName, now, now);
+        if (existed) merged++; else inserted++;
+      }
+    });
+    return { ok: true, imported: inserted, merged, total: contacts.length, list: listName, owner: row.label || row.username };
+  });
+
   app.post('/api/smtp/accounts/import-ms', async (request) => {
     const body = request.body || {};
     const quota = Math.min(100000, Math.max(0, Number(body.quota) || 10000));
@@ -1822,18 +1863,33 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       if (loose.records.length) parsed = loose;
       else fail(strictErr.message || 'Invalid CSV', 400);
     }
+    const listName = text(request.body?.list || '', 'list', 80);
     const unique = [...new Map(parsed.records.map((record) => [record.email, record])).values()];
     const now = new Date().toISOString();
     transaction(db, () => {
       const statement = db.prepare(`
-        INSERT INTO recipients (email, first_name, last_name, company, custom_json, consent_confirmed, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+        INSERT INTO recipients (email, first_name, last_name, company, custom_json, consent_confirmed, list_name, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
         ON CONFLICT(email) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name,
-          company = excluded.company, custom_json = excluded.custom_json, consent_confirmed = 1, updated_at = excluded.updated_at
+          company = excluded.company, custom_json = excluded.custom_json, consent_confirmed = 1,
+          list_name = CASE WHEN excluded.list_name <> '' THEN excluded.list_name ELSE recipients.list_name END,
+          updated_at = excluded.updated_at
       `);
-      for (const record of unique) statement.run(record.email, record.firstName, record.lastName, record.company, JSON.stringify(record.custom), now, now);
+      for (const record of unique) statement.run(record.email, record.firstName, record.lastName, record.company, JSON.stringify(record.custom), listName, now, now);
     });
-    return { imported: unique.length, duplicates: parsed.records.length - unique.length, errors: parsed.errors };
+    return { imported: unique.length, duplicates: parsed.records.length - unique.length, errors: parsed.errors, list: listName };
+  });
+
+  // Editable recipient fields — name/company corrections and list moves.
+  app.put('/api/recipients/:id', async (request) => {
+    const id = Number(request.params.id);
+    const row = db.prepare('SELECT id FROM recipients WHERE id = ?').get(id);
+    if (!row) fail('Recipient not found', 404);
+    const body = request.body || {};
+    db.prepare(`UPDATE recipients SET first_name = ?, last_name = ?, company = ?, list_name = ?, updated_at = ? WHERE id = ?`)
+      .run(text(body.firstName || '', 'firstName', 120), text(body.lastName || '', 'lastName', 120),
+        text(body.company || '', 'company', 160), text(body.list || '', 'list', 80), new Date().toISOString(), id);
+    return { ok: true };
   });
 
   // File uploads for campaign attachments (base64 JSON — no multipart dep)
@@ -1944,9 +2000,12 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     const limit = Math.min(2000, Math.max(1, Number(request.query.limit) || 1000));
     const tier = String(request.query.tier || 'all');
     const lookup = String(request.query.email || '').trim().toLowerCase();
+    const list = String(request.query.list || '').trim();
     const where = ['1=1'];
     const params = [];
     if (lookup) { where.push('LOWER(email) = ?'); params.push(lookup); }
+    if (list === '__none__') where.push("list_name = ''");
+    else if (list) { where.push('list_name = ?'); params.push(list); }
     if (tier === 'hot') where.push('engagement_score >= 70');
     else if (tier === 'warm') where.push('engagement_score BETWEEN 31 AND 69');
     else if (tier === 'cold') where.push('engagement_score < 31');
@@ -2103,7 +2162,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
   app.post('/api/campaigns', async (request) => {
     const campaign = campaignBody(request.body || {});
     const now = new Date().toISOString();
-    const result = db.prepare("INSERT INTO campaigns (name, subject, preheader, html, text, attachments_json, providers_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)").run(campaign.name, campaign.subject, campaign.preheader, campaign.html, campaign.text, JSON.stringify(campaign.attachments || []), JSON.stringify(campaign.providers || []), now, now);
+    const result = db.prepare("INSERT INTO campaigns (name, subject, preheader, html, text, attachments_json, providers_json, lists_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)").run(campaign.name, campaign.subject, campaign.preheader, campaign.html, campaign.text, JSON.stringify(campaign.attachments || []), JSON.stringify(campaign.providers || []), JSON.stringify(campaign.lists || []), now, now);
     return { id: Number(result.lastInsertRowid) };
   });
 
@@ -2113,7 +2172,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     if (!existing) fail('Campaign not found', 404);
     if (!['draft', 'failed', 'scheduled'].includes(existing.status)) fail('Only draft, scheduled or failed campaigns can be edited');
     const campaign = campaignBody(request.body || {});
-    db.prepare('UPDATE campaigns SET name = ?, subject = ?, preheader = ?, html = ?, text = ?, attachments_json = ?, providers_json = ?, updated_at = ? WHERE id = ?').run(campaign.name, campaign.subject, campaign.preheader, campaign.html, campaign.text, JSON.stringify(campaign.attachments || []), JSON.stringify(campaign.providers || []), new Date().toISOString(), id);
+    db.prepare('UPDATE campaigns SET name = ?, subject = ?, preheader = ?, html = ?, text = ?, attachments_json = ?, providers_json = ?, lists_json = ?, updated_at = ? WHERE id = ?').run(campaign.name, campaign.subject, campaign.preheader, campaign.html, campaign.text, JSON.stringify(campaign.attachments || []), JSON.stringify(campaign.providers || []), JSON.stringify(campaign.lists || []), new Date().toISOString(), id);
     return { id };
   });
 
@@ -2121,7 +2180,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     const campaign = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(Number(request.params.id));
     if (!campaign) fail('Campaign not found', 404);
     const now = new Date().toISOString();
-    const result = db.prepare("INSERT INTO campaigns (name, subject, preheader, html, text, attachments_json, providers_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)").run(`${campaign.name} copy`.slice(0, 120), campaign.subject, campaign.preheader || '', campaign.html, campaign.text, campaign.attachments_json || '[]', campaign.providers_json || '[]', now, now);
+    const result = db.prepare("INSERT INTO campaigns (name, subject, preheader, html, text, attachments_json, providers_json, lists_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)").run(`${campaign.name} copy`.slice(0, 120), campaign.subject, campaign.preheader || '', campaign.html, campaign.text, campaign.attachments_json || '[]', campaign.providers_json || '[]', campaign.lists_json || '[]', now, now);
     return { id: Number(result.lastInsertRowid) };
   });
 
@@ -2142,12 +2201,15 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     if (settings.sendMode === 'gmail' && (!settings.engineClientId || !settings.engineClientSecret || !settings.engineRefreshToken)) fail('Configure Gmail engine credentials before queueing');
     if (settings.sendMode === 'api' && (!settings.apiProvider || (settings.apiProvider !== 'custom' && !db.prepare('SELECT api_key_encrypted FROM send_settings WHERE id = 1').get()?.api_key_encrypted))) fail('Configure the API engine provider and key before queueing');
     if (settings.sendMode === 'api' && !settings.directFromEmail) fail('Configure a from/direct email before queueing');
-    let providers = [];
+    let providers = [], lists = [];
     try { providers = JSON.parse(campaign.providers_json || '[]').filter((p) => typeof p === 'string' && p); } catch {}
-    const recipients = providers.length
-      ? db.prepare(`SELECT id FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0 AND valid_syntax = 1 AND json_extract(COALESCE(custom_json,'{}'), '$.provider') IN (${providers.map(() => '?').join(',')})`).all(...providers)
-      : db.prepare('SELECT id FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0 AND valid_syntax = 1').all();
-    if (!recipients.length) fail(providers.length ? 'No confirmed, unsuppressed recipients in the selected provider categories' : 'No confirmed, unsuppressed recipients are available');
+    try { lists = JSON.parse(campaign.lists_json || '[]').filter((l) => typeof l === 'string' && l); } catch {}
+    const conds = ['consent_confirmed = 1', 'suppressed = 0', 'valid_syntax = 1'];
+    const condParams = [];
+    if (providers.length) { conds.push(`json_extract(COALESCE(custom_json,'{}'), '$.provider') IN (${providers.map(() => '?').join(',')})`); condParams.push(...providers); }
+    if (lists.length) { conds.push(`list_name IN (${lists.map(() => '?').join(',')})`); condParams.push(...lists); }
+    const recipients = db.prepare(`SELECT id FROM recipients WHERE ${conds.join(' AND ')}`).all(...condParams);
+    if (!recipients.length) fail(providers.length || lists.length ? 'No confirmed, unsuppressed recipients in the selected audience' : 'No confirmed, unsuppressed recipients are available');
     let scheduledFor = null;
     if (request.body?.scheduledFor) {
       const timestamp = Date.parse(request.body.scheduledFor);

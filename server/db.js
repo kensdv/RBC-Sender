@@ -267,6 +267,7 @@ export function openDatabase(path) {
   if (!campaignCols.has('providers_json')) db.exec("ALTER TABLE campaigns ADD COLUMN providers_json TEXT NOT NULL DEFAULT '[]'");
   if (!campaignCols.has('paused')) db.exec("ALTER TABLE campaigns ADD COLUMN paused INTEGER NOT NULL DEFAULT 0");
   if (!campaignCols.has('send_time_optimization_enabled')) db.exec("ALTER TABLE campaigns ADD COLUMN send_time_optimization_enabled INTEGER NOT NULL DEFAULT 0");
+  if (!campaignCols.has('lists_json')) db.exec("ALTER TABLE campaigns ADD COLUMN lists_json TEXT NOT NULL DEFAULT '[]'");
   const recipientCols = new Set(db.prepare('PRAGMA table_info(recipients)').all().map((c) => c.name));
   if (!recipientCols.has('timezone_guessed')) db.exec("ALTER TABLE recipients ADD COLUMN timezone_guessed TEXT NOT NULL DEFAULT ''");
   if (!recipientCols.has('engagement_score')) db.exec("ALTER TABLE recipients ADD COLUMN engagement_score INTEGER NOT NULL DEFAULT 0");
@@ -277,6 +278,8 @@ export function openDatabase(path) {
   if (!recipientCols.has('complaint_count')) db.exec("ALTER TABLE recipients ADD COLUMN complaint_count INTEGER NOT NULL DEFAULT 0");
   if (!recipientCols.has('last_complaint_at')) db.exec("ALTER TABLE recipients ADD COLUMN last_complaint_at TEXT NOT NULL DEFAULT ''");
   if (!recipientCols.has('valid_syntax')) db.exec("ALTER TABLE recipients ADD COLUMN valid_syntax INTEGER NOT NULL DEFAULT 1");
+  if (!recipientCols.has('list_name')) db.exec("ALTER TABLE recipients ADD COLUMN list_name TEXT NOT NULL DEFAULT ''");
+  db.exec('CREATE INDEX IF NOT EXISTS idx_recipients_list ON recipients(list_name)');
   const acctCols = new Set(db.prepare('PRAGMA table_info(smtp_accounts)').all().map((c) => c.name));
   if (!acctCols.has('last_check')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN last_check TEXT");
   if (!acctCols.has('last_error')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN last_error TEXT NOT NULL DEFAULT ''");
