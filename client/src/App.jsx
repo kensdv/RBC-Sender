@@ -2446,6 +2446,32 @@ export default function App() {
                       <VisualEditor draft={draft} updateDraft={updateDraft} token={token} assets={assets} setAssets={setAssets} />
                     )}
 
+                  </div>
+
+                  <div className="pane preview-pane">
+                    <div className="pane-head">
+                      <span>LIVE PREVIEW</span>
+                      <div className="mode-toggle">
+                        <button type="button" className={previewDevice === 'desktop' ? 'mode-btn active' : 'mode-btn'} onClick={() => setPreviewDevice('desktop')}>DESKTOP</button>
+                        <button type="button" className={previewDevice === 'mobile' ? 'mode-btn active' : 'mode-btn'} onClick={() => setPreviewDevice('mobile')}>MOBILE</button>
+                      </div>
+                    </div>
+                    {preview ? (
+                      <>
+                        <div className="preview-subject">Subject: {preview.subject}</div>
+                        {preview.html ? (
+                          <div className={`preview-device-wrap ${previewDevice}`}>
+                            <iframe title="Preview" sandbox="" srcDoc={preview.html} className="preview-frame" />
+                          </div>
+                        ) : (
+                          <div className={`preview-device-wrap ${previewDevice}`}>
+                            <iframe title="Preview" sandbox="" srcDoc={plainPreviewDoc(preview.text)} className="preview-frame" />
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="preview-empty">[ START TYPING — PREVIEW STREAMS HERE ]</div>
+                    )}
                     {/* ATTACHMENTS */}
                     <div className="cfg-block" style={{marginTop:8}}>
                       <div className="cfg-block-title">[ ATTACHMENTS ] <span className="dim">max 10 files / 10MB each</span></div>
@@ -2474,32 +2500,6 @@ export default function App() {
                       )}
                     </div>
 
-                  </div>
-
-                  <div className="pane preview-pane">
-                    <div className="pane-head">
-                      <span>LIVE PREVIEW</span>
-                      <div className="mode-toggle">
-                        <button type="button" className={previewDevice === 'desktop' ? 'mode-btn active' : 'mode-btn'} onClick={() => setPreviewDevice('desktop')}>DESKTOP</button>
-                        <button type="button" className={previewDevice === 'mobile' ? 'mode-btn active' : 'mode-btn'} onClick={() => setPreviewDevice('mobile')}>MOBILE</button>
-                      </div>
-                    </div>
-                    {preview ? (
-                      <>
-                        <div className="preview-subject">Subject: {preview.subject}</div>
-                        {preview.html ? (
-                          <div className={`preview-device-wrap ${previewDevice}`}>
-                            <iframe title="Preview" sandbox="" srcDoc={preview.html} className="preview-frame" />
-                          </div>
-                        ) : (
-                          <div className={`preview-device-wrap ${previewDevice}`}>
-                            <iframe title="Preview" sandbox="" srcDoc={plainPreviewDoc(preview.text)} className="preview-frame" />
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <div className="preview-empty">[ START TYPING — PREVIEW STREAMS HERE ]</div>
-                    )}
                   </div>
                 </div>
               )}
