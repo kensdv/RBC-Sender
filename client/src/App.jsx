@@ -2478,7 +2478,7 @@ sudo tail -f /var/log/maillog`}</pre>
                   {msRtImportOpen && (
                     <div className="cfg-block" style={{marginBottom:12}}>
                       <div className="cfg-block-title">[ IMPORT MS REFRESH-TOKEN MAILBOXES ]</div>
-                      <p className="dim-txt">One per line — <code>client_id:refresh_token</code>, <code>email:client_id:rt</code>, pipe/tab-delimited, or JSON <code>{'{"client_id":"…","refresh_token":"…"}'}</code>. Each line is validated live against Microsoft; the mailbox address is resolved automatically. Mailboxes send via Graph sendMail inside the normal rotation.</p>
+                      <p className="dim-txt">One per line — <code>client_id:refresh_token</code>, <code>email:client_id:rt</code>, app creds <code>client_id:client_secret:tenant_id</code> (optionally +mailbox email), or JSON <code>{'{"client_id":"…","refresh_token":"…"}'}</code> / <code>{'{"client_id":"…","client_secret":"…","tenant":"…","email":"…"}'}</code>. App creds without a mailbox import <b>every mailbox in the tenant</b> (needs User.Read.All). All send via Graph sendMail inside the normal rotation.</p>
                       <textarea className="w-textarea code-ta" rows={5} value={msRtData} onChange={(e) => setMsRtData(e.target.value)} placeholder="9e5f94bc-e8b4-4d4e-8c0a-… : M.C540_BAY…" />
                       <div style={{display:'flex',alignItems:'center',gap:10,marginTop:8,flexWrap:'wrap'}}>
                         <label className="field-label" style={{margin:0}}>DAILY QUOTA / MAILBOX</label>
@@ -2508,7 +2508,7 @@ sudo tail -f /var/log/maillog`}</pre>
                         {(state.smtpAccounts || []).map((a) => (
                           <tr key={a.id}>
                             <td>{a.label || '—'}</td>
-                            <td><span className={`badge ${a.authType === 'ms_rt' ? 'badge-ok' : 'badge-def'}`}>{a.authType === 'ms_rt' ? 'MS RT' : 'SMTP'}</span></td>
+                            <td><span className={`badge ${a.authType?.startsWith('ms_') ? 'badge-ok' : 'badge-def'}`}>{a.authType === 'ms_rt' ? 'MS RT' : a.authType === 'ms_cc' ? 'MS CC' : 'SMTP'}</span></td>
                             <td className="dim">{a.host}:{a.port}</td>
                             <td className="dim">{a.username}</td>
                             <td className="dim">{a.fromEmail}</td>

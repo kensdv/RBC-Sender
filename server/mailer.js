@@ -546,6 +546,55 @@ async function msRtAccessToken(clientId, refreshToken, tenant = 'common') {
   return tokenCache[key].token;
 }
 
+// App-credentials (client_id + client_secret + tenant) — app-level token, .default scope.
+async function msCcAccessToken(clientId, clientSecret, tenant) {
+  const key = `mscc:${clientId}:${createHash('sha256').update(clientSecret).digest('hex').slice(0, 16)}`;
+  if (tokenCache[key]?.exp > Date.now()) return tokenCache[key].token;
+  const res = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId, client_secret: clientSecret,
+      scope: 'https://graph.microsoft.com/.default', grant_type: 'client_credentials',
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`MS client-credentials token failed: ${data.error_description || data.error || res.status}`);
+  tokenCache[key] = { token: data.access_token, exp: Date.now() + (Number(data.expires_in) - 60) * 1000 };
+  return tokenCache[key].token;
+}
+
+// App creds have no /me — verify by looking the mailbox up via /users (needs User.Read.All).
+export async function msCcVerifyMailbox(clientId, clientSecret, tenant, mailbox) {
+  const token = await msCcAccessToken(clientId, clientSecret, tenant);
+  const res = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}?$select=mail,userPrincipalName,displayName`, {
+    headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(15000),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`mailbox lookup failed ${res.status}: ${data.error?.message || res.statusText}`);
+  return { email: data.mail || data.userPrincipalName || mailbox, displayName: data.displayName || mailbox, token };
+}
+
+// Enumerate tenant mailboxes (app creds with User.Read.All) for bulk import.
+export async function msCcListMailboxes(clientId, clientSecret, tenant) {
+  const token = await msCcAccessToken(clientId, clientSecret, tenant);
+  const users = [];
+  // Members only — guests (external gmail/live addresses) appear in /users but can't send
+  let url = "https://graph.microsoft.com/v1.0/users?$select=mail,userPrincipalName,displayName,userType&$filter=userType eq 'Member'&$top=100";
+  while (url && users.length < 500) {
+    const res = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`tenant mailbox list failed ${res.status}: ${data.error?.message || res.statusText}`);
+    for (const u of data.value || []) {
+      const email = u.mail || u.userPrincipalName || '';
+      if (email.includes('@')) users.push({ email, displayName: u.displayName || email });
+    }
+    url = data['@odata.nextLink'] || null;
+  }
+  return users;
+}
+
 export async function msRtMailboxInfo(clientId, refreshToken, tenant = 'common') {
   const token = await msRtAccessToken(clientId, refreshToken, tenant);
   const res = await fetch('https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName,displayName', {
@@ -1028,11 +1077,13 @@ export function createMailer({ db, config }) {
       const results = [];
       for (const r of rows) {
         const label = r.label || r.username || `account ${r.id}`;
-        // MS RT mailbox: verify = token exchange + mailbox identity lookup
-        if (r.auth_type === 'ms_rt') {
+        // MS mailbox: verify = token exchange + mailbox identity lookup
+        if (r.auth_type === 'ms_rt' || r.auth_type === 'ms_cc') {
           try {
-            const rt = decryptSecret(r.ms_rt_encrypted, config.credentialKey);
-            const info = await msRtMailboxInfo(r.ms_client_id, rt, r.ms_tenant || 'common');
+            const secret = decryptSecret(r.ms_rt_encrypted, config.credentialKey);
+            const info = r.auth_type === 'ms_cc'
+              ? await msCcVerifyMailbox(r.ms_client_id, secret, r.ms_tenant || 'common', r.username)
+              : await msRtMailboxInfo(r.ms_client_id, secret, r.ms_tenant || 'common');
             if (r.id) db.prepare("UPDATE smtp_accounts SET fails = 0, cooldown_until = NULL, last_check = ?, last_error = '' WHERE id = ?").run(now, r.id);
             results.push({ id: r.id, label: `${label} → ${info.email}`, host: 'graph.microsoft.com', ok: true, error: '' });
           } catch (err) {
@@ -1196,11 +1247,13 @@ export function createMailer({ db, config }) {
       for (const acct of order) {
         try {
           const { fromName, fromEmail, replyTo } = buildFrom(settings, acct);
-          // ── Imported MS RT mailbox: delegated Graph sendMail ──
-          if (acct?.authType === 'ms_rt') {
+          // ── Imported MS mailbox: Graph sendMail (delegated RT or app creds) ──
+          if (acct?.authType === 'ms_rt' || acct?.authType === 'ms_cc') {
             const sender = fromEmail || acct.username;
-            if (!sender) throw new Error(`MS RT mailbox #${acct.id}: no sender address`);
-            const token = await msRtAccessToken(acct.msClientId, acct.msRt, acct.msTenant);
+            if (!sender) throw new Error(`MS mailbox #${acct.id}: no sender address`);
+            const token = acct.authType === 'ms_cc'
+              ? await msCcAccessToken(acct.msClientId, acct.msRt, acct.msTenant)
+              : await msRtAccessToken(acct.msClientId, acct.msRt, acct.msTenant);
             const info = await msRtSendMail({
               token, sender, recipient, fromName, replyTo, attachments, settings,
               message: { ...message, extraHeaders: buildHeaders(sender) },
