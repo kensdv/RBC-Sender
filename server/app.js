@@ -885,14 +885,14 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     }
 
     // Excessive exclamation marks
-    const exclamCount = (subject + html + text).match(/!/g)?.length || 0;
+    const exclamCount = content.match(/!/g)?.length || 0;
     if (exclamCount > 3) {
       issues.push({ type: 'excessive_exclamation', count: exclamCount, severity: 'medium' });
       score -= 5;
     }
 
     // Excessive question marks
-    const questCount = (subject + html + text).match(/\?/g)?.length || 0;
+    const questCount = content.match(/\?/g)?.length || 0;
     if (questCount > 3) {
       issues.push({ type: 'excessive_question', count: questCount, severity: 'low' });
       score -= 3;
@@ -900,7 +900,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
 
     // All caps in body (more than 10 consecutive caps)
     const capsPattern = /[A-Z]{10,}/g;
-    const capsMatches = (html + text).match(capsPattern);
+    const capsMatches = ((html || '') + (text || '')).match(capsPattern);
     if (capsMatches && capsMatches.length > 2) {
       issues.push({ type: 'excessive_caps', count: capsMatches.length, severity: 'medium' });
       score -= 5;
