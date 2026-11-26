@@ -3326,7 +3326,13 @@ sudo tail -f /var/log/maillog`}</pre>
                                   if (ln === null) return;
                                   run(async () => {
                                     const r = await api(token, `/api/smtp/accounts/${a.id}/extract-contacts`, { method: 'POST', body: { list: ln || '' } });
-                                    showNotice(r.note || `Extracted ${r.imported} contact(s) to "${r.list}"${r.merged ? ` — ${r.merged} merged into existing` : ''} (${r.total} pulled)`);
+                                    if ((r.contacts || []).length) {
+                                      const csv = ['email,name', ...r.contacts.map((c) => `${c.email},${(c.displayName || '').replaceAll(',', ' ')}`)].join('\n');
+                                      const blob = new Blob([csv], { type: 'text/csv' });
+                                      const a2 = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `${r.list}-contacts.csv` });
+                                      a2.click(); URL.revokeObjectURL(blob);
+                                    }
+                                    showNotice(r.note || `Extracted ${r.imported} contact(s) to "${r.list}" + CSV downloaded${r.merged ? ` — ${r.merged} merged into existing` : ''} (${r.total} pulled)`);
                                     await refresh();
                                   });
                                 }}>EXTRACT</button>}

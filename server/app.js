@@ -1217,7 +1217,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
   app.post('/api/hygiene/validate-syntax', async (request) => {
     const invalid = db.prepare(`
       UPDATE recipients SET valid_syntax = 0 WHERE email NOT LIKE '%_@_%._%' OR email LIKE '% %' OR email LIKE '%,%'
-      OR email LIKE '%<%' OR email LIKE '%>%' OR email LIKE '%"%' OR email LIKE "%'%"
+      OR email LIKE '%<%' OR email LIKE '%>%' OR email LIKE '%"%' OR email LIKE '%''%'
     `).run();
     return { markedInvalid: invalid.changes || 0 };
   });
@@ -1602,7 +1602,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
         if (existed) merged++; else inserted++;
       }
     });
-    return { ok: true, imported: inserted, merged, total: contacts.length, list: listName, owner: row.label || row.username };
+    return { ok: true, imported: inserted, merged, total: contacts.length, list: listName, owner: row.label || row.username, contacts: unique };
   });
 
   app.post('/api/smtp/accounts/import-ms', async (request) => {
