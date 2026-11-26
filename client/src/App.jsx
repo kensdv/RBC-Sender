@@ -4664,38 +4664,6 @@ client_id:secret:tenant            app creds (no RT)
                     </details>
 
                     <details className="help-sec">
-                      <summary>RBC HELPER — COMMANDS THAT WORK</summary>
-                      <table className="w-table help-table"><thead><tr><th>ASK</th><th>WHAT HAPPENS</th></tr></thead><tbody>
-                        <tr><td>"verify my accounts" / "test the pool"</td><td>⚡ VERIFY ALL — handshakes every pool account, reports per-account errors</td></tr>
-                        <tr><td>"send a test to me@x.com"</td><td>⚡ SEND TEST — fires the live draft as a single test send</td></tr>
-                        <tr><td>"check my spam score"</td><td>⚡ RUN SPAM CHECK — scores the current draft, lists the issues</td></tr>
-                        <tr><td>"pause / resume / retry the queue"</td><td>⚡ campaign controls — acts on the running campaign</td></tr>
-                        <tr><td>"reset quota for info@x.com"</td><td>⚡ RESET QUOTA — per-mailbox or all</td></tr>
-                        <tr><td>"disable info@x.com" / "enable #3"</td><td>⚡ toggles a pool account by email, label, or number</td></tr>
-                        <tr><td>"where is the import button"</td><td>⚡ OPEN &lt;TAB&gt; — navigates to the right pane</td></tr>
-                        <tr><td>"write a subject about…"</td><td>generates content + → apply buttons write it into the draft</td></tr>
-                        <tr><td>"why are my sends failing"</td><td>reads live failure stats, names the actual errors</td></tr>
-                      </tbody></table>
-                    </details>
-
-                    <details className="help-sec">
-                      <summary>API REFERENCE</summary>
-                      <p className="help-p">Every route is token-gated: <code>Authorization: Bearer &lt;DASHBOARD_TOKEN&gt;</code>. Content-type <code>application/json</code>.</p>
-                      <table className="w-table help-table"><thead><tr><th>ENDPOINT</th><th>DOES</th></tr></thead><tbody>
-                        <tr><td>GET /api/state</td><td>Full dashboard snapshot — settings, counts, pool, drafts (secrets masked)</td></tr>
-                        <tr><td>POST /api/recipients/import</td><td>Import contacts — <code>{"{csv, consentConfirmed:true}"}</code></td></tr>
-                        <tr><td>POST /api/sorter</td><td>Sort raw email text → provider buckets + flags + TLD/domain stats</td></tr>
-                        <tr><td>POST /api/queue</td><td>Launch the campaign (engine-validated, error tells you what's missing)</td></tr>
-                        <tr><td>POST /api/campaigns/:id/pause|resume|retry</td><td>Campaign controls</td></tr>
-                        <tr><td>POST /api/test-send</td><td>Send the current draft to one address</td></tr>
-                        <tr><td>POST /api/accounts/verify-all</td><td>Handshake-test every pool account</td></tr>
-                        <tr><td>POST /api/ai/chat · /api/ai/assist · /api/ai/models</td><td>Helper chat / content assist / live model list</td></tr>
-                        <tr><td>GET /api/dns-check · /api/spam-check</td><td>SPF/DKIM/DMARC verification · draft spam scoring</td></tr>
-                        <tr><td>GET /api/analytics · /api/bounces</td><td>Opens/clicks/domains report · suppression log</td></tr>
-                      </tbody></table>
-                    </details>
-
-                    <details className="help-sec">
                       <summary>TROUBLESHOOTING</summary>
                       <table className="w-table help-table"><thead><tr><th>SYMPTOM</th><th>FIX</th></tr></thead><tbody>
                         <tr><td>AI 401 / "not working"</td><td>Key got wiped or is wrong — re-enter it in SETTINGS → AI ASSISTANT, save, retry. LIST MODELS confirms the key works.</td></tr>
@@ -4711,7 +4679,6 @@ client_id:secret:tenant            app creds (no RT)
                       <summary>FAQ — WHERE PEOPLE GET STUCK</summary>
                       <table className="w-table help-table"><thead><tr><th>QUESTION</th><th>ANSWER</th></tr></thead><tbody>
                         <tr><td>MS RT import says "unparseable line"</td><td>Every line must carry a refresh token AND a client id — or a JSON dump that contains an <code>access_token</code> (client + tenant get harvested from it). Bare <code>1.xxx</code> tokens auto-bind the Teams public client. Whole vault exports and <code>rubicon_backup</code> gzip blobs are supported — paste the entire blob, or use <code>[ SELECT FILE ]</code>. A line that is only a fragment (half a token, a JSON shard) can't import — re-export the file instead of copy-pasting through a clipped window.</td></tr>
-                        <tr><td>Update button fails / "cannot find npm"</td><td>Fixed — the updater resolves <code>npm.cmd</code> from the node executable dir, not PATH. If you're on a build older than that fix, run it once by hand: <code>git pull &amp;&amp; npm install &amp;&amp; npm run build &amp;&amp; pm2 restart rbc-api</code>. After that the button works.</td></tr>
                         <tr><td>PORT 25 BLOCKED in the sidebar</td><td>Your host/provider filters outbound SMTP. DIRECT MX mode needs port 25 open — ask the provider to unblock it, or switch engines: SMTP pool, GRAPH, or an HTTP API provider (SendGrid/SES/etc.) doesn't need port 25 at all.</td></tr>
                         <tr><td>Emails land in spam</td><td>Run the spam checker on the draft before queueing — it scores triggers and hands fixes to the AI in one click. Then the deliverability basics: SPF + DKIM + DMARC aligned on the sending domain (DKIM guide lives in SETTINGS), a real unsubscribe link (auto-inserted), warmed-up volume (start low, ramp), and clean lists (SORTER first — kills dead domains and disposables that tank reputation).</td></tr>
                         <tr><td>"LAUNCH" is greyed out</td><td>The setup wizard is gating it — one of the four steps isn't ready: LETTER (subject + body), AUDIENCE (≥1 confirmed contact), ENGINE (creds for the selected send type — the step tells you exactly which field is missing), WINDOW (send window). Fix the amber step, launch unlocks.</td></tr>
@@ -4999,7 +4966,7 @@ client_id:secret:tenant            app creds (no RT)
           <div className="dlg-card">
             <div className="dlg-title" style={{ color: 'var(--cyan)' }}>UPDATING...</div>
             <div className="dlg-msg">
-              Running <code style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>git pull → npm install → npm run build</code>.<br /><br />
+              Pulling the latest build and applying it.<br /><br />
               The server will restart automatically when done.<br />
               <strong>Refresh this page in ~30 seconds.</strong>
             </div>
