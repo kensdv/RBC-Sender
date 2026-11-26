@@ -1220,7 +1220,6 @@ export default function App() {
   const [previewDevice, setPreviewDevice] = useState('desktop');
   const [versionInfo, setVersionInfo] = useState(null);
   const [updateInfo, setUpdateInfo] = useState(null);
-  const [updateOpen, setUpdateOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [testTo, setTestTo] = useState('');
   const [relayTest, setRelayTest] = useState({ state: 'idle' });
@@ -1371,7 +1370,7 @@ export default function App() {
       .then((r) => {
         if (!alive) return;
         setVersionInfo({ version: r.version, commit: r.local });
-        if (!r.upToDate && r.remote) { setUpdateInfo(r); setUpdateOpen(false); }
+        if (!r.upToDate && r.remote) setUpdateInfo(r);
       })
       .catch(() => {});
     check();
@@ -1831,7 +1830,7 @@ export default function App() {
                 try {
                   const r = await api(token, '/api/update/check');
                   setVersionInfo({ version: r.version, commit: r.local });
-                  if (!r.upToDate && r.remote) { setUpdateInfo(r); setUpdateOpen(false); }
+                  if (!r.upToDate && r.remote) setUpdateInfo(r);
                   else showNotice(`Up to date — ${String(r.local || '').slice(0, 7)}`);
                 } catch { showNotice('Update check failed.'); }
               }}>
@@ -1849,16 +1848,17 @@ export default function App() {
           <div className="stat-row"><span className="stat-lbl">QUEUE</span><span className="stat-val queue-val">{totals.queued}</span></div>
         </div>
 
-        <nav className="sb-nav">
+        <nav className="sb-nav" aria-label="Suite sections">
           {NAV_ITEMS.map((item) => (
-            <button key={item.id} className={`nav-item ${tab === item.id ? 'active' : ''}`} onClick={() => setTab(item.id)}>
-              <span className="nav-icon">{item.icon}</span>
+            <button key={item.id} className={`nav-item ${tab === item.id ? 'active' : ''}`} aria-current={tab === item.id ? 'page' : undefined} onClick={() => setTab(item.id)}>
+              <span className="nav-icon" aria-hidden="true">{item.icon}</span>
               <span>{item.label}</span>
+              {item.id === 'help' && updateInfo ? <span className="nav-upd" title="Update available">⇧</span> : null}
             </button>
           ))}
         </nav>
 
-        <button className="nav-item theme-toggle" onClick={() => setTheme((t) => (t === 'phosphor' ? 'obsidian' : 'phosphor'))}>
+        <button className="nav-item theme-toggle" aria-label="Toggle color theme" onClick={() => setTheme((t) => (t === 'phosphor' ? 'obsidian' : 'phosphor'))}>
           {theme === 'phosphor' ? '◑ OBSIDIAN' : '◒ PHOSPHOR'}
         </button>
         <button className="nav-item logout-btn" onClick={logout}>✕ LOGOUT</button>
@@ -1867,7 +1867,7 @@ export default function App() {
           <div className="sb-net-title">SERVER</div>
           <div className="sb-net-row">
             <span className="stat-lbl">IP</span>
-            <button className="sb-ip" title="Click to copy — use for SMTP relay / IP whitelists"
+            <button className="sb-ip" title="Click to copy — use for SMTP relay / IP whitelists" aria-label="Copy server public IP"
               onClick={() => { if (netInfo?.publicIp) { navigator.clipboard.writeText(netInfo.publicIp); showNotice('IP copied.'); } }}>
               {netInfo?.publicIp || '…'}
             </button>
@@ -1883,7 +1883,7 @@ export default function App() {
       </aside>
 
       {/* ── MAIN ── */}
-      <div className="main-wrap">
+      <div className="main-wrap" role="main">
 
         {/* top bar */}
         <div className="topbar">
@@ -1892,12 +1892,12 @@ export default function App() {
             {NAV_ITEMS.find((n) => n.id === tab)?.label}
           </span>
           {notice && (
-            <div className={`notice-bar ${noticeType === 'err' ? 'notice-err' : ''}`}>
+            <div className={`notice-bar ${noticeType === 'err' ? 'notice-err' : ''}`} role="status" aria-live="polite">
               {noticeType === 'err' ? '[ ERR ] ' : '[ OK ] '}{notice}
-              <button onClick={() => setNotice('')}>✕</button>
+              <button aria-label="Dismiss notification" onClick={() => setNotice('')}>✕</button>
             </div>
           )}
-          {busy && <span className="busy-dot">●</span>}
+          {busy && <span className="busy-dot" role="status" aria-label="Working">●</span>}
         </div>
 
         <div className="content">
@@ -1961,7 +1961,7 @@ export default function App() {
                       <div className="ai-panel">
                         <div className="ai-panel-head">
                           <span>AI ASSISTANT</span>
-                          <button className="btn-sm" onClick={() => setAiAssistantOpen(false)}>[ × ]</button>
+                          <button className="btn-sm" aria-label="Close AI assist panel" onClick={() => setAiAssistantOpen(false)}>[ × ]</button>
                         </div>
                         <div className="ai-presets">
                           <button className="btn-sm" onClick={() => setAiPrompt('Rewrite the subject line for higher open rate.')}>[ REWRITE SUBJECT ]</button>
@@ -2049,7 +2049,7 @@ export default function App() {
                       <div className="ai-panel">
                         <div className="ai-panel-head">
                           <span>SPAM SCORE CHECKER</span>
-                          <button className="btn-sm" onClick={() => setSpamCheckOpen(false)}>[ × ]</button>
+                          <button className="btn-sm" aria-label="Close spam check" onClick={() => setSpamCheckOpen(false)}>[ × ]</button>
                         </div>
                         <button
                           className="btn-sm"
@@ -2696,7 +2696,7 @@ export default function App() {
                     </div>
                     {verifyResults && (
                       <div className="verify-panel">
-                        <div className="verify-head">DNS VERIFY — {verifyResults.length} checked <button className="btn-xs" onClick={() => setVerifyResults(null)}>✕</button></div>
+                        <div className="verify-head">DNS VERIFY — {verifyResults.length} checked <button className="btn-xs" aria-label="Close verify results" onClick={() => setVerifyResults(null)}>✕</button></div>
                         <div className="tbl-wrap" style={{maxHeight:220}}>
                           <table className="w-table">
                             <thead><tr><th>EMAIL</th><th>MX</th><th>PROVIDER</th><th>FLAGS</th></tr></thead>
@@ -3146,7 +3146,7 @@ sudo tail -f /var/log/maillog`}</pre>
                             <td className="dim">{a.username}</td>
                             <td className="dim">{a.fromEmail}</td>
                             <td>{a.weight}</td>
-                            <td className="dim" style={{whiteSpace:'nowrap'}}>{a.dailyQuota ? `${a.sentToday}/${a.dailyQuota}` : '∞'}{a.sentToday > 0 ? <button className="btn-xs" style={{marginLeft:6}} title="Reset daily counter" onClick={() => run(async () => { await api(token, `/api/smtp/accounts/${a.id}/reset-quota`, { method: 'POST' }); await refresh(); })}>↺</button> : null}</td>
+                            <td className="dim" style={{whiteSpace:'nowrap'}}>{a.dailyQuota ? `${a.sentToday}/${a.dailyQuota}` : '∞'}{a.sentToday > 0 ? <button className="btn-xs" style={{marginLeft:6}} title="Reset daily counter" aria-label="Reset daily quota counter" onClick={() => run(async () => { await api(token, `/api/smtp/accounts/${a.id}/reset-quota`, { method: 'POST' }); await refresh(); })}>↺</button> : null}</td>
                             <td><span className={`badge ${a.enabled ? 'badge-ok' : 'badge-def'}`}>{a.cooldownUntil && a.cooldownUntil > new Date().toISOString() ? 'COOLDOWN' : a.enabled ? 'ACTIVE' : 'OFF'}</span>{a.fails ? <span className="dim"> ({a.fails}f)</span> : null}
                               {a.lastError ? <div className="red-txt" style={{fontSize:11}} title={a.lastError}>{a.lastError.slice(0, 60)}</div>
                                 : a.lastCheck ? <div className="dim-txt" style={{fontSize:11}}>ok {new Date(a.lastCheck).toLocaleTimeString()}</div> : null}</td>
@@ -4310,18 +4310,36 @@ sudo tail -f /var/log/maillog`}</pre>
                   <div className="pane">
                     <div className="pane-head"><span>HELP — RUBICON EMAIL SUITE MANUAL</span></div>
 
-                    <div className="help-sec">
-                      <h3>[ QUICK START ]</h3>
+                    <div className={"upd-card" + (updateInfo ? "" : " upd-card-ok")}>
+                      {updateInfo ? (
+                        <>
+                          <div className="upd-card-head">⇧ UPDATE AVAILABLE</div>
+                          <p className="help-p">A new version of Rubicon Email Suite is ready — installs and restarts automatically.</p>
+                          {!!(updateInfo.changes || []).length && (
+                            <ul className="help-list">{updateInfo.changes.map((c, i) => <li key={i}>{c}</li>)}</ul>
+                          )}
+                          <div className="upd-card-actions">
+                            <button className="btn-primary" onClick={applyUpdate}>[ UPDATE ]</button>
+                            <button className="btn-sm" onClick={() => setUpdateInfo(null)}>DISMISS</button>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="help-p" style={{ margin: 0 }}>Suite is <strong>up to date</strong> — when a release drops, the update card lands here.</p>
+                      )}
+                    </div>
+
+                    <details className="help-sec" open>
+                      <summary>QUICK START</summary>
                       <ol className="help-list">
                         <li><strong>Engine:</strong> SETTINGS → SEND TYPE — pick SMTP / DIRECT MX / RELAY / PROXY / GRAPH / GMAIL / HTTP API and fill its block. The SMTP tab also holds the OUTGOING CONNECTION presets.</li>
                         <li><strong>List:</strong> CONTACTS → paste or import CSV (<code>email, first_name, last_name, company</code>), confirm consent, import. SORTER pre-cleans any raw list first.</li>
                         <li><strong>Letter:</strong> LETTER tab — subject, preheader, body (HTML / text / blocks / paste), attachments, live preview. AI WRITER drafts it for you.</li>
                         <li><strong>Queue:</strong> CAMPAIGN tab → queue it. Pause/resume/retry from CAMPAIGN HISTORY. SCHEDULE sets the window; caps + warm-up live on EMAIL.</li>
                       </ol>
-                    </div>
+                    </details>
 
-                    <div className="help-sec">
-                      <h3>[ SEND ENGINES ]</h3>
+                    <details className="help-sec">
+                      <summary>SEND ENGINES</summary>
                       <table className="w-table help-table"><thead><tr><th>MODE</th><th>WHAT IT DOES</th><th>NEEDS</th></tr></thead><tbody>
                         <tr><td>SMTP</td><td>Any authenticated SMTP server or the account pool</td><td>host:port, user, password (or pool accounts)</td></tr>
                         <tr><td>DIRECT MX</td><td>Delivers to recipient MX on port 25 — no provider</td><td>FROM NAME + FROM EMAIL; port 25 open outbound</td></tr>
@@ -4331,10 +4349,10 @@ sudo tail -f /var/log/maillog`}</pre>
                         <tr><td>GMAIL</td><td>Gmail API with OAuth</td><td>client id + secret + refresh token</td></tr>
                         <tr><td>HTTP API</td><td>SendGrid · SES · Mailgun · Postmark · Brevo · SparkPost · Elastic · Mandrill · custom endpoint</td><td>API key; SES adds IAM user + region, Mailgun adds domain, custom adds URL</td></tr>
                       </tbody></table>
-                    </div>
+                    </details>
 
-                    <div className="help-sec">
-                      <h3>[ MAILBOX POOL / MS RT IMPORT ]</h3>
+                    <details className="help-sec">
+                      <summary>MAILBOX POOL / MS RT IMPORT</summary>
                       <p className="help-p">SMTP tab → ACCOUNT POOL → <code>[ IMPORT MS RT ]</code> — one account per line, up to 200 at once. Accepted formats:</p>
                       <pre className="help-pre">{`email@x.com:client_id:M.C5...rt      email:cid:rt
 client_id:M.C5...rt                cid:rt
@@ -4342,10 +4360,10 @@ email|cid|rt · email,cid,rt · email;cid;rt
 client_id:secret:tenant            app creds (no RT)
 {"client_id":"…","refresh_token":"…"}   JSON`}</pre>
                       <p className="help-p">GRAPH mode round-robins imported mailboxes first (each sends as itself, 10k/day quota, cooldown + failover). SMTP mode mixes them with SMTP accounts. VERIFY ALL handshakes every account and shows per-account errors.</p>
-                    </div>
+                    </details>
 
-                    <div className="help-sec">
-                      <h3>[ AI — HELPER · WRITER · ASSIST ]</h3>
+                    <details className="help-sec">
+                      <summary>AI — HELPER · WRITER · ASSIST</summary>
                       <p className="help-p">Configure in SETTINGS → AI ASSISTANT: endpoint (OpenAI-compatible or Gemini URL), API key, model — LIST MODELS shows the live list; dead model IDs self-heal on next call.</p>
                       <ul className="help-list">
                         <li><strong>✦ RBC Helper AI</strong> (bottom-right button) — chatbot with live access to your sender state. Ask why sends fail, how much quota is left, or to rewrite the draft. ⚡ buttons verify accounts, pause/resume/retry campaigns, send tests, reset quotas, navigate tabs. → apply buttons write its output into subject/preheader/body.</li>
@@ -4353,20 +4371,20 @@ client_id:secret:tenant            app creds (no RT)
                         <li><strong>AI ASSIST panel</strong> (LETTER tab) — quick rewrites against the current draft; same apply flow.</li>
                         <li><strong>SPAM CHECK → FIX WITH AI</strong> — scores the draft, then one click has AI rewrite around the findings.</li>
                       </ul>
-                    </div>
+                    </details>
 
-                    <div className="help-sec">
-                      <h3>[ SORTER ]</h3>
+                    <details className="help-sec">
+                      <summary>SORTER</summary>
                       <p className="help-p">SORTER tab — paste any raw list (commas, lines, mixed text). Extracts emails, dedupes, syntax-checks, flags disposable + role addresses, buckets by live MX provider. Copy clean or per-provider lists — nothing is imported unless you take it to CONTACTS yourself.</p>
-                    </div>
+                    </details>
 
-                    <div className="help-sec">
-                      <h3>[ PLACEHOLDERS ]</h3>
+                    <details className="help-sec">
+                      <summary>PLACEHOLDERS</summary>
                       <p className="help-p"><code>[Firstname] [Lastname] [Company] [Email]</code> — recipient fields. <code>++rbc_url++ ++rbc_link++ ++rbc_short++</code> — random link from the pool. <code>++rbc_domain1++</code> etc — rotation tokens. Full list in the LETTER tab tag palette.</p>
-                    </div>
+                    </details>
 
-                    <div className="help-sec">
-                      <h3>[ DELIVERABILITY CHECKLIST ]</h3>
+                    <details className="help-sec">
+                      <summary>DELIVERABILITY CHECKLIST</summary>
                       <ul className="help-list">
                         <li>DKIM on (SETTINGS → SENDER IDENTITY) + SPF/DMARC on the sending domain</li>
                         <li>Warm-up enabled on a fresh IP — ramp 2–3 weeks</li>
@@ -4375,10 +4393,10 @@ client_id:secret:tenant            app creds (no RT)
                         <li>Watch BOUNCES — hard bounces and complaints suppress automatically</li>
                         <li>SPAM CHECK every draft — fix what it flags before queueing</li>
                       </ul>
-                    </div>
+                    </details>
 
-                    <div className="help-sec">
-                      <h3>[ RBC HELPER — COMMANDS THAT WORK ]</h3>
+                    <details className="help-sec">
+                      <summary>RBC HELPER — COMMANDS THAT WORK</summary>
                       <table className="w-table help-table"><thead><tr><th>ASK</th><th>WHAT HAPPENS</th></tr></thead><tbody>
                         <tr><td>"verify my accounts" / "test the pool"</td><td>⚡ VERIFY ALL — handshakes every pool account, reports per-account errors</td></tr>
                         <tr><td>"send a test to me@x.com"</td><td>⚡ SEND TEST — fires the live draft as a single test send</td></tr>
@@ -4390,10 +4408,10 @@ client_id:secret:tenant            app creds (no RT)
                         <tr><td>"write a subject about…"</td><td>generates content + → apply buttons write it into the draft</td></tr>
                         <tr><td>"why are my sends failing"</td><td>reads live failure stats, names the actual errors</td></tr>
                       </tbody></table>
-                    </div>
+                    </details>
 
-                    <div className="help-sec">
-                      <h3>[ API REFERENCE ]</h3>
+                    <details className="help-sec">
+                      <summary>API REFERENCE</summary>
                       <p className="help-p">Every route is token-gated: <code>Authorization: Bearer &lt;DASHBOARD_TOKEN&gt;</code>. Content-type <code>application/json</code>.</p>
                       <table className="w-table help-table"><thead><tr><th>ENDPOINT</th><th>DOES</th></tr></thead><tbody>
                         <tr><td>GET /api/state</td><td>Full dashboard snapshot — settings, counts, pool, drafts (secrets masked)</td></tr>
@@ -4407,10 +4425,10 @@ client_id:secret:tenant            app creds (no RT)
                         <tr><td>GET /api/dns-check · /api/spam-check</td><td>SPF/DKIM/DMARC verification · draft spam scoring</td></tr>
                         <tr><td>GET /api/analytics · /api/bounces</td><td>Opens/clicks/domains report · suppression log</td></tr>
                       </tbody></table>
-                    </div>
+                    </details>
 
-                    <div className="help-sec">
-                      <h3>[ TROUBLESHOOTING ]</h3>
+                    <details className="help-sec">
+                      <summary>TROUBLESHOOTING</summary>
                       <table className="w-table help-table"><thead><tr><th>SYMPTOM</th><th>FIX</th></tr></thead><tbody>
                         <tr><td>AI 401 / "not working"</td><td>Key got wiped or is wrong — re-enter it in SETTINGS → AI ASSISTANT, save, retry. LIST MODELS confirms the key works.</td></tr>
                         <tr><td>AI 503 "high demand"</td><td>Transient — the engine retries then fails over to the next live model automatically and persists the winner.</td></tr>
@@ -4419,10 +4437,10 @@ client_id:secret:tenant            app creds (no RT)
                         <tr><td>API mode "Configure a from/direct email"</td><td>HTTP API sends via DIRECT CONFIG fields — fill FROM NAME + FROM EMAIL in SETTINGS.</td></tr>
                         <tr><td>Queue won't start</td><td>CAMPAIGN tab tells you why — missing engine creds, empty list, or send-window closed (see SCHEDULE).</td></tr>
                       </tbody></table>
-                    </div>
+                    </details>
 
-                    <div className="help-sec">
-                      <h3>[ FAQ — WHERE PEOPLE GET STUCK ]</h3>
+                    <details className="help-sec">
+                      <summary>FAQ — WHERE PEOPLE GET STUCK</summary>
                       <table className="w-table help-table"><thead><tr><th>QUESTION</th><th>ANSWER</th></tr></thead><tbody>
                         <tr><td>MS RT import says "unparseable line"</td><td>Every line must carry a refresh token AND a client id — or a JSON dump that contains an <code>access_token</code> (client + tenant get harvested from it). Bare <code>1.xxx</code> tokens auto-bind the Teams public client. Whole vault exports and <code>rubicon_backup</code> gzip blobs are supported — paste the entire blob, or use <code>[ SELECT FILE ]</code>. A line that is only a fragment (half a token, a JSON shard) can't import — re-export the file instead of copy-pasting through a clipped window.</td></tr>
                         <tr><td>Update button fails / "cannot find npm"</td><td>Fixed — the updater resolves <code>npm.cmd</code> from the node executable dir, not PATH. If you're on a build older than that fix, run it once by hand: <code>git pull &amp;&amp; npm install &amp;&amp; npm run build &amp;&amp; pm2 restart rbc-api</code>. After that the button works.</td></tr>
@@ -4435,7 +4453,7 @@ client_id:secret:tenant            app creds (no RT)
                         <tr><td>Forgot the dashboard token</td><td>It's in <code>.env</code> as <code>DASHBOARD_TOKEN</code> on the machine running the server. Change it there and restart. Sessions live in sessionStorage — closing the tab logs you out.</td></tr>
                         <tr><td>Where do MS RT mailboxes come from?</td><td>They send via Microsoft Graph inside the normal rotation — same quotas, cooldowns and failover as SMTP pool accounts. VERIFY ALL handshakes every account; dead ones drop for 6h. App creds (<code>cid:secret:tenant</code>) import every mailbox in the tenant — that needs User.Read.All consent on the app.</td></tr>
                       </tbody></table>
-                    </div>
+                    </details>
                   </div>
                 </div>
               )}
@@ -4567,34 +4585,10 @@ client_id:secret:tenant            app creds (no RT)
         </div>
       )}
 
-      {/* ── UPDATE AVAILABLE — floating pill + popover ── */}
-      {updateInfo && !updating && !updateOpen && (
-        <button className="upd-fab" onClick={() => setUpdateOpen(true)}>⇧ UPDATE AVAILABLE</button>
-      )}
-      {updateInfo && !updating && updateOpen && (
-        <div className="upd-pop">
-          <div className="upd-pop-head"><span>UPDATE AVAILABLE</span><button className="upd-x" onClick={() => setUpdateOpen(false)}>✕</button></div>
-          <div className="upd-pop-body">
-            A new version of Rubicon Email Suite is ready — installs and restarts automatically.
-            {!!(updateInfo.changes || []).length && (
-              <>
-                <span className="dim" style={{ display: 'block', marginTop: 10 }}>WHAT WAS FIXED:</span>
-                <ul className="update-changes">
-                  {updateInfo.changes.map((c, i) => <li key={i}>{c}</li>)}
-                </ul>
-              </>
-            )}
-          </div>
-          <div className="upd-pop-actions">
-            <button className="btn-primary" onClick={applyUpdate}>[ UPDATE ]</button>
-            <button className="btn-sm" onClick={() => setUpdateInfo(null)}>DISMISS</button>
-          </div>
-        </div>
-      )}
 
       {/* ── RHS AI CHATBOT ── */}
       {!chatOpen && (
-        <button className="chat-fab" title="Rubicon AI" onClick={() => setChatOpen(true)}><RbcMascot size={22} /> RUBICON AI</button>
+        <button className="chat-fab" title="Rubicon AI" aria-label="Open Rubicon AI assistant" onClick={() => setChatOpen(true)}><RbcMascot size={22} /> RUBICON AI</button>
       )}
       {chatOpen && (
         <div className="chat-panel">
@@ -4607,7 +4601,7 @@ client_id:secret:tenant            app creds (no RT)
                 </select>
               ) : null}
               <button className="btn-sm" onClick={() => { setChatMsgs([]); }} title="Clear">↺</button>
-              <button className="btn-sm" onClick={() => setChatOpen(false)}>[ × ]</button>
+              <button className="btn-sm" aria-label="Close Rubicon AI" onClick={() => setChatOpen(false)}>[ × ]</button>
             </div>
           </div>
           <div className="chat-body">
@@ -4657,7 +4651,7 @@ client_id:secret:tenant            app creds (no RT)
               placeholder="Talk to Rubicon AI…"
               disabled={chatBusy}
             />
-            <button className="btn-sm" disabled={chatBusy || !chatInput.trim()} onClick={sendChat}>➤</button>
+            <button className="btn-sm" aria-label="Send message" disabled={chatBusy || !chatInput.trim()} onClick={sendChat}>➤</button>
           </div>
         </div>
       )}

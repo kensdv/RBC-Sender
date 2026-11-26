@@ -1091,36 +1091,20 @@ code {
 .chat-fab .rbc-mascot { animation-duration: 1.4s; }
 
 /* ── update pill + popover ── */
-.upd-fab {
-  position: fixed; right: 18px; bottom: 68px; z-index: 900;
-  padding: 10px 18px; border-radius: 8px; cursor: pointer;
-  background: rgba(232, 161, 58, 0.10); border: 1px solid var(--yellow);
-  color: var(--yellow); font-family: inherit; font-size: 11px; font-weight: 800; letter-spacing: 2px;
-  animation: upd-pulse 2.2s ease-in-out infinite;
+.upd-card {
+  margin-top: 14px; padding: 16px 20px; border-radius: 8px;
+  background: rgba(232, 161, 58, 0.07); border: 1px solid var(--yellow);
+  box-shadow: 0 0 30px rgba(232, 161, 58, 0.08);
 }
+.upd-card-ok { background: rgba(47, 224, 107, 0.04); border-color: var(--line); box-shadow: none; }
+.upd-card-head { color: var(--yellow); font-size: 12px; font-weight: 800; letter-spacing: 2px; margin-bottom: 6px; }
+.upd-card-actions { display: flex; gap: 10px; margin-top: 12px; }
+.nav-upd { color: var(--yellow); margin-left: 6px; font-weight: 800; animation: upd-pulse 2.2s ease-in-out infinite; }
 @keyframes upd-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(232, 161, 58, 0.45); }
-  50% { box-shadow: 0 0 22px 4px rgba(232, 161, 58, 0.25); }
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; text-shadow: 0 0 12px rgba(232, 161, 58, 0.8); }
 }
-.upd-fab:hover { background: var(--yellow); color: #100a00; animation: none; }
-.upd-pop {
-  position: fixed; right: 18px; bottom: 68px; z-index: 900; width: 340px;
-  background: var(--panel); border: 1px solid var(--yellow); border-radius: 8px;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6), 0 0 30px rgba(232, 161, 58, 0.12);
-  animation: dlg-in 0.18s ease-out;
-}
-.upd-pop-head {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px; border-bottom: 1px solid var(--line);
-  color: var(--yellow); font-size: 11px; font-weight: 800; letter-spacing: 2px;
-}
-.upd-x { background: none; border: none; color: var(--dim); font-size: 13px; cursor: pointer; padding: 0 2px; }
-.upd-x:hover { color: var(--yellow); }
-.upd-pop-body { padding: 14px 16px; font-size: 12px; color: var(--txt); line-height: 1.7; }
-.upd-pop-actions { display: flex; gap: 10px; padding: 0 16px 16px; }
-.upd-pop .update-changes { margin: 6px 0 0; padding-left: 18px; color: var(--dim); font-size: 11px; line-height: 1.8; }
-::root[data-theme='obsidian'] .upd-pop { background: #171a14; border-color: #e8a13a; }
-::root[data-theme='obsidian'] .upd-fab { background: rgba(232, 161, 58, 0.10); border-color: #e8a13a; color: #e8a13a; }
+::root[data-theme='obsidian'] .upd-card { background: rgba(232, 161, 58, 0.08); border-color: #e8a13a; }
 
 /* ── Rubicon AI mascot — dancing alien droid ── */
 .rbc-mascot { display: inline-block; vertical-align: middle; overflow: visible;
@@ -1297,10 +1281,23 @@ code {
 .sorter-bucket-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 11px; letter-spacing: 1.2px; color: var(--green); }
 .sorter-bucket-list { margin: 0; padding: 10px 12px; font-size: 11px; line-height: 1.7; color: var(--dim); max-height: 240px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
 
+/* Keyboard focus — visible ring on every interactive element */
+:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 4px; }
+details.help-sec summary:focus-visible { outline-offset: 4px; }
+
 /* Help */
 .help-wrap { display: flex; flex-direction: column; gap: 16px; max-width: 900px; }
-.help-sec { margin-top: 22px; }
-.help-sec h3 { color: var(--green); font-size: 12px; letter-spacing: 1.5px; margin-bottom: 10px; }
+details.help-sec { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 20px; margin-top: 12px; }
+details.help-sec:first-of-type { margin-top: 14px; }
+details.help-sec summary {
+  cursor: pointer; color: var(--txt); font-size: 12px; font-weight: 700;
+  letter-spacing: 1.2px; list-style: none; user-select: none;
+}
+details.help-sec summary::-webkit-details-marker { display: none; }
+details.help-sec summary::before { content: '> '; color: var(--green); }
+details.help-sec summary:hover { color: var(--green); }
+details.help-sec[open] summary { margin-bottom: 10px; color: var(--green); }
+details.help-sec[open] summary::before { content: 'v '; }
 .help-list { color: var(--txt2, #b8dcc4); font-size: 12px; line-height: 1.9; padding-left: 22px; }
 .help-list li { margin-bottom: 6px; }
 .help-list code, .help-p code { color: var(--cyan); background: rgba(63,212,232,.08); padding: 1px 5px; border-radius: 3px; }
