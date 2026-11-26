@@ -2587,13 +2587,17 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
         log.push(String(out || '').trim().slice(-3000));
       };
       const save = () => { try { writeFileSync(UPDATE_LOG, log.join('\n')); } catch {} };
+      // Mark the log immediately — the status poller must not read a stale
+      // FAILED/OK left over from a previous run while this one is working.
+      log.push(`[update] STARTED ${new Date().toISOString()}`);
+      save();
       try {
         // autostash covers dirty tracked files (package-lock churn); if the reapply
         // conflicts, fall back to discarding local tracked changes — deployed box
         // always wants upstream, data/ is untracked and untouched.
         try { runSilent('git pull --rebase --autostash'); }
         catch { runSilent('git checkout -- .'); runSilent('git pull --rebase'); }
-        runSilent(`${npmBin} install`);
+        runSilent(`${npmBin} install --include=dev --no-audit --no-fund`);
         runSilent(`${npmBin} run build`);
         log.push(`[update] OK ${new Date().toISOString()}`);
         save();

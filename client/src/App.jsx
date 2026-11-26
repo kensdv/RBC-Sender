@@ -1500,18 +1500,25 @@ export default function App() {
         tries++;
         try {
           const s = await api(token, '/api/update/status');
-          if (s.log?.includes('FAILED')) {
+          // Only trust results from THIS run — a STARTED marker means the log
+          // was rewritten by the current apply, not left over from an old one.
+          const fresh = s.log?.includes('[update] STARTED');
+          if (fresh && s.log.includes('FAILED')) {
             clearInterval(poll);
             setUpdating(false);
             showNotice(`Update failed — ${s.log.trim().split('\n').pop()}`, 'err');
-          } else if (s.log?.includes('[update] OK')) {
+          } else if (fresh && s.log.includes('[update] OK')) {
             clearInterval(poll);
             setUpdating(false);
             showNotice('Update applied — reloading…');
             setTimeout(() => location.reload(), 6000);
           }
         } catch {}
-        if (tries > 20) { clearInterval(poll); setUpdating(false); }
+        if (tries > 30) {
+          clearInterval(poll);
+          setUpdating(false);
+          showNotice('Update still running — refresh in a minute to see the new build.');
+        }
       }, 3000);
     } catch (err) {
       setUpdating(false);
