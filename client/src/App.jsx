@@ -2884,6 +2884,28 @@ sudo tail -f /var/log/maillog`}</pre>
                         <input className="w-input" type="password" value={typeof settings.aiKey === 'string' ? settings.aiKey : ''} onChange={(e) => updateSettings('aiKey', e.target.value)} placeholder={settings.aiKey === true ? '(unchanged)' : 'sk-...'} />
                       </div>
                     </div>
+                    <details style={{ border: '1px solid rgba(0,255,65,.15)', borderRadius: 8, padding: '10px 14px', background: 'rgba(0,255,65,.03)', marginTop: 10 }}>
+                      <summary style={{ cursor: 'pointer', fontWeight: 700, letterSpacing: '.08em', color: 'var(--green)' }}>[ FREE PROVIDER SETUP — CLICK A PROVIDER TO AUTOFILL ]</summary>
+                      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {[
+                          { name: 'GROQ (recommended — fast, ~14k req/day free, no card)', endpoint: 'https://api.groq.com/openai/v1/chat/completions', model: 'llama-3.3-70b-versatile', where: 'console.groq.com → API Keys' },
+                          { name: 'OPENROUTER (free models, 50 req/day)', endpoint: 'https://openrouter.ai/api/v1/chat/completions', model: 'deepseek/deepseek-chat-v3-0324:free', where: 'openrouter.ai → Keys' },
+                          { name: 'GEMINI (1500 req/day free)', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', where: 'aistudio.google.com → Get API key' },
+                          { name: 'MISTRAL (free tier)', endpoint: 'https://api.mistral.ai/v1/chat/completions', model: 'mistral-small-latest', where: 'console.mistral.ai → API keys' },
+                          { name: 'OLLAMA (local — fully free & private, runs on this machine)', endpoint: 'http://localhost:11434/v1/chat/completions', model: 'llama3.1:8b', where: 'install ollama → ollama pull llama3.1:8b → any non-empty key works' },
+                        ].map((p) => (
+                          <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', borderBottom: '1px solid rgba(255,255,255,.06)', paddingBottom: 6 }}>
+                            <button className="btn-xs" onClick={() => setSettings({ ...settings, aiEndpoint: p.endpoint, aiModel: p.model })}>USE</button>
+                            <div style={{ flex: 1, minWidth: 220 }}>
+                              <div style={{ fontWeight: 700 }}>{p.name}</div>
+                              <div className="dim-txt" style={{ fontSize: 10 }}>{p.where}</div>
+                              <code className="dim" style={{ fontSize: 10, wordBreak: 'break-all' }}>{p.endpoint} · {p.model}</code>
+                            </div>
+                          </div>
+                        ))}
+                        <p className="dim-txt" style={{ margin: '4px 0 0' }}>Claude note: Anthropic API is paid-only and uses a different request shape — reach Claude models through OPENROUTER instead (model <code>anthropic/claude-sonnet-4.5</code>).</p>
+                      </div>
+                    </details>
                   </div>
 
                   {/* Email options */}
