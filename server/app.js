@@ -435,6 +435,116 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     }
   });
 
+  // ── Spam Score Checker ──
+  app.post('/api/spam-check', async (request) => {
+    const body = request.body || {};
+    const { subject, html, text } = body;
+    const row = db.prepare('SELECT dkim_enabled, dkim_key_encrypted, send_mode FROM send_settings WHERE id = 1').get() || {};
+    const dkimEnabled = Boolean(row.dkim_enabled);
+    const dkimConfigured = Boolean(row.dkim_key_encrypted);
+    const sendMode = row.send_mode || 'smtp';
+
+    const content = `${subject || ''} ${html || ''} ${text || ''}`.toLowerCase();
+    const issues = [];
+    let score = 100;
+
+    // Spam trigger words
+    const spamWords = [
+      'free', 'winner', 'winning', 'won', 'prize', 'cash', 'money', 'credit', 'loan',
+      'debt', 'refinance', 'bankruptcy', 'viagra', 'casino', 'poker', 'gambling',
+      'guarantee', 'guaranteed', '100%', 'risk-free', 'no obligation', 'limited time',
+      'act now', 'don\'t delete', 'urgent', 'priority', 'confidential', 'secret',
+      'income', 'profit', 'investment', 'earn', 'make money', 'fast cash', 'easy money',
+      'work from home', 'opportunity', 'offer expires', 'trial', 'subscription',
+      'click here', 'unsubscribe', 'this is not spam', 'you have been selected',
+      'congratulations', 'bonus', 'discount', 'cheap', 'affordable', 'lowest price',
+      'save', 'savings', 'deal', 'bargain', 'clearance', 'sale', 'gift', 'free gift',
+      'xxx', 'adult', 'porn', 'sex', 'hot', 'sexy', 'naked', 'nude'
+    ];
+
+    for (const word of spamWords) {
+      if (content.includes(word)) {
+        issues.push({ type: 'spam_word', word, severity: 'medium' });
+        score -= 2;
+      }
+    }
+
+    // All caps in subject
+    if (subject && subject.length > 5 && subject === subject.toUpperCase()) {
+      issues.push({ type: 'all_caps_subject', severity: 'high' });
+      score -= 10;
+    }
+
+    // Excessive exclamation marks
+    const exclamCount = (subject + html + text).match(/!/g)?.length || 0;
+    if (exclamCount > 3) {
+      issues.push({ type: 'excessive_exclamation', count: exclamCount, severity: 'medium' });
+      score -= 5;
+    }
+
+    // Excessive question marks
+    const questCount = (subject + html + text).match(/\?/g)?.length || 0;
+    if (questCount > 3) {
+      issues.push({ type: 'excessive_question', count: questCount, severity: 'low' });
+      score -= 3;
+    }
+
+    // All caps in body (more than 10 consecutive caps)
+    const capsPattern = /[A-Z]{10,}/g;
+    const capsMatches = (html + text).match(capsPattern);
+    if (capsMatches && capsMatches.length > 2) {
+      issues.push({ type: 'excessive_caps', count: capsMatches.length, severity: 'medium' });
+      score -= 5;
+    }
+
+    // Missing DKIM
+    if (!dkimEnabled || !dkimConfigured) {
+      issues.push({ type: 'missing_dkim', severity: 'high' });
+      score -= 15;
+    }
+
+    // Direct MX without SPF/DKIM
+    if (sendMode === 'direct' && (!dkimEnabled || !dkimConfigured)) {
+      issues.push({ type: 'direct_mx_missing_auth', severity: 'high' });
+      score -= 10;
+    }
+
+    // No unsubscribe link in HTML
+    if (html && !html.toLowerCase().includes('unsubscribe')) {
+      issues.push({ type: 'missing_unsubscribe', severity: 'high' });
+      score -= 10;
+    }
+
+    // Short body
+    const bodyLength = (html || text || '').length;
+    if (bodyLength < 100) {
+      issues.push({ type: 'short_body', length: bodyLength, severity: 'low' });
+      score -= 5;
+    }
+
+    // No personalization placeholders
+    const placeholders = ['[firstname]', '[lastname]', '[company]', '++rbc_', '[first_name]', '[last_name]'];
+    const hasPersonalization = placeholders.some(p => content.includes(p.toLowerCase()));
+    if (!hasPersonalization && bodyLength > 200) {
+      issues.push({ type: 'no_personalization', severity: 'low' });
+      score -= 3;
+    }
+
+    // Single image body (no alt text, no text)
+    const imgPattern = /<img[^>]*>/gi;
+    const imgMatches = html?.match(imgPattern) || [];
+    const textLength = (text || '').replace(/\s/g, '').length;
+    if (imgMatches.length > 0 && textLength < 50) {
+      issues.push({ type: 'image_only_body', severity: 'medium' });
+      score -= 8;
+    }
+
+    // Clamp score
+    score = Math.max(0, Math.min(100, score));
+
+    return { score, issues, dkimEnabled, dkimConfigured, sendMode };
+  });
+
   // ── SMTP account pool ──
   function accountView(row) {
     return {

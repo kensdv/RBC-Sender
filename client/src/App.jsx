@@ -901,6 +901,10 @@ export default function App() {
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiResponse, setAiResponse] = useState('');
   const [aiStreaming, setAiStreaming] = useState(false);
+  const [spamCheckOpen, setSpamCheckOpen] = useState(false);
+  const [spamScore, setSpamScore] = useState(null);
+  const [spamIssues, setSpamIssues] = useState([]);
+  const [spamChecking, setSpamChecking] = useState(false);
   const htmlRef = useRef(null);
   const pasteRef = useRef(null);
   const textRef = useRef(null);
@@ -1356,6 +1360,7 @@ export default function App() {
                       <span>{selectedId ? `EDIT DRAFT #${selectedId}` : 'NEW LETTER'}</span>
                       <div className="head-actions">
                         <button className="btn-sm" disabled={busy} onClick={() => setAiAssistantOpen(!aiAssistantOpen)}>[ AI ASSIST ]</button>
+                        <button className="btn-sm" disabled={busy} onClick={() => setSpamCheckOpen(!spamCheckOpen)}>[ SPAM CHECK ]</button>
                         <button className="btn-sm" disabled={busy} onClick={() => run(async () => { await saveDraft(); showNotice('Draft saved.'); })}>[ SAVE ]</button>
                       </div>
                     </div>
@@ -1425,6 +1430,69 @@ export default function App() {
                               </button>
                             </div>
                             <pre className="ai-response-text">{aiResponse}</pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* SPAM CHECK PANEL */}
+                    {spamCheckOpen && (
+                      <div className="ai-panel">
+                        <div className="ai-panel-head">
+                          <span>SPAM SCORE CHECKER</span>
+                          <button className="btn-sm" onClick={() => setSpamCheckOpen(false)}>[ × ]</button>
+                        </div>
+                        <button
+                          className="btn-sm"
+                          disabled={spamChecking}
+                          onClick={async () => {
+                            setSpamChecking(true);
+                            setSpamScore(null);
+                            setSpamIssues([]);
+                            try {
+                              const res = await api(token, '/api/spam-check', {
+                                method: 'POST',
+                                body: { subject: draft.subject, html: draft.html, text: draft.text },
+                              });
+                              setSpamScore(res.score);
+                              setSpamIssues(res.issues || []);
+                            } catch (err) {
+                              setSpamScore(0);
+                              setSpamIssues([{ type: 'error', severity: 'high', desc: err.message || 'Check failed' }]);
+                            } finally {
+                              setSpamChecking(false);
+                            }
+                          }}
+                        >
+                          {spamChecking ? '[ CHECKING... ]' : '[ RUN CHECK ]'}
+                        </button>
+                        {spamScore !== null && (
+                          <div className="spam-result-area">
+                            <div className="spam-score-display">
+                              <span className={`spam-score ${spamScore >= 80 ? 'spam-good' : spamScore >= 50 ? 'spam-warn' : 'spam-bad'}`}>
+                                {spamScore}/100
+                              </span>
+                              <span className="spam-score-label">
+                                {spamScore >= 80 ? 'GOOD' : spamScore >= 50 ? 'WARN' : 'POOR'}
+                              </span>
+                            </div>
+                            {spamIssues.length > 0 && (
+                              <div className="spam-issues-list">
+                                {spamIssues.map((issue, i) => (
+                                  <div key={i} className={`spam-issue spam-${issue.severity}`}>
+                                    <span className="spam-issue-type">
+                                      {issue.type.replace(/_/g, ' ').toUpperCase()}
+                                    </span>
+                                    <span className="spam-issue-desc">
+                                      {issue.word && `Word: "${issue.word}"`}
+                                      {issue.count && `Count: ${issue.count}`}
+                                      {issue.length && `Length: ${issue.length}`}
+                                      {issue.desc && issue.desc}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
