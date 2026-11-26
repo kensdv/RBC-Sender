@@ -65,6 +65,8 @@ export function openDatabase(path) {
       email TEXT NOT NULL COLLATE NOCASE,
       kind TEXT NOT NULL,
       reason TEXT NOT NULL DEFAULT '',
+      classification TEXT NOT NULL DEFAULT 'technical',
+      suppression_action TEXT NOT NULL DEFAULT 'retained',
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS subject_variants (
@@ -176,7 +178,12 @@ export function openDatabase(path) {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL DEFAULT ''
     );
-    PRAGMA user_version = 2;
+    CREATE TABLE IF NOT EXISTS disposable_domains (
+      id INTEGER PRIMARY KEY,
+      domain TEXT NOT NULL UNIQUE,
+      added_at TEXT NOT NULL
+    );
+    PRAGMA user_version = 3;
   `);
   const cols = new Set(db.prepare('PRAGMA table_info(send_settings)').all().map((c) => c.name));
   const ensureColumn = (name, ddl) => {
@@ -233,9 +240,23 @@ export function openDatabase(path) {
   if (!campaignCols.has('attachments_json')) db.exec("ALTER TABLE campaigns ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'");
   if (!campaignCols.has('providers_json')) db.exec("ALTER TABLE campaigns ADD COLUMN providers_json TEXT NOT NULL DEFAULT '[]'");
   if (!campaignCols.has('paused')) db.exec("ALTER TABLE campaigns ADD COLUMN paused INTEGER NOT NULL DEFAULT 0");
+  if (!campaignCols.has('send_time_optimization_enabled')) db.exec("ALTER TABLE campaigns ADD COLUMN send_time_optimization_enabled INTEGER NOT NULL DEFAULT 0");
+  const recipientCols = new Set(db.prepare('PRAGMA table_info(recipients)').all().map((c) => c.name));
+  if (!recipientCols.has('timezone_guessed')) db.exec("ALTER TABLE recipients ADD COLUMN timezone_guessed TEXT NOT NULL DEFAULT ''");
+  if (!recipientCols.has('engagement_score')) db.exec("ALTER TABLE recipients ADD COLUMN engagement_score INTEGER NOT NULL DEFAULT 0");
+  if (!recipientCols.has('last_engaged_at')) db.exec("ALTER TABLE recipients ADD COLUMN last_engaged_at TEXT NOT NULL DEFAULT ''");
+  if (!recipientCols.has('engagement_events_json')) db.exec("ALTER TABLE recipients ADD COLUMN engagement_events_json TEXT NOT NULL DEFAULT '[]'");
+  if (!recipientCols.has('bounce_count')) db.exec("ALTER TABLE recipients ADD COLUMN bounce_count INTEGER NOT NULL DEFAULT 0");
+  if (!recipientCols.has('last_bounce_at')) db.exec("ALTER TABLE recipients ADD COLUMN last_bounce_at TEXT NOT NULL DEFAULT ''");
+  if (!recipientCols.has('complaint_count')) db.exec("ALTER TABLE recipients ADD COLUMN complaint_count INTEGER NOT NULL DEFAULT 0");
+  if (!recipientCols.has('last_complaint_at')) db.exec("ALTER TABLE recipients ADD COLUMN last_complaint_at TEXT NOT NULL DEFAULT ''");
+  if (!recipientCols.has('valid_syntax')) db.exec("ALTER TABLE recipients ADD COLUMN valid_syntax INTEGER NOT NULL DEFAULT 1");
   const acctCols = new Set(db.prepare('PRAGMA table_info(smtp_accounts)').all().map((c) => c.name));
   if (!acctCols.has('last_check')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN last_check TEXT");
   if (!acctCols.has('last_error')) db.exec("ALTER TABLE smtp_accounts ADD COLUMN last_error TEXT NOT NULL DEFAULT ''");
+  const bounceCols = new Set(db.prepare('PRAGMA table_info(bounces)').all().map((c) => c.name));
+  if (!bounceCols.has('classification')) db.exec("ALTER TABLE bounces ADD COLUMN classification TEXT NOT NULL DEFAULT ''");
+  if (!bounceCols.has('suppression_action')) db.exec("ALTER TABLE bounces ADD COLUMN suppression_action TEXT NOT NULL DEFAULT ''");
   const variantCols = db.prepare('SELECT name FROM sqlite_master WHERE type="table" AND name="subject_variants"').get();
   if (!variantCols) {
     db.exec(`
@@ -250,6 +271,87 @@ export function openDatabase(path) {
         created_at TEXT NOT NULL
       );
       CREATE INDEX subject_variants_campaign_idx ON subject_variants(campaign_id);
+    `);
+  }
+  const engagementCols = db.prepare('SELECT name FROM sqlite_master WHERE type="table" AND name="engagement_heatmap"').get();
+  if (!engagementCols) {
+    db.exec(`
+      CREATE TABLE engagement_heatmap (
+        id INTEGER PRIMARY KEY,
+        campaign_id INTEGER NOT NULL,
+        hour INTEGER NOT NULL,
+        opens INTEGER NOT NULL DEFAULT 0,
+        clicks INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        UNIQUE (campaign_id, hour)
+      );
+      CREATE INDEX engagement_heatmap_campaign_idx ON engagement_heatmap(campaign_id);
+    `);
+  }
+  const analyticsCols = db.prepare('SELECT name FROM sqlite_master WHERE type="table" AND name="analytics_events"').get();
+  if (!analyticsCols) {
+    db.exec(`
+      CREATE TABLE analytics_events (
+        id INTEGER PRIMARY KEY,
+        campaign_id INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        recipient_id INTEGER,
+        occurred_at TEXT NOT NULL,
+        metadata_json TEXT NOT NULL DEFAULT '{}'
+      );
+      CREATE INDEX analytics_events_idx ON analytics_events(campaign_id, occurred_at);
+      CREATE INDEX analytics_kind_idx ON analytics_events(kind, occurred_at);
+    `);
+  }
+  const repCols = db.prepare('SELECT name FROM sqlite_master WHERE type="table" AND name="reputation_alerts"').get();
+  if (!repCols) {
+    db.exec(`
+      CREATE TABLE reputation_alerts (
+        id INTEGER PRIMARY KEY,
+        target TEXT NOT NULL,
+        source TEXT NOT NULL,
+        listed_at TEXT NOT NULL,
+        resolved_at TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX reputation_alerts_idx ON reputation_alerts(target, source);
+    `);
+  }
+  const disposableCols = db.prepare('SELECT name FROM sqlite_master WHERE type="table" AND name="disposable_domains"').get();
+  if (!disposableCols) {
+    db.exec(`
+      CREATE TABLE disposable_domains (
+        id INTEGER PRIMARY KEY,
+        domain TEXT NOT NULL UNIQUE,
+        added_at TEXT NOT NULL
+      );
+    `);
+    db.exec(`INSERT INTO disposable_domains (domain, added_at) VALUES
+      ('tempmail.org', CURRENT_TIMESTAMP),
+      ('guerillamail.com', CURRENT_TIMESTAMP),
+      ('mailinator.com', CURRENT_TIMESTAMP),
+      ('10minutemail.com', CURRENT_TIMESTAMP),
+      ('trashmail.com', CURRENT_TIMESTAMP),
+      ('fakeinbox.com', CURRENT_TIMESTAMP),
+      ('yopmail.com', CURRENT_TIMESTAMP),
+      ('maildrop.cc', CURRENT_TIMESTAMP),
+      ('dispostable.com', CURRENT_TIMESTAMP),
+      ('getnada.com', CURRENT_TIMESTAMP)
+    `);
+  }
+  const templateCols = db.prepare('SELECT name FROM sqlite_master WHERE type="table" AND name="campaign_templates"').get();
+  if (!templateCols) {
+    db.exec(`
+      CREATE TABLE campaign_templates (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        preheader TEXT NOT NULL DEFAULT '',
+        html TEXT NOT NULL DEFAULT '',
+        text TEXT NOT NULL DEFAULT '',
+        attachments_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL
+      );
     `);
   }
   // campaigns.status CHECK predates the 'failed' state — rebuild the table once

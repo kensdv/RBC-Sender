@@ -797,6 +797,7 @@ const NAV_ITEMS = [
   { id: 'schedule',   label: 'SCHEDULE',    icon: '◷' },
   { id: 'bounces',    label: 'BOUNCES',     icon: '⚠' },
   { id: 'send',       label: 'SEND',        icon: '▶' },
+  { id: 'analytics',  label: 'ANALYTICS',   icon: '▤' },
 ];
 
 const EVENT_STYLE = {
@@ -908,6 +909,11 @@ export default function App() {
   const [abTestCampaignId, setAbTestCampaignId] = useState(null);
   const [subjectVariants, setSubjectVariants] = useState([]);
   const [newVariantSubject, setNewVariantSubject] = useState('');
+  const [engagementTier, setEngagementTier] = useState('all');
+  const [templates, setTemplates] = useState([]);
+  const [templateDropdownOpen, setTemplateDropdownOpen] = useState(false);
+  const [analyticsData, setAnalyticsData] = useState(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const htmlRef = useRef(null);
   const pasteRef = useRef(null);
   const textRef = useRef(null);
@@ -917,6 +923,8 @@ export default function App() {
     setState(next);
     setSmtp({ ...emptySmtp, ...next.smtp, password: '' });
     if (next.sendSettings) setSettings({ ...emptySettings, ...next.sendSettings });
+    const templatesRes = await api(activeToken, '/api/templates');
+    setTemplates(templatesRes || []);
   }
 
   useEffect(() => {
@@ -1374,6 +1382,32 @@ export default function App() {
                     <label className="field-label">SUBJECT</label>
                     <input className="w-input" value={draft.subject} onChange={(e) => updateDraft('subject', e.target.value)} placeholder="Subject line — placeholders work here" />
 
+                    <div className="template-row">
+                      <select className="w-select" onChange={async (e) => {
+                        const templateId = e.target.value;
+                        if (!templateId) return;
+                        const r = await api(token, `/api/templates/${templateId}`);
+                        updateDraft('subject', r.subject);
+                        updateDraft('preheader', r.preheader);
+                        updateDraft('html', r.html);
+                        updateDraft('text', r.text);
+                        updateDraft('attachments', r.attachments || []);
+                        showNotice(`Template "${r.name}" loaded.`);
+                        e.target.value = '';
+                      }}>
+                        <option value="">Load template...</option>
+                        {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                      <button className="btn-xs" onClick={async () => {
+                        const name = await uiPrompt('Template name?', 'Save as template', 'Template name');
+                        if (!name) return;
+                        await api(token, '/api/templates', { method: 'POST', body: { name, subject: draft.subject, preheader: draft.preheader, html: draft.html, text: draft.text, attachments_json: draft.attachments || [] } });
+                        showNotice('Template saved.');
+                        const r = await api(token, '/api/templates');
+                        setTemplates(r || []);
+                      }}>SAVE TEMPLATE</button>
+                    </div>
+
                     <label className="field-label">PREHEADER <span className="dim">(inbox preview text)</span></label>
                     <input className="w-input" value={draft.preheader} onChange={(e) => updateDraft('preheader', e.target.value)} placeholder="Preview text recipients see next to the subject..." />
 
@@ -1786,6 +1820,24 @@ export default function App() {
                           showNotice(`Classified ${r.classified}: ${Object.entries(r.counts).map(([k, v]) => `${k}=${v}`).join(', ')}`);
                           await refresh();
                         })}>SORT BY PROVIDER</button>
+                        <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
+                          const r = await api(token, '/api/hygiene/remove-role-addresses', { method: 'POST' });
+                          showNotice(`Removed ${r.removed} role addresses.`);
+                          await refresh();
+                        })}>REMOVE ROLE</button>
+                        <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
+                          const r = await api(token, '/api/hygiene/remove-disposable-addresses', { method: 'POST' });
+                          showNotice(`Removed ${r.removed} disposable addresses.`);
+                          await refresh();
+                        })}>REMOVE DISPOSABLE</button>
+                        <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
+                          const r = await api(token, '/api/hygiene/find-duplicates', { method: 'POST' });
+                          showNotice(`Found ${r.duplicates.length} duplicate groups.`);
+                        })}>FIND DUPLICATES</button>
+                        <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
+                          const r = await api(token, '/api/hygiene/validate-syntax', { method: 'POST' });
+                          showNotice(`Marked ${r.markedInvalid} invalid emails.`);
+                        })}>VALIDATE SYNTAX</button>
                         {settings.engineMsRefreshToken === true && (
                           <button className="btn-xs" style={{ borderColor: 'rgba(0,120,215,0.6)', color: '#5bbcff' }} disabled={busy} onClick={() => run(async () => {
                             const r = await api(token, '/api/graph/contacts', { method: 'POST' });
@@ -1799,6 +1851,15 @@ export default function App() {
                           }
                         }}>CLEAR LIST</button>
                       </div>
+                    </div>
+                    <div className="filter-row">
+                      <span className="dim">ENGAGEMENT:</span>
+                      <select className="w-select" value={engagementTier} onChange={(e) => setEngagementTier(e.target.value)}>
+                        <option value="all">ALL</option>
+                        <option value="hot">HOT (70+)</option>
+                        <option value="warm">WARM (31-69)</option>
+                        <option value="cold">COLD (0-30)</option>
+                      </select>
                     </div>
                     {verifyResults && (
                       <div className="verify-panel">
@@ -1822,20 +1883,32 @@ export default function App() {
                     )}
                     <div className="tbl-wrap">
                       <table className="w-table">
-                        <thead><tr><th>EMAIL</th><th>NAME</th><th>PROVIDER</th><th>STATUS</th><th></th></tr></thead>
+                        <thead><tr><th>EMAIL</th><th>NAME</th><th>PROVIDER</th><th>ENGAGEMENT</th><th>STATUS</th><th></th></tr></thead>
                         <tbody>
-                          {(state.recipients.concat(extraRecipients.filter((x) => !state.recipients.some((y) => y.id === x.id)))).map((r) => (
-                            <tr key={r.id}>
-                              <td>{r.email}</td>
-                              <td>{[r.firstName, r.lastName].filter(Boolean).join(' ')}</td>
-                              <td className="dim">{r.custom?.provider || '—'}</td>
-                              <td><span className={`badge ${r.suppressed ? 'badge-fail' : 'badge-ok'}`}>{r.suppressed ? 'SUPPRESSED' : 'ACTIVE'}</span></td>
-                              <td>{r.suppressed
-                                ? <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Unsuppress ${r.email}? They will receive future campaigns again.`, { title: 'UNSUPPRESS RECIPIENT', confirmLabel: 'UNSUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/unsuppress`, { method: 'POST' }); setExtraRecipients((prev) => prev.map((x) => x.id === r.id ? { ...x, suppressed: false } : x)); await refresh(); }); }}>UNSUPPRESS</button>
-                                : <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Suppress ${r.email}?`, { title: 'SUPPRESS RECIPIENT', danger: true, confirmLabel: 'SUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/suppress`, { method: 'POST' }); setExtraRecipients((prev) => prev.map((x) => x.id === r.id ? { ...x, suppressed: true } : x)); await refresh(); }); }}>SUPPRESS</button>}
-                                <button className="btn-xs btn-danger" onClick={async () => { if (await uiConfirm(`Delete ${r.email} from the list?`, { title: 'DELETE RECIPIENT', danger: true, confirmLabel: 'DELETE' })) run(async () => { await api(token, `/api/recipients/${r.id}`, { method: 'DELETE' }); setExtraRecipients((prev) => prev.filter((x) => x.id !== r.id)); await refresh(); }); }}>DEL</button></td>
-                            </tr>
-                          ))}
+                          {(state.recipients.concat(extraRecipients.filter((x) => !state.recipients.some((y) => y.id === x.id)))).map((r) => {
+                            if (engagementTier !== 'all') {
+                              const score = r.engagement_score || 0;
+                              const tier = score >= 70 ? 'hot' : score >= 31 ? 'warm' : 'cold';
+                              if (tier !== engagementTier) return null;
+                            }
+                            return (
+                              <tr key={r.id}>
+                                <td>{r.email}</td>
+                                <td>{[r.firstName, r.lastName].filter(Boolean).join(' ')}</td>
+                                <td className="dim">{r.custom?.provider || '—'}</td>
+                                <td>
+                                  <span className={`badge ${r.engagement_score >= 70 ? 'badge-ok' : r.engagement_score >= 31 ? 'badge-def' : 'badge-fail'}`}>
+                                    {r.engagement_score || 0}
+                                  </span>
+                                </td>
+                                <td><span className={`badge ${r.suppressed ? 'badge-fail' : 'badge-ok'}`}>{r.suppressed ? 'SUPPRESSED' : 'ACTIVE'}</span></td>
+                                <td>{r.suppressed
+                                  ? <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Unsuppress ${r.email}? They will receive future campaigns again.`, { title: 'UNSUPPRESS RECIPIENT', confirmLabel: 'UNSUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/unsuppress`, { method: 'POST' }); setExtraRecipients((prev) => prev.map((x) => x.id === r.id ? { ...x, suppressed: false } : x)); await refresh(); }); }}>UNSUPPRESS</button>
+                                  : <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Suppress ${r.email}?`, { title: 'SUPPRESS RECIPIENT', danger: true, confirmLabel: 'SUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/suppress`, { method: 'POST' }); setExtraRecipients((prev) => prev.map((x) => x.id === r.id ? { ...x, suppressed: true } : x)); await refresh(); }); }}>SUPPRESS</button>}
+                                  <button className="btn-xs btn-danger" onClick={async () => { if (await uiConfirm(`Delete ${r.email} from the list?`, { title: 'DELETE RECIPIENT', danger: true, confirmLabel: 'DELETE' })) run(async () => { await api(token, `/api/recipients/${r.id}`, { method: 'DELETE' }); setExtraRecipients((prev) => prev.filter((x) => x.id !== r.id)); await refresh(); }); }}>DEL</button></td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -2950,8 +3023,82 @@ sudo tail -f /var/log/maillog`}</pre>
                                     const r = await api(token, `/api/campaigns/${c.id}/subject-variants`);
                                     setSubjectVariants(r || []);
                                   }}>AB TEST</button>
+                                  <button className="btn-xs" onClick={async () => {
+                                    const r = await api(token, `/api/campaigns/${c.id}/enable-send-time-optimization`, { method: 'POST', body: { enabled: !c.send_time_optimization_enabled } });
+                                    showNotice(`Send time optimization ${r.enabled ? 'ON' : 'OFF'}.`);
+                                    await refresh();
+                                  }}>{c.send_time_optimization_enabled ? 'TZ ON' : 'TZ OFF'}</button>
                                 </div>
                               </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ══ ANALYTICS ══ */}
+              {tab === 'analytics' && (
+                <div style={{display:'flex',flexDirection:'column',gap:16}}>
+                  <div className="pane">
+                    <div className="pane-head"><span>ANALYTICS DASHBOARD</span></div>
+                    <div className="kpi-row">
+                      {[
+                        ['OPENS', analyticsData?.opens || 0, 'var(--green)'],
+                        ['CLICKS', analyticsData?.clicks || 0, 'var(--cyan)'],
+                        ['BOUNCES', analyticsData?.bounces || 0, 'var(--yellow)'],
+                        ['COMPLAINTS', analyticsData?.complaints || 0, 'var(--red)'],
+                        ['CAMPAIGNS', analyticsData?.campaigns || 0, 'var(--txt)'],
+                        ['RECIPIENTS', analyticsData?.recipients || 0, 'var(--purple)'],
+                      ].map(([lbl, val, color]) => (
+                        <div key={lbl} className="kpi-card">
+                          <div className="kpi-val" style={{ color }}>{val}</div>
+                          <div className="kpi-lbl">{lbl}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <button className="btn-sm" onClick={async () => {
+                      setAnalyticsLoading(true);
+                      try {
+                        const res = await api(token, '/api/analytics/overview');
+                        setAnalyticsData(res);
+                      } catch (err) {
+                        showNotice(`Analytics error: ${err.message}`);
+                      } finally {
+                        setAnalyticsLoading(false);
+                      }
+                    }}>{analyticsLoading ? '[ LOADING... ]' : '[ REFRESH ANALYTICS ]'}</button>
+                  </div>
+                  <div className="pane">
+                    <div className="pane-head"><span>ENGAGEMENT HEATMAP</span><span className="dim">opens/clicks by hour (UTC)</span></div>
+                    <div className="heatmap-grid">
+                      {Array.from({length: 24}).map((_, hour) => {
+                        const data = analyticsData?.heatmap?.[hour] || { opens: 0, clicks: 0 };
+                        const intensity = Math.min(100, (data.opens + data.clicks) * 5);
+                        return (
+                          <div key={hour} className="heatmap-cell" style={{ opacity: 0.3 + intensity * 0.007 }}>
+                            <div className="heatmap-hour">{hour}:00</div>
+                            <div className="heatmap-value">O:{data.opens} C:{data.clicks}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="pane">
+                    <div className="pane-head"><span>TOP DOMAINS</span></div>
+                    <div className="tbl-wrap">
+                      <table className="w-table">
+                        <thead><tr><th>DOMAIN</th><th>RECIPIENTS</th><th>OPENS</th><th>CLICKS</th><th>OPEN RATE</th></tr></thead>
+                        <tbody>
+                          {(analyticsData?.topDomains || []).map((d, i) => (
+                            <tr key={i}>
+                              <td>{d.domain}</td>
+                              <td>{d.recipients}</td>
+                              <td className="green-txt">{d.opens}</td>
+                              <td className="cyan-txt">{d.clicks}</td>
+                              <td className="dim">{d.openRate}%</td>
                             </tr>
                           ))}
                         </tbody>

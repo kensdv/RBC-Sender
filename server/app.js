@@ -54,6 +54,8 @@ function recipientView(row) {
     id: row.id, email: row.email, firstName: row.first_name, lastName: row.last_name,
     company: row.company, custom, consentConfirmed: Boolean(row.consent_confirmed),
     suppressed: Boolean(row.suppressed), suppressionReason: row.suppression_reason, createdAt: row.created_at,
+    engagement_score: row.engagement_score || 0,
+    timezone_guessed: row.timezone_guessed || '',
   };
 }
 
@@ -67,6 +69,7 @@ function campaignView(row) {
     attachments, providers, paused: Boolean(row.paused),
     status: row.status, scheduledFor: row.scheduled_for, createdAt: row.created_at,
     total: row.total || 0, sent: row.sent || 0, failed: row.failed || 0, queued: row.queued || 0,
+    send_time_optimization_enabled: Boolean(row.send_time_optimization_enabled),
   };
 }
 
@@ -592,6 +595,338 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const variantId = Number(request.params.variantId);
     db.prepare('DELETE FROM subject_variants WHERE id = ? AND campaign_id = ?').run(variantId, campaignId);
     return { ok: true };
+  });
+
+  // ── Send Time Optimization ──
+  app.post('/api/campaigns/:id/enable-send-time-optimization', async (request) => {
+    const campaignId = Number(request.params.id);
+    const body = request.body || {};
+    const { enabled } = body;
+    db.prepare('UPDATE campaigns SET send_time_optimization_enabled = ? WHERE id = ?').run(enabled ? 1 : 0, campaignId);
+    return { ok: true, enabled: Boolean(enabled) };
+  });
+
+  app.post('/api/recipients/:id/guess-timezone', async (request) => {
+    const recipientId = Number(request.params.id);
+    const recipient = db.prepare('SELECT email FROM recipients WHERE id = ?').get(recipientId);
+    if (!recipient) fail('Recipient not found');
+    const domain = recipient.email.split('@')[1] || '';
+    const tld = domain.split('.').pop().toLowerCase();
+    const timezoneMap = {
+      'us': 'America/New_York', 'ca': 'America/Toronto', 'mx': 'America/Mexico_City',
+      'br': 'America/Sao_Paulo', 'ar': 'America/Argentina/Buenos_Aires',
+      'uk': 'Europe/London', 'de': 'Europe/Berlin', 'fr': 'Europe/Paris', 'es': 'Europe/Madrid',
+      'it': 'Europe/Rome', 'nl': 'Europe/Amsterdam', 'se': 'Europe/Stockholm', 'no': 'Europe/Oslo',
+      'dk': 'Europe/Copenhagen', 'fi': 'Europe/Helsinki', 'pl': 'Europe/Warsaw', 'cz': 'Europe/Prague',
+      'hu': 'Europe/Budapest', 'at': 'Europe/Vienna', 'ch': 'Europe/Zurich', 'be': 'Europe/Brussels',
+      'ie': 'Europe/Dublin', 'pt': 'Europe/Lisbon', 'gr': 'Europe/Athens', 'ru': 'Europe/Moscow',
+      'ua': 'Europe/Kiev', 'tr': 'Europe/Istanbul', 'il': 'Asia/Jerusalem', 'ae': 'Asia/Dubai',
+      'sa': 'Asia/Riyadh', 'ir': 'Asia/Tehran', 'pk': 'Asia/Karachi', 'in': 'Asia/Kolkata',
+      'bd': 'Asia/Dhaka', 'np': 'Asia/Kathmandu', 'th': 'Asia/Bangkok', 'vn': 'Asia/Ho_Chi_Minh',
+      'ph': 'Asia/Manila', 'id': 'Asia/Jakarta', 'my': 'Asia/Kuala_Lumpur', 'sg': 'Asia/Singapore',
+      'cn': 'Asia/Shanghai', 'hk': 'Asia/Hong_Kong', 'tw': 'Asia/Taipei', 'jp': 'Asia/Tokyo',
+      'kr': 'Asia/Seoul', 'au': 'Australia/Sydney', 'nz': 'Pacific/Auckland', 'za': 'Africa/Johannesburg',
+      'eg': 'Africa/Cairo', 'ng': 'Africa/Lagos', 'ke': 'Africa/Nairobi', 'ma': 'Africa/Casablanca',
+      'dz': 'Africa/Algiers', 'tn': 'Africa/Tunis', 'ly': 'Africa/Tripoli', 'et': 'Africa/Addis_Ababa',
+      'gh': 'Africa/Accra', 'ug': 'Africa/Kampala', 'tz': 'Africa/Dar_es_Salaam', 'rw': 'Africa/Kigali',
+      'cd': 'Africa/Kinshasa', 'ao': 'Africa/Luanda', 'mz': 'Africa/Maputo', 'zw': 'Africa/Harare',
+      'bw': 'Africa/Gaborone', 'na': 'Africa/Windhoek', 'zm': 'Africa/Lusaka', 'mw': 'Africa/Blantyre',
+      'mg': 'Indian/Antananarivo', 'mu': 'Indian/Mauritius', 'sc': 'Indian/Mahe', 'km': 'Indian/Comoro',
+      'dj': 'Africa/Djibouti', 'so': 'Africa/Mogadishu', 'er': 'Africa/Asmara', 'sd': 'Africa/Khartoum',
+      'ss': 'Africa/Juba', 'td': 'Africa/Ndjamena', 'cf': 'Africa/Bangui', 'cm': 'Africa/Douala',
+      'ga': 'Africa/Libreville', 'cg': 'Africa/Brazzaville', 'gq': 'Africa/Malabo', 'st': 'Africa/Sao_Tome',
+      'bi': 'Africa/Bujumbura', 'sl': 'Africa/Freetown', 'lr': 'Africa/Monrovia', 'ci': 'Africa/Abidjan',
+      'bf': 'Africa/Ouagadougou', 'ne': 'Africa/Niamey', 'ml': 'Africa/Bamako', 'sn': 'Africa/Dakar',
+      'gm': 'Africa/Banjul', 'gw': 'Africa/Bissau', 'gn': 'Africa/Conakry', 'cv': 'Atlantic/Cape_Verde',
+      'mr': 'Africa/Nouakchott', 'eh': 'Africa/El_Aaiun', 'am': 'Asia/Yerevan', 'az': 'Asia/Baku',
+      'ge': 'Asia/Tbilisi', 'kg': 'Asia/Bishkek', 'kz': 'Asia/Almaty', 'tj': 'Asia/Dushanbe',
+      'tm': 'Asia/Ashgabat', 'uz': 'Asia/Tashkent', 'af': 'Asia/Kabul', 'mn': 'Asia/Ulaanbaatar',
+      'bt': 'Asia/Thimphu', 'lk': 'Asia/Colombo', 'mv': 'Indian/Maldives', 'kh': 'Asia/Phnom_Penh',
+      'la': 'Asia/Vientiane', 'mm': 'Asia/Yangon', 'bn': 'Asia/Brunei', 'tl': 'Asia/Dili',
+      'fj': 'Pacific/Fiji', 'pg': 'Pacific/Port_Moresby', 'sb': 'Pacific/Guadalcanal', 'vu': 'Pacific/Efate',
+      'nc': 'Pacific/Noumea', 'pf': 'Pacific/Tahiti', 'ws': 'Pacific/Apia', 'to': 'Pacific/Tongatapu',
+      'ki': 'Pacific/Tarawa', 'tv': 'Pacific/Funafuti', 'nr': 'Pacific/Yaren', 'pw': 'Pacific/Palau',
+      'fm': 'Pacific/Pohnpei', 'mh': 'Pacific/Majuro', 'nu': 'Pacific/Niue', 'ck': 'Pacific/Rarotonga',
+      'as': 'Pacific/Pago_Pago', 'gu': 'Pacific/Guam', 'mp': 'Pacific/Saipan', 'um': 'Pacific/Wake',
+      'com': 'UTC', 'net': 'UTC', 'org': 'UTC', 'io': 'UTC', 'co': 'UTC', 'ai': 'UTC', 'app': 'UTC',
+      'dev': 'UTC', 'me': 'UTC', 'tv': 'UTC', 'ws': 'UTC', 'info': 'UTC', 'biz': 'UTC', 'name': 'UTC',
+      'mobi': 'UTC', 'tel': 'UTC', 'asia': 'UTC', 'cat': 'UTC', 'eu': 'UTC', 'jobs': 'UTC', 'travel': 'UTC',
+      'pro': 'UTC', 'xxx': 'UTC', 'post': 'UTC', 'aero': 'UTC', 'museum': 'UTC', 'coop': 'UTC'
+    };
+    const guessedTz = timezoneMap[tld] || 'UTC';
+    db.prepare('UPDATE recipients SET timezone_guessed = ? WHERE id = ?').run(guessedTz, recipientId);
+    return { timezone: guessedTz };
+  });
+
+  app.get('/api/engagement-heatmap/:campaignId', async (request) => {
+    const campaignId = Number(request.params.campaignId);
+    const rows = db.prepare('SELECT hour, opens, clicks FROM engagement_heatmap WHERE campaign_id = ? ORDER BY hour').all(campaignId);
+    const heatmap = Array(24).fill({ opens: 0, clicks: 0 });
+    for (const row of rows) {
+      heatmap[row.hour] = { opens: row.opens, clicks: row.clicks };
+    }
+    return heatmap;
+  });
+
+  // ── Engagement Scoring ──
+  app.post('/api/recipients/:id/track-engagement', async (request) => {
+    const recipientId = Number(request.params.id);
+    const body = request.body || {};
+    const { kind } = body;
+    const recipient = db.prepare('SELECT engagement_score, engagement_events_json FROM recipients WHERE id = ?').get(recipientId);
+    if (!recipient) fail('Recipient not found');
+    const events = JSON.parse(recipient.engagement_events_json || '[]');
+    const now = new Date().toISOString();
+    events.push({ kind, at: now });
+    const scoreMap = { open: 10, click: 15, reply: 20 };
+    const scoreDelta = scoreMap[kind] || 0;
+    const newScore = Math.min(100, Math.max(0, (recipient.engagement_score || 0) + scoreDelta));
+    db.prepare('UPDATE recipients SET engagement_score = ?, engagement_events_json = ?, last_engaged_at = ? WHERE id = ?')
+      .run(newScore, JSON.stringify(events), now, recipientId);
+    return { score: newScore, events: events.length };
+  });
+
+  app.post('/api/recipients/engagement-decay', async (request) => {
+    const now = new Date().toISOString();
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const stale = db.prepare('SELECT id, engagement_score FROM recipients WHERE last_engaged_at < ? OR last_engaged_at IS NULL').all(cutoff);
+    for (const r of stale) {
+      const newScore = Math.max(0, (r.engagement_score || 0) - 1);
+      db.prepare('UPDATE recipients SET engagement_score = ? WHERE id = ?').run(newScore, r.id);
+    }
+    return { decayed: stale.length };
+  });
+
+  app.get('/api/recipients/engagement-tiers', async (request) => {
+    const tiers = db.prepare(`
+      SELECT
+        CASE WHEN engagement_score >= 70 THEN 'hot' WHEN engagement_score >= 31 THEN 'warm' ELSE 'cold' END as tier,
+        COUNT(*) as count
+      FROM recipients
+      WHERE suppressed = 0 AND consent_confirmed = 1
+      GROUP BY tier
+    `).all();
+    return tiers;
+  });
+
+  // ── Reputation Monitoring ──
+  app.post('/api/reputation/check', async (request) => {
+    const body = request.body || {};
+    const { target, source } = body;
+    if (!target || !source) fail('target and source required');
+    const now = new Date().toISOString();
+    const existing = db.prepare('SELECT id FROM reputation_alerts WHERE target = ? AND source = ? AND resolved_at IS NULL').get(target, source);
+    if (existing) {
+      return { alreadyListed: true, listedAt: now };
+    }
+    db.prepare('INSERT INTO reputation_alerts (target, source, listed_at, created_at) VALUES (?, ?, ?, ?)')
+      .run(target, source, now, now);
+    return { listed: true, listedAt: now };
+  });
+
+  app.get('/api/reputation/alerts', async (request) => {
+    const rows = db.prepare('SELECT target, source, listed_at, resolved_at FROM reputation_alerts WHERE resolved_at IS NULL ORDER BY listed_at DESC').all();
+    return rows;
+  });
+
+  app.post('/api/reputation/resolve', async (request) => {
+    const body = request.body || {};
+    const { target, source } = body;
+    if (!target || !source) fail('target and source required');
+    const now = new Date().toISOString();
+    db.prepare('UPDATE reputation_alerts SET resolved_at = ? WHERE target = ? AND source = ? AND resolved_at IS NULL')
+      .run(now, target, source);
+    return { ok: true };
+  });
+
+  // ── List Hygiene ──
+  app.post('/api/hygiene/remove-role-addresses', async (request) => {
+    const rolePrefixes = ['postmaster', 'abuse', 'security', 'admin', 'support', 'info', 'sales', 'contact', 'billing', 'webmaster', 'hostmaster', 'noc', 'root', 'mailer-daemon', 'noreply', 'no-reply', 'mail', 'email', 'office', 'help', 'marketing', 'newsletter', 'feedback', 'orders', 'returns', 'shipping', 'hr', 'careers', 'jobs', 'recruitment', 'recruiting', 'hr@', 'jobs@', 'careers@', 'info@', 'support@', 'help@', 'sales@', 'marketing@', 'contact@', 'enquiries@', 'enquiry@', 'general@', 'office@', 'admin@', 'webmaster@', 'postmaster@', 'abuse@', 'security@', 'privacy@', 'legal@', 'compliance@', 'billing@', 'accounts@', 'finance@', 'payments@', 'orders@', 'returns@', 'shipping@', 'receiving@', 'delivery@', 'tracking@', 'customercare@', 'customer.care@', 'customerservice@', 'customer.service@', 'service@', 'services@', 'tech@', 'it@', 'dev@', 'ops@', 'team@', 'hello@', 'hi@', 'hey@', 'welcome@', 'start@', 'begin@', 'onboarding@', 'setup@', 'configure@', 'install@', 'upgrade@', 'update@', 'news@', 'newsletter@', 'announce@', 'announcement@', 'updates@', 'notifications@', 'alert@', 'alerts@', 'warning@', 'warnings@', 'error@', 'errors@', 'bug@', 'bugs@', 'feedback@', 'review@', 'reviews@', 'rating@', 'ratings@', 'survey@', 'surveys@', 'poll@', 'polls@', 'vote@', 'votes@', 'contest@', 'contests@', 'giveaway@', 'giveaways@', 'promo@', 'promos@', 'offer@', 'offers@', 'deal@', 'deals@', 'discount@', 'discounts@', 'sale@', 'sales@', 'special@', 'specials@', 'vip@', 'premium@', 'exclusive@', 'member@', 'members@', 'club@', 'community@', 'forum@', 'forums@', 'discussion@', 'discussions@', 'chat@', 'talk@', 'connect@', 'network@', 'social@', 'friends@', 'family@', 'love@', 'dating@', 'meet@', 'match@', 'partner@', 'partners@', 'collab@', 'collabs@', 'sponsor@', 'sponsors@', 'advertise@', 'ads@', 'ad@', 'advertising@', 'media@', 'press@', 'pr@', 'public@', 'relations@', 'events@', 'event@', 'calendar@', 'booking@', 'reservation@', 'reservations@', 'appointment@', 'appointments@', 'schedule@', 'scheduling@', 'signup@', 'register@', 'registration@', 'join@', 'subscribe@', 'unsubscribe@', 'opt-in@', 'optin@', 'opt-out@', 'optout@', 'confirm@', 'confirmation@', 'verify@', 'verification@', 'activate@', 'activation@', 'validate@', 'validation@', 'check@', 'test@', 'testing@', 'demo@', 'trial@', 'sample@', 'example@', 'helpdesk@', 'ticket@', 'tickets@', 'support@', 'assistance@', 'aid@', 'assistance@', 'guide@', 'tutorial@', 'docs@', 'documentation@', 'manual@', 'manuals@', 'faq@', 'faqs@', 'knowledge@', 'kb@', 'library@', 'resources@', 'downloads@', 'files@', 'assets@', 'images@', 'videos@', 'audio@', 'media@', 'gallery@', 'photos@', 'pics@', 'pictures@', 'art@', 'design@', 'creative@', 'studio@', 'labs@', 'research@', 'development@', 'engineering@', 'science@', 'tech@', 'innovation@', 'solutions@', 'products@', 'services@', 'solutions@', 'platform@', 'api@', 'developers@', 'code@', 'scripts@', 'automation@', 'bots@', 'ai@', 'ml@', 'data@', 'analytics@', 'insights@', 'reports@', 'metrics@', 'stats@', 'statistics@', 'performance@', 'optimization@', 'seo@', 'sem@', 'ppc@', 'cpc@', 'cpm@', 'ctr@', 'roi@', 'kpi@', 'metrics@', 'measurement@', 'tracking@', 'monitoring@', 'logging@', 'audit@', 'security@', 'privacy@', 'compliance@', 'legal@', 'terms@', 'tos@', 'policy@', 'policies@', 'gdpr@', 'ccpa@', 'hipaa@', 'sox@', 'pci@', 'iso@', 'certification@', 'compliance@', 'governance@', 'risk@', 'threat@', 'vulnerability@', 'incident@', 'response@', 'forensics@', 'investigation@', 'claims@', 'disputes@', 'complaints@', 'feedback@', 'quality@', 'assurance@', 'qa@', 'testing@', 'validation@', 'verification@', 'inspection@', 'audit@', 'review@', 'approval@', 'signoff@', 'acceptance@', 'rejection@', 'return@', 'refund@', 'exchange@', 'warranty@', 'guarantee@', 'service@', 'level@', 'agreement@', 'sla@', 'contract@', 'contracts@', 'negotiation@', 'procurement@', 'purchasing@', 'buying@', 'sourcing@', 'supplier@', 'vendors@', 'vendor@', 'partners@', 'alliance@', 'reseller@', 'distributor@', 'channel@', 'sales@', 'leads@', 'prospects@', 'opportunities@', 'pipeline@', 'funnel@', 'conversion@', 'acquisition@', 'retention@', 'churn@', 'loyalty@', 'advocacy@', 'referral@', 'referrals@', 'affiliate@', 'affiliates@', 'influencer@', 'influencers@', 'ambassador@', 'ambassadors@', 'evangelist@', 'evangelists@', 'community@', 'user@', 'users@', 'customer@', 'customers@', 'client@', 'clients@', 'account@', 'accounts@', 'profile@', 'profiles@', 'settings@', 'preferences@', 'customization@', 'personalization@', 'experience@', 'ux@', 'ui@', 'interface@', 'usability@', 'accessibility@', 'inclusion@', 'diversity@', 'equity@', 'belonging@', 'culture@', 'values@', 'mission@', 'vision@', 'strategy@', 'goals@', 'objectives@', 'targets@', 'milestones@', 'deliverables@', 'outcomes@', 'results@', 'impact@', 'effectiveness@', 'efficiency@', 'productivity@', 'performance@', 'excellence@', 'quality@', 'innovation@', 'creativity@', 'disruption@', 'transformation@', 'change@', 'management@', 'leadership@', 'executive@', 'c-suite@', 'clevel@', 'directors@', 'managers@', 'supervisors@', 'teamleaders@', 'coordinators@', 'specialists@', 'analysts@', 'consultants@', 'advisors@', 'experts@', 'professionals@', 'practitioners@', 'operators@', 'technicians@', 'engineers@', 'developers@', 'designers@', 'architects@', 'scientists@', 'researchers@', 'academics@', 'educators@', 'trainers@', 'coaches@', 'mentors@', 'guides@', 'facilitators@', 'moderators@', 'administrators@', 'operators@', 'owners@', 'founders@', 'entrepreneurs@', 'startups@', 'companies@', 'organizations@', 'institutions@', 'enterprises@', 'corporations@', 'businesses@', 'ventures@', 'projects@', 'initiatives@', 'programs@', 'campaigns@', 'launches@', 'releases@', 'updates@', 'versions@', 'editions@', 'releases@', 'patches@', 'fixes@', 'hotfixes@', 'securitypatches@', 'updates@', 'upgrades@', 'migrations@', 'transitions@', 'rollouts@', 'deployments@', 'implementations@', 'integrations@', 'connectivity@', 'interoperability@', 'compatibility@', 'standards@', 'protocols@', 'interfaces@', 'apis@', 'sdks@', 'frameworks@', 'libraries@', 'toolkits@', 'components@', 'modules@', 'plugins@', 'extensions@', 'addons@', 'features@', 'functionality@', 'capabilities@', 'functionality@', 'functionality@'];
+    const result = db.prepare(`
+      DELETE FROM recipients WHERE email LIKE ? OR email LIKE ? OR email LIKE ? OR email LIKE ?
+    `).run('postmaster@%', 'abuse@%', 'security@%', 'admin@%');
+    const totalRoleAddresses = rolePrefixes.length;
+    return { removed: result.changes || 0, totalRoleAddresses };
+  });
+
+  app.post('/api/hygiene/remove-disposable-addresses', async (request) => {
+    const result = db.prepare(`
+      DELETE FROM recipients WHERE email LIKE ? OR email LIKE ? OR email LIKE ? OR email LIKE ?
+      OR email LIKE ? OR email LIKE ? OR email LIKE ? OR email LIKE ?
+      OR email LIKE ? OR email LIKE ?
+    `).run('%@tempmail.org', '%@guerillamail.com', '%@mailinator.com', '%@10minutemail.com',
+      '%@trashmail.com', '%@fakeinbox.com', '%@yopmail.com', '%@maildrop.cc',
+      '%@dispostable.com', '%@getnada.com');
+    return { removed: result.changes || 0 };
+  });
+
+  app.post('/api/hygiene/find-duplicates', async (request) => {
+    const duplicates = db.prepare(`
+      SELECT LOWER(email) as email_lower, COUNT(*) as count, GROUP_CONCAT(id) as ids
+      FROM recipients
+      GROUP BY LOWER(email)
+      HAVING COUNT(*) > 1
+    `).all();
+    return { duplicates };
+  });
+
+  app.post('/api/hygiene/validate-syntax', async (request) => {
+    const invalid = db.prepare(`
+      UPDATE recipients SET valid_syntax = 0 WHERE email NOT LIKE '%_@_%._%' OR email LIKE '% %' OR email LIKE '%,%'
+      OR email LIKE '%<%' OR email LIKE '%>%' OR email LIKE '%"%' OR email LIKE "%'%"
+    `).run();
+    return { markedInvalid: invalid.changes || 0 };
+  });
+
+  // ── Campaign Templates ──
+  app.post('/api/templates', async (request) => {
+    const body = request.body || {};
+    const { name, subject, preheader, html, text, attachments_json } = body;
+    if (!name || !subject) fail('name and subject required');
+    const now = new Date().toISOString();
+    const result = db.prepare(`
+      INSERT INTO campaign_templates (name, subject, preheader, html, text, attachments_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(name, subject, preheader || '', html || '', text || '', JSON.stringify(attachments_json || []), now);
+    return { id: result.lastInsertRowid };
+  });
+
+  app.get('/api/templates', async (request) => {
+    const rows = db.prepare('SELECT id, name, subject, preheader, html, text, attachments_json, created_at FROM campaign_templates ORDER BY created_at DESC').all();
+    return rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      subject: r.subject,
+      preheader: r.preheader,
+      html: r.html,
+      text: r.text,
+      attachments: JSON.parse(r.attachments_json || '[]'),
+      createdAt: r.created_at,
+    }));
+  });
+
+  app.delete('/api/templates/:id', async (request) => {
+    const templateId = Number(request.params.id);
+    db.prepare('DELETE FROM campaign_templates WHERE id = ?').run(templateId);
+    return { ok: true };
+  });
+
+  // ── Analytics ──
+  app.get('/api/analytics/overview', async (request) => {
+    const last30Days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const opens = db.prepare('SELECT COUNT(*) as count FROM analytics_events WHERE kind = "open" AND occurred_at > ?').get(last30Days).count;
+    const clicks = db.prepare('SELECT COUNT(*) as count FROM analytics_events WHERE kind = "click" AND occurred_at > ?').get(last30Days).count;
+    const bounces = db.prepare('SELECT COUNT(*) as count FROM bounces WHERE created_at > ?').get(last30Days).count;
+    const complaints = db.prepare('SELECT COUNT(*) as count FROM bounces WHERE classification = "spam_complaint" AND created_at > ?').get(last30Days).count;
+    const campaigns = db.prepare('SELECT COUNT(*) as count FROM campaigns WHERE created_at > ?').get(last30Days).count;
+    const recipients = db.prepare('SELECT COUNT(*) as count FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0').get().count;
+    const heatmap = db.prepare('SELECT hour, opens, clicks FROM engagement_heatmap').all();
+    const topDomains = db.prepare(`
+      SELECT
+        substr(r.email, instr(r.email, '@') + 1) as domain,
+        COUNT(DISTINCT r.id) as recipients,
+        COUNT(DISTINCT CASE WHEN a.kind = 'open' THEN a.id END) as opens,
+        COUNT(DISTINCT CASE WHEN a.kind = 'click' THEN a.id END) as clicks,
+        ROUND(COUNT(DISTINCT CASE WHEN a.kind = 'open' THEN a.id END) * 100.0 / COUNT(DISTINCT r.id), 1) as openRate
+      FROM recipients r
+      LEFT JOIN analytics_events a ON a.recipient_id = r.id AND a.kind IN ('open', 'click')
+      WHERE r.consent_confirmed = 1 AND r.suppressed = 0
+      GROUP BY domain
+      ORDER BY opens DESC
+      LIMIT 10
+    `).all();
+    return { opens, clicks, bounces, complaints, campaigns, recipients, heatmap, topDomains };
+  });
+
+  app.get('/api/analytics/trends', async (request) => {
+    const last30Days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const dailyStats = db.prepare(`
+      SELECT DATE(occurred_at) as date, kind, COUNT(*) as count
+      FROM analytics_events
+      WHERE occurred_at > ?
+      GROUP BY DATE(occurred_at), kind
+      ORDER BY date
+    `).all(last30Days);
+    const bounceStats = db.prepare(`
+      SELECT DATE(created_at) as date, classification, COUNT(*) as count
+      FROM bounces
+      WHERE created_at > ?
+      GROUP BY DATE(created_at), classification
+      ORDER BY date
+    `).all(last30Days);
+    return { dailyStats, bounceStats };
+  });
+
+  app.get('/api/analytics/top-domains', async (request) => {
+    const domains = db.prepare(`
+      SELECT
+        substr(email, instr(email, '@') + 1) as domain,
+        COUNT(DISTINCT r.id) as recipients,
+        COUNT(DISTINCT CASE WHEN a.kind = 'open' THEN a.id END) as opens,
+        COUNT(DISTINCT CASE WHEN a.kind = 'click' THEN a.id END) as clicks
+      FROM recipients r
+      LEFT JOIN analytics_events a ON r.id = a.recipient_id
+      WHERE r.suppressed = 0 AND r.consent_confirmed = 1
+      GROUP BY domain
+      ORDER BY opens DESC
+      LIMIT 20
+    `).all();
+    return domains;
+  });
+
+  // ── Bounce Classification + Auto-Suppression ──
+  app.post('/api/bounces/classify', async (request) => {
+    const body = request.body || {};
+    const { reason, kind } = body;
+    if (!reason) fail('reason required');
+    const reasonLower = String(reason).toLowerCase();
+    let classification = 'technical';
+    let suppressionAction = 'retained';
+    if (reasonLower.includes('5.1.1') || reasonLower.includes('user unknown') || reasonLower.includes('mailbox not found') || reasonLower.includes('no such user') || reasonLower.includes('invalid recipient') || reasonLower.includes('does not exist')) {
+      classification = 'hard';
+      suppressionAction = 'auto_suppressed';
+    } else if (reasonLower.includes('mailbox full') || reasonLower.includes('quota exceeded') || reasonLower.includes('over quota') || reasonLower.includes('temporarily unavailable') || reasonLower.includes('try again later')) {
+      classification = 'soft';
+      suppressionAction = 'retained';
+    } else if (reasonLower.includes('spam') || reasonLower.includes('blocked') || reasonLower.includes('rejected') || reasonLower.includes('policy') || reasonLower.includes('blacklist') || reasonLower.includes('rbl')) {
+      classification = 'spam';
+      suppressionAction = 'flagged';
+    } else if (reasonLower.includes('abuse') || reasonLower.includes('complaint') || reasonLower.includes('fraud') || reasonLower.includes('phishing') || reasonLower.includes('scam')) {
+      classification = 'complaint';
+      suppressionAction = 'auto_suppressed';
+    }
+    return { classification, suppressionAction };
+  });
+
+  app.post('/api/webhooks/fbl', async (request) => {
+    if (!config.webhookToken) fail('FBL webhook is not configured', 503);
+    if (!tokensEqual(request.headers['x-webhook-token'], config.webhookToken)) fail('Unauthorized', 401);
+    const body = request.body || {};
+    const { email, reason, headers } = body;
+    if (!email) fail('email required');
+    const address = String(email).toLowerCase();
+    const now = new Date().toISOString();
+    db.prepare('INSERT INTO bounces (email, kind, reason, classification, suppression_action, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(address, 'complaint', reason || 'FBL complaint', 'complaint', 'auto_suppressed', now);
+    const recipient = db.prepare('SELECT id, complaint_count FROM recipients WHERE email = ?').get(address);
+    if (recipient) {
+      const newComplaintCount = (recipient.complaint_count || 0) + 1;
+      db.prepare('UPDATE recipients SET complaint_count = ?, last_complaint_at = ? WHERE id = ?')
+        .run(newComplaintCount, now, recipient.id);
+      suppress(address, reason || 'FBL complaint', 'complaint');
+    }
+    emit('bounce', { email: address, reason: reason || 'FBL complaint', kind: 'complaint', classification: 'complaint', suppressionAction: 'auto_suppressed' });
+    return { ok: true };
+  });
+
+  app.post('/api/recipients/:id/retry-soft-bounce', async (request) => {
+    const recipientId = Number(request.params.id);
+    const body = request.body || {};
+    const { bounceCount } = body;
+    if (!bounceCount) fail('bounceCount required');
+    const backoffMinutes = Math.pow(2, Math.min(bounceCount, 5)); // 1, 2, 4, 8, 16, 32 max
+    const nextAttempt = new Date(Date.now() + backoffMinutes * 60 * 1000).toISOString();
+    return { nextAttempt, backoffMinutes };
   });
 
   // ── SMTP account pool ──
@@ -1171,9 +1506,48 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     if (!tokensEqual(request.headers['x-webhook-token'], config.webhookToken)) fail('Unauthorized', 401);
     const kind = request.body?.kind === 'complaint' ? 'complaint' : 'bounce';
     const reason = text(request.body?.reason, 'reason', 1000) || kind;
-    suppress(request.body?.email, reason, kind);
-    emit('bounce', { email: String(request.body?.email || '').toLowerCase(), reason, kind });
-    return { ok: true };
+    const address = String(request.body?.email || '').toLowerCase();
+    const now = new Date().toISOString();
+
+    // Classify bounce type
+    let classification = 'technical';
+    let suppressionAction = 'retained';
+    const reasonLower = reason.toLowerCase();
+    if (reasonLower.includes('5.1.1') || reasonLower.includes('user unknown') || reasonLower.includes('mailbox not found') || reasonLower.includes('no such user') || reasonLower.includes('invalid recipient')) {
+      classification = 'hard';
+      suppressionAction = 'auto_suppressed';
+    } else if (reasonLower.includes('mailbox full') || reasonLower.includes('quota exceeded') || reasonLower.includes('over quota')) {
+      classification = 'soft';
+      suppressionAction = 'retained';
+    } else if (reasonLower.includes('spam') || reasonLower.includes('blocked') || reasonLower.includes('rejected') || reasonLower.includes('policy')) {
+      classification = 'spam';
+      suppressionAction = 'flagged';
+    } else if (reasonLower.includes('abuse') || reasonLower.includes('complaint') || reasonLower.includes('fraud')) {
+      classification = 'complaint';
+      suppressionAction = 'auto_suppressed';
+    }
+
+    // Update bounce record with classification
+    const bounceResult = db.prepare('INSERT INTO bounces (email, kind, reason, classification, suppression_action, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(address, kind, reason, classification, suppressionAction, now);
+    const bounceId = bounceResult.lastInsertRowid;
+
+    // Update recipient bounce/complaint counts
+    const recipient = db.prepare('SELECT id, bounce_count, complaint_count FROM recipients WHERE email = ?').get(address);
+    if (recipient) {
+      const newBounceCount = (recipient.bounce_count || 0) + 1;
+      const newComplaintCount = kind === 'complaint' ? (recipient.complaint_count || 0) + 1 : (recipient.complaint_count || 0);
+      db.prepare('UPDATE recipients SET bounce_count = ?, last_bounce_at = ?, complaint_count = ?, last_complaint_at = ? WHERE id = ?')
+        .run(newBounceCount, now, newComplaintCount, kind === 'complaint' ? now : recipient.last_complaint_at || '', recipient.id);
+    }
+
+    // Auto-suppress hard bounces and complaints
+    if (suppressionAction === 'auto_suppressed') {
+      suppress(address, reason, kind);
+    }
+
+    emit('bounce', { email: address, reason, kind, classification, suppressionAction, bounceId });
+    return { ok: true, bounceId, classification, suppressionAction };
   });
 
   // 1x1 transparent GIF for open tracking
@@ -1186,10 +1560,23 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     if (address && tokensEqual(token, unsubscribeToken(address, config.unsubscribeSecret))) {
       try {
         db.prepare('INSERT INTO tracking_events (campaign_id, email, kind, created_at) VALUES (?, ?, ?, ?)').run(campaignId, address, 'open', new Date().toISOString());
+        db.prepare('INSERT INTO analytics_events (campaign_id, kind, occurred_at, metadata_json) VALUES (?, ?, ?, ?)').run(campaignId, 'open', new Date().toISOString(), JSON.stringify({ email: address }));
         const opens = db.prepare("SELECT COUNT(*) AS c FROM tracking_events WHERE kind = 'open' AND email = ? AND campaign_id IS ?").get(address, campaignId).c;
         if (opens === 1) {
           const camp = campaignId ? db.prepare('SELECT name FROM campaigns WHERE id = ?').get(campaignId) : null;
           emit('open', { campaignId, email: address, name: camp?.name });
+        }
+        const recipient = db.prepare('SELECT id FROM recipients WHERE email = ?').get(address);
+        if (recipient) {
+          const hour = new Date().getHours();
+          db.prepare('INSERT INTO engagement_heatmap (campaign_id, hour, opens, clicks, created_at) VALUES (?, ?, 1, 0, ?) ON CONFLICT(campaign_id, hour) DO UPDATE SET opens = opens + 1')
+            .run(campaignId, hour, new Date().toISOString());
+          const rec = db.prepare('SELECT engagement_score, engagement_events_json FROM recipients WHERE id = ?').get(recipient.id);
+          const events = JSON.parse(rec.engagement_events_json || '[]');
+          events.push({ kind: 'open', at: new Date().toISOString() });
+          const newScore = Math.min(100, (rec.engagement_score || 0) + 10);
+          db.prepare('UPDATE recipients SET engagement_score = ?, engagement_events_json = ?, last_engaged_at = ? WHERE id = ?')
+            .run(newScore, JSON.stringify(events), new Date().toISOString(), recipient.id);
         }
       } catch {}
     }
@@ -1204,8 +1591,21 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     if (address && tokensEqual(token, unsubscribeToken(address, config.unsubscribeSecret)) && /^https?:\/\//i.test(target)) {
       try {
         db.prepare('INSERT INTO tracking_events (campaign_id, email, kind, target, created_at) VALUES (?, ?, ?, ?, ?)').run(campaignId, address, 'click', target.slice(0, 2000), new Date().toISOString());
+        db.prepare('INSERT INTO analytics_events (campaign_id, kind, occurred_at, metadata_json) VALUES (?, ?, ?, ?)').run(campaignId, 'click', new Date().toISOString(), JSON.stringify({ email: address, target }));
         const camp = campaignId ? db.prepare('SELECT name FROM campaigns WHERE id = ?').get(campaignId) : null;
         emit('click', { campaignId, email: address, target, name: camp?.name });
+        const recipient = db.prepare('SELECT id FROM recipients WHERE email = ?').get(address);
+        if (recipient) {
+          const hour = new Date().getHours();
+          db.prepare('INSERT INTO engagement_heatmap (campaign_id, hour, opens, clicks, created_at) VALUES (?, ?, 0, 1, ?) ON CONFLICT(campaign_id, hour) DO UPDATE SET clicks = clicks + 1')
+            .run(campaignId, hour, new Date().toISOString());
+          const rec = db.prepare('SELECT engagement_score, engagement_events_json FROM recipients WHERE id = ?').get(recipient.id);
+          const events = JSON.parse(rec.engagement_events_json || '[]');
+          events.push({ kind: 'click', at: new Date().toISOString() });
+          const newScore = Math.min(100, (rec.engagement_score || 0) + 15);
+          db.prepare('UPDATE recipients SET engagement_score = ?, engagement_events_json = ?, last_engaged_at = ? WHERE id = ?')
+            .run(newScore, JSON.stringify(events), new Date().toISOString(), recipient.id);
+        }
       } catch {}
       return reply.redirect(target, 302);
     }

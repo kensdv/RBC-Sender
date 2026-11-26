@@ -95,8 +95,8 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
   }
 
   const ROW_SELECT = `
-    SELECT d.id AS delivery_id, d.attempts, c.id AS campaign_id, c.name, c.subject, c.preheader, c.html, c.text, c.attachments_json,
-      r.id AS recipient_id, r.email, r.first_name, r.last_name, r.company, r.custom_json
+    SELECT d.id AS delivery_id, d.attempts, c.id AS campaign_id, c.name, c.subject, c.preheader, c.html, c.text, c.attachments_json, c.send_time_optimization_enabled,
+      r.id AS recipient_id, r.email, r.first_name, r.last_name, r.company, r.custom_json, r.timezone_guessed
     FROM deliveries d
     JOIN campaigns c ON c.id = d.campaign_id
     JOIN recipients r ON r.id = d.recipient_id
@@ -114,6 +114,16 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
 
   async function sendOne(row, ctx) {
     const now = new Date().toISOString();
+    // Send Time Optimization: skip recipients outside their 9-11 AM local window
+    if (row.send_time_optimization_enabled && row.timezone_guessed) {
+      const recipientHour = new Date().toLocaleString('en-US', { timeZone: row.timezone_guessed, hour: 'numeric', hour12: false });
+      const hour = Number(recipientHour);
+      if (hour < 9 || hour >= 11) {
+        // Outside optimal window — requeue for next cycle
+        db.prepare("UPDATE deliveries SET next_attempt_at = ? WHERE id = ?").run(new Date(Date.now() + 3600000).toISOString(), row.delivery_id);
+        return;
+      }
+    }
     const claimed = db.prepare("UPDATE deliveries SET status = 'sending', attempts = attempts + 1 WHERE id = ? AND status = 'queued'").run(row.delivery_id);
     if (!claimed.changes) return;
     const flipped = db.prepare("UPDATE campaigns SET status = 'sending', updated_at = ? WHERE id = ? AND status IN ('queued', 'scheduled')").run(now, row.campaign_id);

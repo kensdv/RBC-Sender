@@ -1024,6 +1024,16 @@ export function createMailer({ db, config }) {
       const dkim = dkimFor(settings, config);
       const attachments = await buildAttachments({ campaign, message, settings, recipient });
 
+      // ── Send Time Optimization: delay until recipient's optimal window (9-11 AM local) ──
+      if (campaign.send_time_optimization_enabled && recipient.timezone_guessed) {
+        const recipientHour = new Date().toLocaleString('en-US', { timeZone: recipient.timezone_guessed, hour: 'numeric', hour12: false });
+        const hour = Number(recipientHour);
+        if (hour < 9 || hour >= 11) {
+          // Recipient outside 9-11 AM local time — skip this send cycle
+          return { skipped: true, reason: `Recipient local time ${hour}:00 is outside optimal window (9-11 AM)` };
+        }
+      }
+
       const buildHeaders = (fromEmail) => ({
         'List-Unsubscribe': `<${message.unsubscribeUrl}>`,
         'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',

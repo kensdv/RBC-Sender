@@ -795,5 +795,54 @@ code {
   gap: 6px;
 }
 
+/* ── ANALYTICS / HEATMAP / TEMPLATES ── */
+.heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  margin-top: 10px;
+}
+.heatmap-cell {
+  background: rgba(0, 255, 65, 0.1);
+  border: 1px solid rgba(0, 255, 65, 0.2);
+  border-radius: 4px;
+  padding: 8px;
+  text-align: center;
+  transition: opacity 0.3s;
+}
+.heatmap-hour {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--green);
+  margin-bottom: 4px;
+}
+.heatmap-value {
+  font-size: 9px;
+  color: var(--txt-dim);
+}
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(0, 255, 65, 0.1);
+}
+.filter-row .dim {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.template-row {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+  align-items: center;
+}
+.template-row .w-select {
+  flex: 1;
+  max-width: 300px;
+}
+
 /* ── OVERFLOW FIX ── */
 .overflow-hidden-x { overflow-x: hidden; }
