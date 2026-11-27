@@ -2031,7 +2031,7 @@ export default function App() {
               {tab === 'recipients' && (
                 <div className="two-col">
                   <div className="pane">
-                    <div className="pane-head"><span>IMPORT MAIL LIST</span></div>
+                    <div className="pane-head"><span>01 · IMPORT MAIL LIST</span></div>
                     <p className="dim-txt">Any format works — CSV with <code>email</code> column, or a plain list (one per line, comma/colon separated). Optional columns: <code>first_name</code>, <code>last_name</code>, <code>company</code>.</p>
                     <input type="file" accept=".csv,text/csv" className="w-input" onChange={(e) => run(async () => { const f = e.target.files[0]; if (f) setCsv(await f.text()); })} />
                     <textarea className="w-textarea code-ta" rows={12} value={csv} onChange={(e) => setCsv(e.target.value)} />
@@ -2053,7 +2053,7 @@ export default function App() {
                   </div>
                   <div className="pane">
                     <div className="pane-head">
-                      <span>AUDIENCE — {state.recipientTotal || 0} RECORDS</span>
+                      <span>02 · AUDIENCE — {state.recipientTotal || 0} RECORDS</span>
                       <div className="btn-row">
                         <button className="btn-xs" disabled={busy || !state.recipientTotal} onClick={() => run(async () => {
                           const r = await api(token, '/api/recipients/verify', { method: 'POST', body: { all: true } });
@@ -2373,198 +2373,20 @@ export default function App() {
               {/* ══ SMTP ══ */}
               {tab === 'smtp' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                {/* ══ SECTION: OUTGOING CONNECTION ══ */}
-                <div className="email-section">OUTGOING CONNECTION</div>
-                <div className="pane narrow-pane">
-                  <div className="pane-head"><span>SMTP CONFIGURATION</span></div>
-                  <p className="dim-txt">Used when Send Mode is <strong>SMTP</strong>. Password is encrypted. Leave blank to keep existing.</p>
-                  <div style={{marginBottom:14}}>
-                    <label className="field-label">PROVIDER PRESET <span className="dim">(auto-fills host/port — then enter your credentials)</span></label>
-                    <select className="w-select" value="" onChange={(e) => {
-                      const p = SMTP_PRESETS[e.target.value];
-                      if (p) setSmtp({ ...smtp, host: p.host, port: p.port, secure: p.secure });
-                      e.target.value = '';
-                    }}>
-                      <option value="">— select provider —</option>
-                      {Object.entries(SMTP_PRESETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="form-grid">
-                    <div><label className="field-label">HOST</label><input className="w-input" value={smtp.host} onChange={(e) => setSmtp({ ...smtp, host: e.target.value })} /></div>
-                    <div><label className="field-label">PORT</label><input className="w-input" type="number" value={smtp.port} onChange={(e) => setSmtp({ ...smtp, port: Number(e.target.value) })} /></div>
-                    <div><label className="field-label">USERNAME</label><input className="w-input" value={smtp.username} onChange={(e) => { const u = e.target.value; setSmtp((f) => ({ ...f, username: u, fromEmail: (!f.fromEmail || f.fromEmail === f.username) ? u : f.fromEmail })); }} /></div>
-                    <div><label className="field-label">PASSWORD</label><input className="w-input" type="password" value={smtp.password} onChange={(e) => setSmtp({ ...smtp, password: e.target.value })} placeholder={smtp.configured ? '(unchanged)' : ''} /></div>
-                    <div><label className="field-label">FROM NAME</label><input className="w-input" value={smtp.fromName} onChange={(e) => setSmtp({ ...smtp, fromName: e.target.value })} /></div>
-                    <div><label className="field-label">FROM EMAIL</label><input className="w-input" type="email" value={smtp.fromEmail} onChange={(e) => setSmtp({ ...smtp, fromEmail: e.target.value })} /></div>
-                    <div><label className="field-label">REPLY-TO</label><input className="w-input" type="email" value={smtp.replyTo} onChange={(e) => setSmtp({ ...smtp, replyTo: e.target.value })} /></div>
-                    <div><label className="field-label">RATE / MIN</label><input className="w-input" type="number" min="1" max="600" value={smtp.ratePerMinute} onChange={(e) => setSmtp({ ...smtp, ratePerMinute: Number(e.target.value) })} /></div>
-                  </div>
-                  <label className="check-row">
-                    <input type="checkbox" checked={smtp.secure} onChange={(e) => setSmtp({ ...smtp, secure: e.target.checked })} />
-                    <span>Implicit TLS — auto-set by port (465=TLS, 587=STARTTLS)</span>
-                  </label>
-                  <div className="btn-row" style={{ alignItems: 'center' }}>
-                    <button className="btn-primary" disabled={busy} onClick={() => run(async () => { await api(token, '/api/smtp', { method: 'PUT', body: smtp }); showNotice('SMTP saved.'); await refresh(); })}>[ SAVE SMTP ]</button>
-                    <button className="btn-sm" disabled={busy || !smtp.configured} onClick={() => run(async () => { await api(token, '/api/smtp/verify', { method: 'POST' }); showNotice('Connection verified.'); })}>[ TEST ]</button>
-                    <input className="w-input" style={{ maxWidth: 220 }} type="email" placeholder="test send to…" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
-                    <button className="btn-sm" disabled={busy || !testTo.includes('@')} onClick={() => run(async () => { const r = await api(token, '/api/test-send', { method: 'POST', body: { to: testTo, subject: draft.subject, html: draft.html, text: draft.text } }); showNotice(`Test accepted via ${String(r.mode || sendMode).toUpperCase()} (${r.messageId || r.response || 'ok'}).`); setTestTo(''); })}>[ SEND TEST — {sendMode.toUpperCase()} ]</button>
-                  </div>
-                  <p className="dim-txt" style={{ marginTop: 6 }}>
-                    SEND TEST uses the active engine (<strong>{sendMode.toUpperCase()}</strong>). TEST only checks the SMTP server above.
-                  </p>
+                <div className="smtp-jump" aria-label="SMTP sections">
+                  {[
+                    ['smtp-accounts', '01 ACCOUNTS', 'who sends'],
+                    ['smtp-connection', '02 CONNECTION', 'single mailbox fallback'],
+                    ['smtp-rules', '03 RULES', 'hours and caps'],
+                    ['smtp-inbox', '04 INBOX', 'reading replies'],
+                    ['smtp-reference', '05 REFERENCE', 'guides'],
+                  ].map(([id, label, hint]) => (
+                    <button key={id} type="button" className="smtp-jump-btn" title={hint}
+                      onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{label}</button>
+                  ))}
                 </div>
-
-                {/* QUICK GUIDES */}
-                <div className="pane">
-                  <div className="pane-head"><span>QUICK GUIDES</span></div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {SMTP_GUIDES.map((g) => (
-                      <details key={g.title} style={{ border: '1px solid rgba(255,255,255,.12)', borderRadius: 8, padding: '10px 14px', background: 'rgba(255,255,255,.03)' }}>
-                        <summary style={{ cursor: 'pointer', fontWeight: 600 }}>{g.title}</summary>
-                        <p className="dim-txt" style={{ margin: '8px 0' }}>{g.body}</p>
-                        <button className="btn-sm" onClick={() => setSmtp({ ...smtp, host: g.apply.host || smtp.host, port: g.apply.port, secure: g.apply.secure, username: g.apply.relay ? '' : smtp.username, password: g.apply.relay ? '' : smtp.password })}>[ USE THESE SETTINGS ]</button>
-                      </details>
-                    ))}
-                  </div>
-                </div>
-
-                {/* POSTFIX RELAY GUIDE */}
-                <div className="pane">
-                  <div className="pane-head"><span>SELF-HOSTED RELAY — POSTFIX ON LINUX</span></div>
-                  <p className="dim-txt">Run postfix on a linux box and point Send Mode → RELAY at it. Below is the dnf (RHEL/Fedora/Rocky/Alma) setup. Replace <code>YOUR.SENDER.IP</code> with the IP this sender connects from.</p>
-                  <details style={{ border: '1px solid rgba(255,255,255,.12)', borderRadius: 8, padding: '10px 14px', background: 'rgba(255,255,255,.03)', marginBottom: 8 }}>
-                    <summary style={{ cursor: 'pointer', fontWeight: 600 }}>1 · Install &amp; basic config</summary>
-                    <pre className="dim-txt" style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.6, margin: '8px 0' }}>{`sudo dnf install -y postfix
-sudo systemctl enable --now postfix
-# during first install pick "Internet Site", mail name = your.domain.com
-
-# /etc/postfix/main.cf — make sure these are set:
-#   myhostname = mail.your.domain.com
-#   mydestination = $myhostname, localhost.$mydomain, localhost
-#   mynetworks = 127.0.0.0/8 YOUR.SENDER.IP/32
-#   inet_interfaces = all
-#   relayhost =`}</pre>
-                  </details>
-                  <details style={{ border: '1px solid rgba(255,255,255,.12)', borderRadius: 8, padding: '10px 14px', background: 'rgba(255,255,255,.03)', marginBottom: 8 }}>
-                    <summary style={{ cursor: 'pointer', fontWeight: 600 }}>2 · Forward through a smarthost (gmail/app password etc.)</summary>
-                    <pre className="dim-txt" style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.6, margin: '8px 0' }}>{`# /etc/postfix/main.cf
-relayhost = [smtp.gmail.com]:587
-smtp_sasl_auth_enable = yes
-smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
-smtp_sasl_security_options = noanonymous
-smtp_tls_security_level = encrypt
-
-# /etc/postfix/sasl_passwd
-[smtp.gmail.com]:587 you@gmail.com:your-16-char-app-password
-
-sudo postmap /etc/postfix/sasl_passwd
-sudo chmod 600 /etc/postfix/sasl_passwd
-sudo systemctl restart postfix`}</pre>
-                  </details>
-                  <details style={{ border: '1px solid rgba(255,255,255,.12)', borderRadius: 8, padding: '10px 14px', background: 'rgba(255,255,255,.03)', marginBottom: 8 }}>
-                    <summary style={{ cursor: 'pointer', fontWeight: 600 }}>3 · Test it</summary>
-                    <pre className="dim-txt" style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.6, margin: '8px 0' }}>{`# from THIS machine (the sender):
-swaks --to you@example.com --from you@your.domain.com --server POSTFIX_IP
-
-# or watch postfix log on the linux box:
-sudo tail -f /var/log/maillog`}</pre>
-                  </details>
-                  <p className="dim-txt" style={{ marginTop: 8 }}><strong>Notes:</strong> GCP/AWS block outbound port 25 by default — request removal or relay through port 587 to your provider instead. SPF/DKIM/DMARC dns records for your.domain.com still required or mail lands in spam.</p>
-                </div>
-
-                {/* SMTP PROVIDER GUIDE */}
-                <div className="pane">
-                  <div className="pane-head"><span>HOW TO GET SMTP CREDENTIALS</span></div>
-                  <div className="smtp-guide">
-                    <div className="guide-section">
-                      <div className="guide-title">FREE / PERSONAL PROVIDERS</div>
-                      <table className="guide-table">
-                        <thead><tr><th>PROVIDER</th><th>HOST</th><th>PORT</th><th>SECURE</th><th>USERNAME</th><th>PASSWORD</th></tr></thead>
-                        <tbody>
-                          <tr>
-                            <td><strong>Gmail</strong></td><td>smtp.gmail.com</td><td>587</td><td>STARTTLS</td>
-                            <td>your@gmail.com</td>
-                            <td>App Password (not your login password)</td>
-                          </tr>
-                          <tr>
-                            <td><strong>Outlook / Hotmail</strong></td><td>smtp-mail.outlook.com</td><td>587</td><td>STARTTLS</td>
-                            <td>your@outlook.com</td>
-                            <td>Account password or app password</td>
-                          </tr>
-                          <tr>
-                            <td><strong>Yahoo</strong></td><td>smtp.mail.yahoo.com</td><td>465</td><td>SSL</td>
-                            <td>your@yahoo.com</td>
-                            <td>App password (Account → Security → App passwords)</td>
-                          </tr>
-                          <tr>
-                            <td><strong>iCloud</strong></td><td>smtp.mail.me.com</td><td>587</td><td>STARTTLS</td>
-                            <td>your@icloud.com</td>
-                            <td>App-specific password (appleid.apple.com)</td>
-                          </tr>
-                          <tr>
-                            <td><strong>Zoho Mail</strong></td><td>smtp.zoho.com</td><td>587</td><td>STARTTLS</td>
-                            <td>your@zoho.com</td>
-                            <td>Account password</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <div className="guide-section">
-                      <div className="guide-title">TRANSACTIONAL / BULK PROVIDERS</div>
-                      <table className="guide-table">
-                        <thead><tr><th>PROVIDER</th><th>HOST</th><th>PORT</th><th>SECURE</th><th>USERNAME</th><th>PASSWORD</th></tr></thead>
-                        <tbody>
-                          <tr>
-                            <td><strong>SendGrid</strong></td><td>smtp.sendgrid.net</td><td>587</td><td>STARTTLS</td>
-                            <td>apikey</td>
-                            <td>API key (starts with SG.)</td>
-                          </tr>
-                          <tr>
-                            <td><strong>Mailgun</strong></td><td>smtp.mailgun.org</td><td>587</td><td>STARTTLS</td>
-                            <td>postmaster@yourdomain.com</td>
-                            <td>SMTP password from Mailgun dashboard</td>
-                          </tr>
-                          <tr>
-                            <td><strong>Brevo</strong></td><td>smtp-relay.brevo.com</td><td>587</td><td>STARTTLS</td>
-                            <td>your@brevo.com</td>
-                            <td>SMTP key (Settings → SMTP & API → SMTP tab)</td>
-                          </tr>
-                          <tr>
-                            <td><strong>AWS SES</strong></td><td>email-smtp.us-east-1.amazonaws.com</td><td>587</td><td>STARTTLS</td>
-                            <td>SES SMTP username</td>
-                            <td>SES SMTP password (not IAM secret)</td>
-                          </tr>
-                          <tr>
-                            <td><strong>Postmark</strong></td><td>smtp.postmarkapp.com</td><td>587</td><td>STARTTLS</td>
-                            <td>your Postmark server token</td>
-                            <td>Server token (same as username)</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <div className="guide-section">
-                      <div className="guide-title">GMAIL APP PASSWORD — STEP BY STEP</div>
-                      <ol className="guide-steps">
-                        <li>Go to <strong>myaccount.google.com</strong> → Security</li>
-                        <li>Enable <strong>2-Step Verification</strong> (required)</li>
-                        <li>Go to <strong>App passwords</strong> (search "app passwords")</li>
-                        <li>Select <strong>Mail</strong> → <strong>Other</strong> → name it "Rubicon Email Suite"</li>
-                        <li>Copy the 16-character password → paste into <strong>Password</strong> field above</li>
-                        <li>Set Host: <code>smtp.gmail.com</code>, Port: <code>587</code>, Secure: <strong>OFF</strong> (STARTTLS)</li>
-                      </ol>
-                    </div>
-
-                    <div className="guide-section">
-                      <div className="guide-title">NO SMTP? USE DIRECT / RELAY MODE</div>
-                      <p className="dim-txt">Go to <strong>SETTINGS</strong> tab → select <strong>DIRECT MX</strong>, <strong>RELAY/PROXY</strong>, or <strong>SOCKS5</strong> send mode. No SMTP credentials needed — mail is delivered directly to the recipient's mail server on port 25 through your proxy.</p>
-                    </div>
-                  </div>
-                </div>
-
                 {/* ══ SECTION: SENDING ACCOUNTS ══ */}
-                <div className="email-section">SENDING ACCOUNTS</div>
+                <div className="email-section" id="smtp-accounts">01 · SENDING ACCOUNTS — who sends</div>
 
                 {/* SMTP ACCOUNT POOL */}
                 <div className="pane">
@@ -2775,8 +2597,50 @@ sudo tail -f /var/log/maillog`}</pre>
                   </div>
                 </div>
 
-                {/* ══ SECTION: SENDING RULES ══ */}
-                <div className="email-section">SENDING RULES</div>
+                {/* ══ SECTION: OUTGOING CONNECTION ══ */}
+                <div className="email-section" id="smtp-connection">02 · OUTGOING CONNECTION — single mailbox fallback</div>
+
+<div className="pane narrow-pane">
+                  <div className="pane-head"><span>LEGACY SMTP FALLBACK</span></div>
+                  <p className="dim-txt">Only used when Send Mode is <strong>SMTP</strong> and the account pool above is empty. Password is encrypted. Leave blank to keep existing.</p>
+                  <div style={{marginBottom:14}}>
+                    <label className="field-label">PROVIDER PRESET <span className="dim">(auto-fills host/port — then enter your credentials)</span></label>
+                    <select className="w-select" value="" onChange={(e) => {
+                      const p = SMTP_PRESETS[e.target.value];
+                      if (p) setSmtp({ ...smtp, host: p.host, port: p.port, secure: p.secure });
+                      e.target.value = '';
+                    }}>
+                      <option value="">— select provider —</option>
+                      {Object.entries(SMTP_PRESETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                    </select>
+                  </div>
+                  <div className="form-grid">
+                    <div><label className="field-label">HOST</label><input className="w-input" value={smtp.host} onChange={(e) => setSmtp({ ...smtp, host: e.target.value })} /></div>
+                    <div><label className="field-label">PORT</label><input className="w-input" type="number" value={smtp.port} onChange={(e) => setSmtp({ ...smtp, port: Number(e.target.value) })} /></div>
+                    <div><label className="field-label">USERNAME</label><input className="w-input" value={smtp.username} onChange={(e) => { const u = e.target.value; setSmtp((f) => ({ ...f, username: u, fromEmail: (!f.fromEmail || f.fromEmail === f.username) ? u : f.fromEmail })); }} /></div>
+                    <div><label className="field-label">PASSWORD</label><input className="w-input" type="password" value={smtp.password} onChange={(e) => setSmtp({ ...smtp, password: e.target.value })} placeholder={smtp.configured ? '(unchanged)' : ''} /></div>
+                    <div><label className="field-label">FROM NAME</label><input className="w-input" value={smtp.fromName} onChange={(e) => setSmtp({ ...smtp, fromName: e.target.value })} /></div>
+                    <div><label className="field-label">FROM EMAIL</label><input className="w-input" type="email" value={smtp.fromEmail} onChange={(e) => setSmtp({ ...smtp, fromEmail: e.target.value })} /></div>
+                    <div><label className="field-label">REPLY-TO</label><input className="w-input" type="email" value={smtp.replyTo} onChange={(e) => setSmtp({ ...smtp, replyTo: e.target.value })} /></div>
+                    <div><label className="field-label">RATE / MIN</label><input className="w-input" type="number" min="1" max="600" value={smtp.ratePerMinute} onChange={(e) => setSmtp({ ...smtp, ratePerMinute: Number(e.target.value) })} /></div>
+                  </div>
+                  <label className="check-row">
+                    <input type="checkbox" checked={smtp.secure} onChange={(e) => setSmtp({ ...smtp, secure: e.target.checked })} />
+                    <span>Implicit TLS — auto-set by port (465=TLS, 587=STARTTLS)</span>
+                  </label>
+                  <div className="btn-row" style={{ alignItems: 'center' }}>
+                    <button className="btn-primary" disabled={busy} onClick={() => run(async () => { await api(token, '/api/smtp', { method: 'PUT', body: smtp }); showNotice('SMTP saved.'); await refresh(); })}>[ SAVE SMTP ]</button>
+                    <button className="btn-sm" disabled={busy || !smtp.configured} onClick={() => run(async () => { await api(token, '/api/smtp/verify', { method: 'POST' }); showNotice('Connection verified.'); })}>[ TEST ]</button>
+                    <input className="w-input" style={{ maxWidth: 220 }} type="email" placeholder="test send to…" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
+                    <button className="btn-sm" disabled={busy || !testTo.includes('@')} onClick={() => run(async () => { const r = await api(token, '/api/test-send', { method: 'POST', body: { to: testTo, subject: draft.subject, html: draft.html, text: draft.text } }); showNotice(`Test accepted via ${String(r.mode || sendMode).toUpperCase()} (${r.messageId || r.response || 'ok'}).`); setTestTo(''); })}>[ SEND TEST — {sendMode.toUpperCase()} ]</button>
+                  </div>
+                  <p className="dim-txt" style={{ marginTop: 6 }}>
+                    SEND TEST uses the active engine (<strong>{sendMode.toUpperCase()}</strong>). TEST only checks the SMTP server above.
+                  </p>
+                </div>
+
+                                {/* ══ SECTION: SENDING RULES ══ */}
+                <div className="email-section" id="smtp-rules">03 · SENDING RULES — when and how fast</div>
 
                 {/* SENDING HOURS */}
                 <div className="pane">
@@ -2847,7 +2711,7 @@ sudo tail -f /var/log/maillog`}</pre>
                 </div>
 
                 {/* ══ SECTION: INBOX ══ */}
-                <div className="email-section">INBOX</div>
+                <div className="email-section" id="smtp-inbox">04 · INBOX — reading replies</div>
 
                 {/* INBOX READING */}
                 <div className="pane">
@@ -2860,6 +2724,159 @@ sudo tail -f /var/log/maillog`}</pre>
                   </ul>
                   <p className="dim-txt">Reply/bounce ingestion is not wired into the queue yet — replies currently go to the Reply-To address.</p>
                 </div>
+                {/* ══ SECTION: REFERENCE ══ */}
+                <div className="email-section" id="smtp-reference">05 · REFERENCE — guides</div>
+
+{/* QUICK GUIDES */}
+                <div className="pane">
+                  <div className="pane-head"><span>QUICK GUIDES</span></div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {SMTP_GUIDES.map((g) => (
+                      <details key={g.title} style={{ border: '1px solid rgba(255,255,255,.12)', borderRadius: 8, padding: '10px 14px', background: 'rgba(255,255,255,.03)' }}>
+                        <summary style={{ cursor: 'pointer', fontWeight: 600 }}>{g.title}</summary>
+                        <p className="dim-txt" style={{ margin: '8px 0' }}>{g.body}</p>
+                        <button className="btn-sm" onClick={() => setSmtp({ ...smtp, host: g.apply.host || smtp.host, port: g.apply.port, secure: g.apply.secure, username: g.apply.relay ? '' : smtp.username, password: g.apply.relay ? '' : smtp.password })}>[ USE THESE SETTINGS ]</button>
+                      </details>
+                    ))}
+                  </div>
+                </div>
+
+                {/* POSTFIX RELAY GUIDE */}
+                <div className="pane">
+                  <div className="pane-head"><span>SELF-HOSTED RELAY — POSTFIX ON LINUX</span></div>
+                  <p className="dim-txt">Run postfix on a linux box and point Send Mode → RELAY at it. Below is the dnf (RHEL/Fedora/Rocky/Alma) setup. Replace <code>YOUR.SENDER.IP</code> with the IP this sender connects from.</p>
+                  <details style={{ border: '1px solid rgba(255,255,255,.12)', borderRadius: 8, padding: '10px 14px', background: 'rgba(255,255,255,.03)', marginBottom: 8 }}>
+                    <summary style={{ cursor: 'pointer', fontWeight: 600 }}>1 · Install &amp; basic config</summary>
+                    <pre className="dim-txt" style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.6, margin: '8px 0' }}>{`sudo dnf install -y postfix
+sudo systemctl enable --now postfix
+# during first install pick "Internet Site", mail name = your.domain.com
+
+# /etc/postfix/main.cf — make sure these are set:
+#   myhostname = mail.your.domain.com
+#   mydestination = $myhostname, localhost.$mydomain, localhost
+#   mynetworks = 127.0.0.0/8 YOUR.SENDER.IP/32
+#   inet_interfaces = all
+#   relayhost =`}</pre>
+                  </details>
+                  <details style={{ border: '1px solid rgba(255,255,255,.12)', borderRadius: 8, padding: '10px 14px', background: 'rgba(255,255,255,.03)', marginBottom: 8 }}>
+                    <summary style={{ cursor: 'pointer', fontWeight: 600 }}>2 · Forward through a smarthost (gmail/app password etc.)</summary>
+                    <pre className="dim-txt" style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.6, margin: '8px 0' }}>{`# /etc/postfix/main.cf
+relayhost = [smtp.gmail.com]:587
+smtp_sasl_auth_enable = yes
+smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+smtp_sasl_security_options = noanonymous
+smtp_tls_security_level = encrypt
+
+# /etc/postfix/sasl_passwd
+[smtp.gmail.com]:587 you@gmail.com:your-16-char-app-password
+
+sudo postmap /etc/postfix/sasl_passwd
+sudo chmod 600 /etc/postfix/sasl_passwd
+sudo systemctl restart postfix`}</pre>
+                  </details>
+                  <details style={{ border: '1px solid rgba(255,255,255,.12)', borderRadius: 8, padding: '10px 14px', background: 'rgba(255,255,255,.03)', marginBottom: 8 }}>
+                    <summary style={{ cursor: 'pointer', fontWeight: 600 }}>3 · Test it</summary>
+                    <pre className="dim-txt" style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.6, margin: '8px 0' }}>{`# from THIS machine (the sender):
+swaks --to you@example.com --from you@your.domain.com --server POSTFIX_IP
+
+# or watch postfix log on the linux box:
+sudo tail -f /var/log/maillog`}</pre>
+                  </details>
+                  <p className="dim-txt" style={{ marginTop: 8 }}><strong>Notes:</strong> GCP/AWS block outbound port 25 by default — request removal or relay through port 587 to your provider instead. SPF/DKIM/DMARC dns records for your.domain.com still required or mail lands in spam.</p>
+                </div>
+
+                {/* SMTP PROVIDER GUIDE */}
+                <div className="pane">
+                  <div className="pane-head"><span>HOW TO GET SMTP CREDENTIALS</span></div>
+                  <div className="smtp-guide">
+                    <div className="guide-section">
+                      <div className="guide-title">FREE / PERSONAL PROVIDERS</div>
+                      <table className="guide-table">
+                        <thead><tr><th>PROVIDER</th><th>HOST</th><th>PORT</th><th>SECURE</th><th>USERNAME</th><th>PASSWORD</th></tr></thead>
+                        <tbody>
+                          <tr>
+                            <td><strong>Gmail</strong></td><td>smtp.gmail.com</td><td>587</td><td>STARTTLS</td>
+                            <td>your@gmail.com</td>
+                            <td>App Password (not your login password)</td>
+                          </tr>
+                          <tr>
+                            <td><strong>Outlook / Hotmail</strong></td><td>smtp-mail.outlook.com</td><td>587</td><td>STARTTLS</td>
+                            <td>your@outlook.com</td>
+                            <td>Account password or app password</td>
+                          </tr>
+                          <tr>
+                            <td><strong>Yahoo</strong></td><td>smtp.mail.yahoo.com</td><td>465</td><td>SSL</td>
+                            <td>your@yahoo.com</td>
+                            <td>App password (Account → Security → App passwords)</td>
+                          </tr>
+                          <tr>
+                            <td><strong>iCloud</strong></td><td>smtp.mail.me.com</td><td>587</td><td>STARTTLS</td>
+                            <td>your@icloud.com</td>
+                            <td>App-specific password (appleid.apple.com)</td>
+                          </tr>
+                          <tr>
+                            <td><strong>Zoho Mail</strong></td><td>smtp.zoho.com</td><td>587</td><td>STARTTLS</td>
+                            <td>your@zoho.com</td>
+                            <td>Account password</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="guide-section">
+                      <div className="guide-title">TRANSACTIONAL / BULK PROVIDERS</div>
+                      <table className="guide-table">
+                        <thead><tr><th>PROVIDER</th><th>HOST</th><th>PORT</th><th>SECURE</th><th>USERNAME</th><th>PASSWORD</th></tr></thead>
+                        <tbody>
+                          <tr>
+                            <td><strong>SendGrid</strong></td><td>smtp.sendgrid.net</td><td>587</td><td>STARTTLS</td>
+                            <td>apikey</td>
+                            <td>API key (starts with SG.)</td>
+                          </tr>
+                          <tr>
+                            <td><strong>Mailgun</strong></td><td>smtp.mailgun.org</td><td>587</td><td>STARTTLS</td>
+                            <td>postmaster@yourdomain.com</td>
+                            <td>SMTP password from Mailgun dashboard</td>
+                          </tr>
+                          <tr>
+                            <td><strong>Brevo</strong></td><td>smtp-relay.brevo.com</td><td>587</td><td>STARTTLS</td>
+                            <td>your@brevo.com</td>
+                            <td>SMTP key (Settings → SMTP & API → SMTP tab)</td>
+                          </tr>
+                          <tr>
+                            <td><strong>AWS SES</strong></td><td>email-smtp.us-east-1.amazonaws.com</td><td>587</td><td>STARTTLS</td>
+                            <td>SES SMTP username</td>
+                            <td>SES SMTP password (not IAM secret)</td>
+                          </tr>
+                          <tr>
+                            <td><strong>Postmark</strong></td><td>smtp.postmarkapp.com</td><td>587</td><td>STARTTLS</td>
+                            <td>your Postmark server token</td>
+                            <td>Server token (same as username)</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="guide-section">
+                      <div className="guide-title">GMAIL APP PASSWORD — STEP BY STEP</div>
+                      <ol className="guide-steps">
+                        <li>Go to <strong>myaccount.google.com</strong> → Security</li>
+                        <li>Enable <strong>2-Step Verification</strong> (required)</li>
+                        <li>Go to <strong>App passwords</strong> (search "app passwords")</li>
+                        <li>Select <strong>Mail</strong> → <strong>Other</strong> → name it "Rubicon Email Suite"</li>
+                        <li>Copy the 16-character password → paste into <strong>Password</strong> field above</li>
+                        <li>Set Host: <code>smtp.gmail.com</code>, Port: <code>587</code>, Secure: <strong>OFF</strong> (STARTTLS)</li>
+                      </ol>
+                    </div>
+
+                    <div className="guide-section">
+                      <div className="guide-title">NO SMTP? USE DIRECT / RELAY MODE</div>
+                      <p className="dim-txt">Go to <strong>SETTINGS</strong> tab → select <strong>DIRECT MX</strong>, <strong>RELAY/PROXY</strong>, or <strong>SOCKS5</strong> send mode. No SMTP credentials needed — mail is delivered directly to the recipient's mail server on port 25 through your proxy.</p>
+                    </div>
+                  </div>
+                </div>
+
+
                 </div>
               )}
 
@@ -2870,7 +2887,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                   {/* Send Mode */}
                   <div className="cfg-block">
-                    <div className="cfg-block-title">[ SEND TYPE ]</div>
+                    <div className="cfg-block-title">[ 01 · SEND TYPE ]</div>
                     <div className="mode-grid">
                       {[
                         ['smtp',   'SMTP AUTH',    'Authenticated SMTP provider'],
@@ -3129,26 +3146,9 @@ sudo tail -f /var/log/maillog`}</pre>
                     </div>
                   )}
 
-                  {/* Rotation */}
-                  <div className="cfg-block">
-                    <div className="cfg-block-title">[ ROTATION ]</div>
-                    <label className="field-label">SUBJECT VARIANTS <span className="dim">(one per line — picked randomly per send)</span></label>
-                    <textarea className="w-textarea code-ta" rows={5}
-                      value={(settings.subjectsList || []).join('\n')}
-                      onChange={(e) => updateSettings('subjectsList', e.target.value.split('\n').map(s => s.trim()).filter(Boolean))}
-                      placeholder={'Action required on your ++rbc_domain1++ account\nImportant: ++rbc_domain1++ security alert'} />
-                    <label className="field-label">FROM NAME VARIANTS <span className="dim">(one per line)</span></label>
-                    <textarea className="w-textarea code-ta" rows={5}
-                      value={(settings.fromNames || []).join('\n')}
-                      onChange={(e) => updateSettings('fromNames', e.target.value.split('\n').map(s => s.trim()).filter(Boolean))}
-                      placeholder={'++rbc_domain1++ Support\n++rbc_domain1++ Security Team'} />
-                    <label className="field-label">REDIRECT URL / LINK POOL <span className="dim">(one per line — random per send · used by ++rbc_url++ / ++rbc_link++ / ++rbc_short++)</span></label>
-                    <textarea className="w-textarea code-ta" rows={3} value={settings.redirectUrl} onChange={(e) => updateSettings('redirectUrl', e.target.value)} placeholder={'https://your-link.com/r?e=++rbc_email++\nhttps://backup-link.com/l?e=++rbc_email++'} />
-                  </div>
-
                   {/* SENDER IDENTITY / SPOOFING */}
                   <div className="cfg-block">
-                    <div className="cfg-block-title">[ SENDER IDENTITY ]</div>
+                    <div className="cfg-block-title">[ 02 · SENDER IDENTITY ]</div>
                     <p className="dim-txt">Send as <strong>Company Name &lt;notifications@yourdomain.com&gt;</strong>. Overrides the from-address for every mode. Placeholders work in the display name.</p>
                     <div className="form-grid">
                       <div>
@@ -3193,9 +3193,26 @@ sudo tail -f /var/log/maillog`}</pre>
                     </div>
                   </div>
 
+                  {/* Rotation */}
+                  <div className="cfg-block">
+                    <div className="cfg-block-title">[ 03 · ROTATION ]</div>
+                    <label className="field-label">SUBJECT VARIANTS <span className="dim">(one per line — picked randomly per send)</span></label>
+                    <textarea className="w-textarea code-ta" rows={5}
+                      value={(settings.subjectsList || []).join('\n')}
+                      onChange={(e) => updateSettings('subjectsList', e.target.value.split('\n').map(s => s.trim()).filter(Boolean))}
+                      placeholder={'Action required on your ++rbc_domain1++ account\nImportant: ++rbc_domain1++ security alert'} />
+                    <label className="field-label">FROM NAME VARIANTS <span className="dim">(one per line)</span></label>
+                    <textarea className="w-textarea code-ta" rows={5}
+                      value={(settings.fromNames || []).join('\n')}
+                      onChange={(e) => updateSettings('fromNames', e.target.value.split('\n').map(s => s.trim()).filter(Boolean))}
+                      placeholder={'++rbc_domain1++ Support\n++rbc_domain1++ Security Team'} />
+                    <label className="field-label">REDIRECT URL / LINK POOL <span className="dim">(one per line — random per send · used by ++rbc_url++ / ++rbc_link++ / ++rbc_short++)</span></label>
+                    <textarea className="w-textarea code-ta" rows={3} value={settings.redirectUrl} onChange={(e) => updateSettings('redirectUrl', e.target.value)} placeholder={'https://your-link.com/r?e=++rbc_email++\nhttps://backup-link.com/l?e=++rbc_email++'} />
+                  </div>
+
                   {/* DKIM SIGNING */}
                   <div className="cfg-block">
-                    <div className="cfg-block-title">[ DKIM SIGNING ]</div>
+                    <div className="cfg-block-title">[ 04 · DKIM SIGNING ]</div>
                     <p className="dim-txt">Sign outgoing mail with a DKIM key so receivers see a valid signature. Key is stored encrypted. Optional on GRAPH API, GMAIL API and HTTP API — those providers sign with your domain's DKIM. Required for DIRECT MX and plain RELAY.</p>
                     <div className="toggle-row" onClick={() => {
                       if (settings.dkimEnabled) { updateSettings('dkimEnabled', false); return; }
@@ -3249,9 +3266,77 @@ sudo tail -f /var/log/maillog`}</pre>
                     )}
                   </div>
 
+                  {/* Email options */}
+                  <div className="cfg-block">
+                    <div className="cfg-block-title">[ 05 · EMAIL OPTIONS ]</div>
+                    <div className="form-grid">
+                      <div>
+                        <label className="field-label">ENCODING</label>
+                        <select className="w-select" value={settings.encoding} onChange={(e) => updateSettings('encoding', e.target.value)}>
+                          <option value="base64">base64</option>
+                          <option value="8bit">8bit</option>
+                          <option value="quoted-printable">quoted-printable</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="field-label">PRIORITY</label>
+                        <select className="w-select" value={settings.priority} onChange={(e) => updateSettings('priority', Number(e.target.value))}>
+                          <option value={1}>1 — Very Important</option>
+                          <option value={2}>2 — Important</option>
+                          <option value={3}>3 — Normal</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="field-label">SEND TYPE</label>
+                        <select className="w-select" value={settings.sendType} onChange={(e) => updateSettings('sendType', e.target.value)}>
+                          <option value="to">TO</option>
+                          <option value="cc">CC</option>
+                          <option value="bcc">BCC</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="field-label">SLEEP MS</label>
+                        <input className="w-input" type="number" min="0" max="60000" value={settings.sleepMs} onChange={(e) => updateSettings('sleepMs', Number(e.target.value))} />
+                      </div>
+                      <div>
+                        <label className="field-label">PARALLEL SENDS <span className="dim">(beast mode — max 30)</span></label>
+                        <input className="w-input" type="number" min="1" max="30" value={settings.parallelSends} onChange={(e) => updateSettings('parallelSends', Number(e.target.value))} />
+                      </div>
+                    </div>
+                    <div className="toggle-list">
+                      <div className="toggle-row" onClick={() => updateSettings('textOnly', !settings.textOnly)}>
+                        <div>
+                          <div className="toggle-lbl">TEXT-ONLY SEND</div>
+                          <div className="toggle-desc">Send without HTML part — plain text only</div>
+                        </div>
+                        <div className={`tog ${settings.textOnly ? 'tog-on' : ''}`}><div className="tog-knob" /></div>
+                      </div>
+                      <div className="toggle-row" onClick={() => updateSettings('trackOpens', !settings.trackOpens)}>
+                        <div>
+                          <div className="toggle-lbl">OPEN TRACKING</div>
+                          <div className="toggle-desc">1×1 pixel — logs when recipient opens</div>
+                        </div>
+                        <div className={`tog ${settings.trackOpens ? 'tog-on' : ''}`}><div className="tog-knob" /></div>
+                      </div>
+                      <div className="toggle-row" onClick={() => updateSettings('trackClicks', !settings.trackClicks)}>
+                        <div>
+                          <div className="toggle-lbl">CLICK TRACKING</div>
+                          <div className="toggle-desc">Wraps all links through redirect — logs clicks</div>
+                        </div>
+                        <div className={`tog ${settings.trackClicks ? 'tog-on' : ''}`}><div className="tog-knob" /></div>
+                      </div>
+                    </div>
+                    {settings.trackClicks && (
+                      <div>
+                        <label className="field-label">CLICK TRACKER BASE URL <span className="dim">(links redirect through this — e.g. https://your-domain.com/go)</span></label>
+                        <input className="w-input" value={settings.clickTrackerUrl} onChange={(e) => updateSettings('clickTrackerUrl', e.target.value)} placeholder="https://track.yourdomain.com/c" />
+                      </div>
+                    )}
+                  </div>
+
                   {/* AI ASSISTANT */}
                   <div className="cfg-block">
-                    <div className="cfg-block-title">[ AI ASSISTANT ]</div>
+                    <div className="cfg-block-title">[ 06 · AI ASSISTANT ]</div>
                     <p className="dim-txt">Connect an AI API to improve letter content directly from the COMPOSE panel. Key is stored encrypted.</p>
                     <div className="form-grid">
                       <div>
@@ -3328,77 +3413,9 @@ sudo tail -f /var/log/maillog`}</pre>
                     </details>
                   </div>
 
-                  {/* Email options */}
-                  <div className="cfg-block">
-                    <div className="cfg-block-title">[ EMAIL OPTIONS ]</div>
-                    <div className="form-grid">
-                      <div>
-                        <label className="field-label">ENCODING</label>
-                        <select className="w-select" value={settings.encoding} onChange={(e) => updateSettings('encoding', e.target.value)}>
-                          <option value="base64">base64</option>
-                          <option value="8bit">8bit</option>
-                          <option value="quoted-printable">quoted-printable</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="field-label">PRIORITY</label>
-                        <select className="w-select" value={settings.priority} onChange={(e) => updateSettings('priority', Number(e.target.value))}>
-                          <option value={1}>1 — Very Important</option>
-                          <option value={2}>2 — Important</option>
-                          <option value={3}>3 — Normal</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="field-label">SEND TYPE</label>
-                        <select className="w-select" value={settings.sendType} onChange={(e) => updateSettings('sendType', e.target.value)}>
-                          <option value="to">TO</option>
-                          <option value="cc">CC</option>
-                          <option value="bcc">BCC</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="field-label">SLEEP MS</label>
-                        <input className="w-input" type="number" min="0" max="60000" value={settings.sleepMs} onChange={(e) => updateSettings('sleepMs', Number(e.target.value))} />
-                      </div>
-                      <div>
-                        <label className="field-label">PARALLEL SENDS <span className="dim">(beast mode — max 30)</span></label>
-                        <input className="w-input" type="number" min="1" max="30" value={settings.parallelSends} onChange={(e) => updateSettings('parallelSends', Number(e.target.value))} />
-                      </div>
-                    </div>
-                    <div className="toggle-list">
-                      <div className="toggle-row" onClick={() => updateSettings('textOnly', !settings.textOnly)}>
-                        <div>
-                          <div className="toggle-lbl">TEXT-ONLY SEND</div>
-                          <div className="toggle-desc">Send without HTML part — plain text only</div>
-                        </div>
-                        <div className={`tog ${settings.textOnly ? 'tog-on' : ''}`}><div className="tog-knob" /></div>
-                      </div>
-                      <div className="toggle-row" onClick={() => updateSettings('trackOpens', !settings.trackOpens)}>
-                        <div>
-                          <div className="toggle-lbl">OPEN TRACKING</div>
-                          <div className="toggle-desc">1×1 pixel — logs when recipient opens</div>
-                        </div>
-                        <div className={`tog ${settings.trackOpens ? 'tog-on' : ''}`}><div className="tog-knob" /></div>
-                      </div>
-                      <div className="toggle-row" onClick={() => updateSettings('trackClicks', !settings.trackClicks)}>
-                        <div>
-                          <div className="toggle-lbl">CLICK TRACKING</div>
-                          <div className="toggle-desc">Wraps all links through redirect — logs clicks</div>
-                        </div>
-                        <div className={`tog ${settings.trackClicks ? 'tog-on' : ''}`}><div className="tog-knob" /></div>
-                      </div>
-                    </div>
-                    {settings.trackClicks && (
-                      <div>
-                        <label className="field-label">CLICK TRACKER BASE URL <span className="dim">(links redirect through this — e.g. https://your-domain.com/go)</span></label>
-                        <input className="w-input" value={settings.clickTrackerUrl} onChange={(e) => updateSettings('clickTrackerUrl', e.target.value)} placeholder="https://track.yourdomain.com/c" />
-                      </div>
-                    )}
-                  </div>
-
                   {/* Anti-fingerprint */}
                   <div className="cfg-block">
-                    <div className="cfg-block-title">[ ANTI-FINGERPRINT ]</div>
+                    <div className="cfg-block-title">[ 07 · ANTI-FINGERPRINT ]</div>
                     <div className="toggle-list">
                       <div className="toggle-row" onClick={() => updateSettings('htmlRandomize', !settings.htmlRandomize)}>
                         <div>
@@ -3517,7 +3534,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                   {/* Test email */}
                   <div className="cfg-block">
-                    <div className="cfg-block-title">[ TEST EMAIL ]</div>
+                    <div className="cfg-block-title">[ 08 · TEST EMAIL ]</div>
                     <div className="toggle-row" onClick={() => updateSettings('testEmailEnabled', !settings.testEmailEnabled)}>
                       <div className="toggle-lbl">SEND TEST EVERY N EMAILS</div>
                       <div className={`tog ${settings.testEmailEnabled ? 'tog-on' : ''}`}><div className="tog-knob" /></div>
@@ -3532,7 +3549,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                   {/* Telegram */}
                   <div className="cfg-block">
-                    <div className="cfg-block-title">[ TELEGRAM REPORTS ]</div>
+                    <div className="cfg-block-title">[ 09 · TELEGRAM REPORTS ]</div>
                     <p className="dim-txt">Campaign start/finish, opens, clicks, bounces and unsubscribes are pushed here live. Create a bot via @BotFather, get your chat id from @userinfobot.</p>
                     <div className="form-grid">
                       <div><label className="field-label">BOT TOKEN</label><input className="w-input" type="password" value={tgToken} onChange={(e) => setTgToken(e.target.value)} placeholder={state.telegram?.configured ? '•••••••• (saved — leave blank to keep)' : '123456:ABC-DEF...'} /></div>
@@ -3825,7 +3842,7 @@ sudo tail -f /var/log/maillog`}</pre>
                     ))}
                   </div>
                   <div className="pane">
-                    <div className="pane-head"><span>CAMPAIGN SETUP</span><span className="dim">pre-flight checklist — green means armed</span></div>
+                    <div className="pane-head"><span>01 · SETUP &amp; LAUNCH</span><span className="dim">pre-flight checklist — green means armed</span></div>
                     <div className="setup-steps">
                       <div className={`setup-step ${canQueue ? 'ok' : ''}`}>
                         <span className="setup-check">{canQueue ? '✓' : '!'}</span>
@@ -3903,51 +3920,13 @@ sudo tail -f /var/log/maillog`}</pre>
                   </div>
 
                   <div className="pane">
-                    <div className="pane-head"><span>CAMPAIGN CONSOLE</span><span className="dim">this campaign — queue · sends · opens · clicks · bounces</span></div>
+                    <div className="pane-head"><span>02 · LIVE CONSOLE</span><span className="dim">this campaign — queue · sends · opens · clicks · bounces</span></div>
                     <LiveConsole events={(state.events || []).filter(isCampaignEvent)} empty="[ AWAITING CAMPAIGN EVENTS — QUEUE, SENDS, OPENS, CLICKS, BOUNCES ]" />
                   </div>
 
                   <div className="pane">
-                    <div className="pane-head"><span>AI TASKS <span className="dim">— scheduled commands, runs without you</span></span></div>
-                    <p className="dim-txt">Tell the suite what to do and when — <code>queue the draft at 9am</code>, <code>pause campaign #4 tonight</code>, <code>verify accounts daily at 06:00</code>. At the set time the AI resolves names to ids and executes through the API — no operator needed.</p>
-                    <div className="ab-test-input-row" style={{ alignItems: 'stretch', flexWrap: 'wrap' }}>
-                      <input className="w-input" style={{ flex: '1 1 260px' }} placeholder="e.g. Queue campaign #3 at 09:00 tomorrow" value={aiTaskText}
-                        onChange={(e) => setAiTaskText(e.target.value)} aria-label="Task for the AI to run" />
-                      <input className="w-input" style={{ maxWidth: 200 }} type="datetime-local" value={aiTaskAt} onChange={(e) => setAiTaskAt(e.target.value)} aria-label="Run at" />
-                      <select className="w-select" style={{ maxWidth: 120 }} value={aiTaskRepeat} onChange={(e) => setAiTaskRepeat(e.target.value)} aria-label="Repeat">
-                        <option value="">ONCE</option><option value="daily">DAILY</option><option value="weekly">WEEKLY</option>
-                      </select>
-                      <button className="btn-sm" disabled={busy || !aiTaskText.trim() || !aiTaskAt} onClick={() => run(async () => {
-                        await api(token, '/api/ai/tasks', { method: 'POST', body: { text: aiTaskText.trim(), runAt: new Date(aiTaskAt).toISOString(), repeat: aiTaskRepeat } });
-                        setAiTaskText(''); setAiTaskAt(''); setAiTaskRepeat('');
-                        showNotice('AI task armed.');
-                        await refresh();
-                      })}>[ ARM TASK ]</button>
-                    </div>
-                    {!!(state.aiTasks || []).length && (
-                      <div className="tbl-wrap" style={{ maxHeight: 180, marginTop: 10 }}>
-                        <table className="w-table">
-                          <thead><tr><th>WHEN</th><th>TASK</th><th>REPEAT</th><th>STATUS</th><th>RESULT</th><th></th></tr></thead>
-                          <tbody>
-                            {(state.aiTasks || []).map((t) => (
-                              <tr key={t.id}>
-                                <td className="dim" style={{ whiteSpace: 'nowrap' }}>{new Date(t.run_at).toLocaleString()}</td>
-                                <td>{t.text}</td>
-                                <td className="dim">{(t.repeat || 'once').toUpperCase()}</td>
-                                <td><span className={`badge ${t.status === 'done' ? 'badge-ok' : t.status === 'failed' ? 'badge-fail' : 'badge-def'}`}>{t.status.toUpperCase()}</span></td>
-                                <td className="dim" title={t.last_result}>{(t.last_result || '—').slice(0, 80)}</td>
-                                <td><button className="btn-xs btn-danger" aria-label={`Delete task ${t.id}`} onClick={() => run(async () => { await api(token, `/api/ai/tasks/${t.id}`, { method: 'DELETE' }); await refresh(); })}>✕</button></td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="pane">
                     <div className="pane-head">
-                      <span>CAMPAIGN LIBRARY <span className="dim">({filteredCampaigns.length})</span></span>
+                      <span>03 · CAMPAIGN LIBRARY <span className="dim">({filteredCampaigns.length})</span></span>
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                         {[['all', 'ALL'], ['active', 'ACTIVE'], ['draft', 'DRAFTS'], ['done', 'FINISHED']].map(([v, l]) => (
                           <button key={v} className={`btn-xs ${campFilter === v ? 'btn-solid' : ''}`} onClick={() => { setCampFilter(v); setHistPage(1); }}>{l}</button>
@@ -4004,6 +3983,44 @@ sudo tail -f /var/log/maillog`}</pre>
                       </table>
                     </div>
                     <Pager total={filteredCampaigns.length} page={histPage} setPage={setHistPage} size={pageSize} setSize={setPageSize} />
+                  </div>
+
+<div className="pane">
+                    <div className="pane-head"><span>04 · AI TASKS <span className="dim">— optional automation, runs without you</span></span></div>
+                    <p className="dim-txt">Tell the suite what to do and when — <code>queue the draft at 9am</code>, <code>pause campaign #4 tonight</code>, <code>verify accounts daily at 06:00</code>. At the set time the AI resolves names to ids and executes through the API — no operator needed.</p>
+                    <div className="ab-test-input-row" style={{ alignItems: 'stretch', flexWrap: 'wrap' }}>
+                      <input className="w-input" style={{ flex: '1 1 260px' }} placeholder="e.g. Queue campaign #3 at 09:00 tomorrow" value={aiTaskText}
+                        onChange={(e) => setAiTaskText(e.target.value)} aria-label="Task for the AI to run" />
+                      <input className="w-input" style={{ maxWidth: 200 }} type="datetime-local" value={aiTaskAt} onChange={(e) => setAiTaskAt(e.target.value)} aria-label="Run at" />
+                      <select className="w-select" style={{ maxWidth: 120 }} value={aiTaskRepeat} onChange={(e) => setAiTaskRepeat(e.target.value)} aria-label="Repeat">
+                        <option value="">ONCE</option><option value="daily">DAILY</option><option value="weekly">WEEKLY</option>
+                      </select>
+                      <button className="btn-sm" disabled={busy || !aiTaskText.trim() || !aiTaskAt} onClick={() => run(async () => {
+                        await api(token, '/api/ai/tasks', { method: 'POST', body: { text: aiTaskText.trim(), runAt: new Date(aiTaskAt).toISOString(), repeat: aiTaskRepeat } });
+                        setAiTaskText(''); setAiTaskAt(''); setAiTaskRepeat('');
+                        showNotice('AI task armed.');
+                        await refresh();
+                      })}>[ ARM TASK ]</button>
+                    </div>
+                    {!!(state.aiTasks || []).length && (
+                      <div className="tbl-wrap" style={{ maxHeight: 180, marginTop: 10 }}>
+                        <table className="w-table">
+                          <thead><tr><th>WHEN</th><th>TASK</th><th>REPEAT</th><th>STATUS</th><th>RESULT</th><th></th></tr></thead>
+                          <tbody>
+                            {(state.aiTasks || []).map((t) => (
+                              <tr key={t.id}>
+                                <td className="dim" style={{ whiteSpace: 'nowrap' }}>{new Date(t.run_at).toLocaleString()}</td>
+                                <td>{t.text}</td>
+                                <td className="dim">{(t.repeat || 'once').toUpperCase()}</td>
+                                <td><span className={`badge ${t.status === 'done' ? 'badge-ok' : t.status === 'failed' ? 'badge-fail' : 'badge-def'}`}>{t.status.toUpperCase()}</span></td>
+                                <td className="dim" title={t.last_result}>{(t.last_result || '—').slice(0, 80)}</td>
+                                <td><button className="btn-xs btn-danger" aria-label={`Delete task ${t.id}`} onClick={() => run(async () => { await api(token, `/api/ai/tasks/${t.id}`, { method: 'DELETE' }); await refresh(); })}>✕</button></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
