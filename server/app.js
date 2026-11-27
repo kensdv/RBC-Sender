@@ -702,6 +702,15 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     return [preferredModel, ...ranked, ...others].filter(Boolean);
   }
 
+  function providerMessage(raw) {
+    try {
+      const j = JSON.parse(raw);
+      const m = j?.error?.message || j?.message || (typeof j?.error === 'string' ? j.error : '');
+      if (m) return String(m).replace(/\s+/g, ' ').slice(0, 300);
+    } catch {}
+    return String(raw || '').replace(/\s+/g, ' ').slice(0, 300);
+  }
+
   async function aiChatRequest({ endpoint, aiKey, model, messages, timeoutMs = 120000 }) {
     if (!model) fail('AI model must be configured in SETTINGS');
     const call = (modelId) => fetch(endpoint, {
@@ -710,46 +719,72 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       body: JSON.stringify({ model: modelId, messages }),
       signal: AbortSignal.timeout(timeoutMs),
     });
-    // candidate order: chosen model (up to 2 tries) → preferred live models (up to 3)
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const retryableStatus = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+    const busyText = /high demand|overload|temporar|unavailable|try again|rate limit|capacity/i;
+
     let candidates = [model];
-    let lastErr = '';
-    let i = 0, tries = 0;
-    while (i < candidates.length && tries < 6) {
-      const modelId = candidates[i];
-      tries++;
-      let res;
-      try { res = await call(modelId); }
-      catch (err) {
-        // hang/timeout/network blip — retry once on the chosen model, else move on
-        lastErr = `${err.name === 'TimeoutError' || err.name === 'AbortError' ? `timed out after ${timeoutMs / 1000}s` : (err.message || err)} [${modelId}]`;
-        if (i === 0 && tries === 1) { await new Promise((r) => setTimeout(r, 1200)); continue; }
-        i++;
-        if (i >= candidates.length && candidates.length === 1) {
-          try { candidates = aiPickOrder(await aiListModels(endpoint, aiKey), model); } catch {}
-          if (candidates.length <= 1) break;
+    let modelsLoaded = false;
+    const loadFallbacks = async () => {
+      if (modelsLoaded) return;
+      modelsLoaded = true;
+      try {
+        const live = await aiListModels(endpoint, aiKey);
+        candidates = [...new Set(aiPickOrder(live, model))].slice(0, 4);
+      } catch { /* keep the chosen model only */ }
+    };
+
+    let lastStatus = 0;
+    let lastMessage = '';
+    let busy = false;
+    let idx = 0;
+    let tries = 0;
+    const delays = [2500, 6000];
+    while (idx < candidates.length && tries < 8) {
+      const modelId = candidates[idx];
+      let attempt = 0;
+      while (attempt < 2 && tries < 8) {
+        attempt++;
+        tries++;
+        let res;
+        try {
+          res = await call(modelId);
+        } catch (err) {
+          lastStatus = 0;
+          lastMessage = err.name === 'TimeoutError' || err.name === 'AbortError'
+            ? `timed out after ${timeoutMs / 1000}s`
+            : (err.message || String(err));
+          busy = true;
+          if (attempt < 2) { await sleep(delays[attempt - 1]); continue; }
+          break;
         }
-        continue;
+        const raw = await res.text();
+        if (res.ok) {
+          let data = {};
+          try { data = JSON.parse(raw); } catch { return { content: raw.slice(0, 50000), model: modelId }; }
+          let content = data.choices?.[0]?.message?.content
+            ?? data.message?.content ?? data.content?.[0]?.text ?? data.response ?? '';
+          if (Array.isArray(content)) content = content.map((c) => (typeof c === 'string' ? c : c?.text || '')).join('');
+          if (modelId !== model) db.prepare('UPDATE send_settings SET ai_model = ? WHERE id = 1').run(modelId);
+          return { content: String(content), model: modelId };
+        }
+        lastStatus = res.status;
+        lastMessage = providerMessage(raw);
+        busy = retryableStatus.has(res.status) || busyText.test(lastMessage);
+        if (retryableStatus.has(res.status) && attempt < 2) { await sleep(delays[attempt - 1]); continue; }
+        if (res.status === 401 || res.status === 403) { idx = candidates.length; busy = false; }
+        break;
       }
-      const raw = await res.text();
-      if (res.ok) {
-        let data = {};
-        try { data = JSON.parse(raw); } catch { return { content: raw.slice(0, 50000), model: modelId }; }
-        let content = data.choices?.[0]?.message?.content
-          ?? data.message?.content ?? data.content?.[0]?.text ?? data.response ?? '';
-        if (Array.isArray(content)) content = content.map((c) => (typeof c === 'string' ? c : c?.text || '')).join('');
-        if (modelId !== model) db.prepare('UPDATE send_settings SET ai_model = ? WHERE id = 1').run(modelId);
-        return { content: String(content), model: modelId };
-      }
-      lastErr = `${res.status} — ${raw.slice(0, 300)}`;
-      const retryable = [500, 502, 503, 429].includes(res.status);
-      if (retryable && i === 0 && tries === 1) { await new Promise((r) => setTimeout(r, 2000)); continue; }
-      i++;
-      if (i >= candidates.length && candidates.length === 1) {
-        try { candidates = aiPickOrder(await aiListModels(endpoint, aiKey), model); } catch {}
-        if (candidates.length <= 1) break;
-      }
+      idx++;
+      if (idx >= candidates.length && !modelsLoaded) await loadFallbacks();
     }
-    fail(`AI request failed: ${lastErr || 'all provider models unavailable'}`);
+
+    if (busy) {
+      const err = new Error('AI is busy right now — it retried automatically and still could not get through. Try again in a moment.');
+      err.statusCode = 503;
+      throw err;
+    }
+    throw Object.assign(new Error(`AI request failed: ${lastMessage || 'provider unavailable'}`), { statusCode: 502 });
   }
 
   // ── AI Assistant for Letter Panel ──

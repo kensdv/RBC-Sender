@@ -482,11 +482,29 @@ export default function App() {
     }
   }
 
+  // AI calls retry themselves on provider "busy"/503/429 before the operator
+  // ever sees an error. The server also fails over to another live model.
+  async function aiApi(path, options = {}, attempts = 3) {
+    let last;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await api(token, path, options);
+      } catch (err) {
+        last = err;
+        const busy = err.status === 503 || err.status === 429
+          || /busy|high demand|temporar|unavailable|overload|try again/i.test(err.message || '');
+        if (!busy || i === attempts - 1) break;
+        await new Promise((r) => setTimeout(r, 2000 + i * 3000));
+      }
+    }
+    throw last;
+  }
+
   async function suggestSubjects(direction = '') {
     if (subjectBusy) return;
     setSubjectBusy(true);
     try {
-      const r = await api(token, '/api/ai/subjects', {
+      const r = await aiApi('/api/ai/subjects', {
         method: 'POST',
         body: {
           subject: draft.subject, preheader: draft.preheader, html: draft.html, text: draft.text,
@@ -513,7 +531,7 @@ export default function App() {
     setChatBusy(true);
     try {
       const r = await Promise.race([
-        api(token, '/api/ai/chat', {
+        aiApi('/api/ai/chat', {
           method: 'POST',
           body: {
             messages: msgs, model: chatModel,
@@ -1097,7 +1115,7 @@ export default function App() {
                             setAiAttachment(null);
                             setAiTarget('body');
                             try {
-                              const res = await api(token, '/api/ai/assist', {
+                              const res = await aiApi('/api/ai/assist', {
                                 method: 'POST',
                                 body: { prompt: aiPrompt, subject: draft.subject, html: draft.html, text: draft.text },
                               });
@@ -1226,7 +1244,7 @@ export default function App() {
                                   setSpamFix(null);
                                   try {
                                     const findings = spamIssues.map((i) => `${i.type}${i.word ? ` "${i.word}"` : ''}${i.desc ? ` — ${i.desc}` : ''}`).join('; ');
-                                    const res = await api(token, '/api/ai/assist', {
+                                    const res = await aiApi('/api/ai/assist', {
                                       method: 'POST',
                                       body: {
                                         prompt: `Rewrite this email to fix these spam-check findings: ${findings}. Keep the same intent, links, and ++rbc_*++ placeholders. Output only the revised content.`,
@@ -1359,7 +1377,7 @@ export default function App() {
                           </div>
                           <div className="btn-row" style={{ marginTop: 10 }}>
                             <button type="button" className="btn-sm" disabled={busy} title="AI picks the strongest letter from the vault for this audience" onClick={() => run(async () => {
-                              const r = await api(token, '/api/ai/pick-letter', { method: 'POST', body: { goal: draft.subject || draft.name, providers: draft.providers || [], lists: draft.lists || [], tiers: draft.tiers || [] } });
+                              const r = await aiApi('/api/ai/pick-letter', { method: 'POST', body: { goal: draft.subject || draft.name, providers: draft.providers || [], lists: draft.lists || [], tiers: draft.tiers || [] } });
                               updateDraft('html', r.html);
                               if (r.text) updateDraft('text', r.text);
                               if (r.subject && !draft.subject) updateDraft('subject', r.subject);
@@ -1657,7 +1675,7 @@ export default function App() {
                         setAwBusy(true); setAwResult(null);
                         const shaped = [awPrompt, awTone && `Tone: ${awTone}.`, awLength && `Length: ${awLength}.`, awAudience.trim() && `Audience: ${awAudience.trim()}.`].filter(Boolean).join(' ');
                         try {
-                          const res = await api(token, '/api/ai/assist', {
+                          const res = await aiApi('/api/ai/assist', {
                             method: 'POST',
                             body: { prompt: shaped, subject: draft.subject, html: draft.html, text: draft.text },
                           });
@@ -1670,7 +1688,7 @@ export default function App() {
                       <button className="btn-sm" disabled={awBusy} onClick={async () => {
                         setAwBusy(true); setAwResult(null);
                         try {
-                          const res = await api(token, '/api/ai/subjects', {
+                          const res = await aiApi('/api/ai/subjects', {
                             method: 'POST',
                             body: {
                               subject: draft.subject, preheader: draft.preheader, html: draft.html, text: draft.text,
@@ -1744,7 +1762,7 @@ export default function App() {
                     <button className="btn-primary" disabled={awDocBusy || !awDocPrompt.trim()} onClick={async () => {
                       setAwDocBusy(true); setAwAttachment(null);
                       try {
-                        const res = await api(token, '/api/ai/assist', {
+                        const res = await aiApi('/api/ai/assist', {
                           method: 'POST',
                           body: { prompt: `Generate a ${awDocType} file attachment document${awDocName.trim() ? ` named "${awDocName.trim()}"` : ''}: ${awDocPrompt}`, subject: draft.subject, html: draft.html, text: draft.text },
                         });
@@ -4085,7 +4103,7 @@ client_id:secret:tenant            app creds (no RT)
                 <button className="btn-sm" disabled={aiSubjectBusy} title="AI generates subject variants from the letter" onClick={async () => {
                   setAiSubjectBusy(true);
                   try {
-                    const res = await api(token, '/api/ai/assist', {
+                    const res = await aiApi('/api/ai/assist', {
                       method: 'POST',
                       body: {
                         prompt: 'Write 6 alternative subject lines for this email campaign. Rules: each on its own line, under 60 characters, varied tone — no numbering, no quotes, no explanations, no preamble.',
