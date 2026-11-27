@@ -2882,11 +2882,11 @@ sudo tail -f /var/log/maillog`}</pre>
 
               {/* ══ SETTINGS / DELIVERY ══ */}
               {tab === 'delivery' && (
-                <div className="pane narrow-pane">
+                <div className="pane settings-pane">
                   <div className="pane-head"><span>SENDER SETTINGS</span></div>
 
                   {/* Send Mode */}
-                  <div className="cfg-block">
+                  <div className="cfg-block settings-wide">
                     <div className="cfg-block-title">[ 01 · SEND TYPE ]</div>
                     <div className="mode-grid">
                       {[
@@ -3006,7 +3006,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                   {/* OAuth engine config — graph / gmail */}
                   {(sendMode === 'graph' || sendMode === 'gmail') && (
-                    <div className="cfg-block">
+                    <div className="cfg-block settings-wide">
                       <div className="cfg-block-title">[ {sendMode === 'graph' ? 'MICROSOFT GRAPH' : 'GMAIL API'} ENGINE ]</div>
                       <p className="dim-txt">
                         {sendMode === 'graph'
@@ -3111,7 +3111,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                   {/* HTTP API engine */}
                   {sendMode === 'api' && (
-                    <div className="cfg-block">
+                    <div className="cfg-block settings-wide">
                       <div className="cfg-block-title">[ API ENGINE ]</div>
                       <p className="dim-txt">Sends over the provider's HTTPS API — no SMTP socket, no port-25 exposure. FROM NAME / FROM EMAIL come from <strong>DIRECT CONFIG</strong> (or SENDER IDENTITY if set).</p>
                       <div className="form-grid">
@@ -3194,7 +3194,7 @@ sudo tail -f /var/log/maillog`}</pre>
                   </div>
 
                   {/* Rotation */}
-                  <div className="cfg-block">
+                  <div className="cfg-block settings-wide">
                     <div className="cfg-block-title">[ 03 · ROTATION ]</div>
                     <label className="field-label">SUBJECT VARIANTS <span className="dim">(one per line — picked randomly per send)</span></label>
                     <textarea className="w-textarea code-ta" rows={5}
@@ -3211,7 +3211,7 @@ sudo tail -f /var/log/maillog`}</pre>
                   </div>
 
                   {/* DKIM SIGNING */}
-                  <div className="cfg-block">
+                  <div className="cfg-block settings-wide">
                     <div className="cfg-block-title">[ 04 · DKIM SIGNING ]</div>
                     <p className="dim-txt">Sign outgoing mail with a DKIM key so receivers see a valid signature. Key is stored encrypted. Optional on GRAPH API, GMAIL API and HTTP API — those providers sign with your domain's DKIM. Required for DIRECT MX and plain RELAY.</p>
                     <div className="toggle-row" onClick={() => {
