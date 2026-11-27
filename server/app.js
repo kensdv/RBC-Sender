@@ -433,13 +433,19 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const body = request.body || {};
     const to = body.to ? email(body.to, 'to') : '';
     if (!to) fail('Test recipient email is required');
+    // Campaign page tests must ride the same senders the campaign is linked to,
+    // not whichever pool account happens to be next in rotation.
+    const accountIds = Array.isArray(body.accountIds)
+      ? body.accountIds.map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 300)
+      : [];
     let info;
     try {
       info = await mailer.send({
         campaign: {
-          id: 0, name: 'test', subject: text(body.subject || 'Rubicon Email Suite — test email', 'subject', 200),
-          preheader: '', html: body.html ? stripPageHtml(String(body.html)) : '<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">Rubicon Email Suite test email — the active send engine accepted this message.</div>',
-          text: body.text || 'Rubicon Email Suite test email — the active send engine accepted this message.', attachments: body.attachments || [],
+          id: 0, name: 'test', subject: text(body.subject || 'Rubicon Email Suite - test email', 'subject', 200),
+          preheader: '', html: body.html ? stripPageHtml(String(body.html)) : '<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">Rubicon Email Suite test email - the active send engine accepted this message.</div>',
+          text: body.text || 'Rubicon Email Suite test email - the active send engine accepted this message.', attachments: body.attachments || [],
+          accountIds, accountsRandom: body.accountsRandom === true,
         },
         recipient: { id: 0, email: to, firstName: (to.split('@')[0] || '').split(/[._-]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ') || '', lastName: '', company: '', custom: {} },
         totalRecipients: 1,
@@ -455,10 +461,12 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const activeMode = body.forceMode
       || db.prepare('SELECT send_mode FROM send_settings WHERE id = 1').get()?.send_mode
       || 'smtp';
-    emit('info', { message: `test accepted via ${activeMode.toUpperCase()} → ${to}` });
+    const account = info.account || '';
+    emit('info', { message: `test accepted via ${activeMode.toUpperCase()}${account ? ` (${account})` : ''} → ${to}` });
     return {
       ok: true,
       mode: activeMode,
+      account,
       messageId: info.messageId || '',
       response: info.response || info.accepted?.join(', ') || 'accepted',
     };

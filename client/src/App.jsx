@@ -545,8 +545,8 @@ export default function App() {
         showNotice(`${acct.label || acct.fromEmail} ${a.enabled ? 'enabled' : 'disabled'}.`);
       } else if (a.id === 'send_test') {
         showNotice(`Sending test to ${a.to}…`);
-        const r = await api(token, '/api/test-send', { method: 'POST', body: { to: a.to, subject: draft.subject, html: draft.html, text: draft.text } });
-        setChatMsgs((m) => [...m, { role: 'assistant', content: `Test accepted by the engine for ${a.to} (${r.messageId || r.response || 'ok'}). Check the inbox - placement there is the real verdict.` }]);
+        const r = await api(token, '/api/test-send', { method: 'POST', body: { to: a.to, subject: draft.subject, html: draft.html, text: draft.text, accountIds: draft.accounts || [], accountsRandom: draft.accountsRandom === true } });
+        setChatMsgs((m) => [...m, { role: 'assistant', content: `Test accepted by the engine${r.account ? ` via ${r.account}` : ''} for ${a.to} (${r.messageId || r.response || 'ok'}). Check the inbox - placement there is the real verdict.` }]);
       } else if (a.id === 'spam_check') {
         const r = await api(token, '/api/spam-check', { method: 'POST', body: { subject: draft.subject, html: draft.html, text: draft.text } });
         const issues = (r.issues || []).slice(0, 8).map((i) => `• ${i.type}${i.word ? ` "${i.word}"` : ''}${i.severity ? ` [${i.severity}]` : ''}`).join('\n');
@@ -3610,10 +3610,18 @@ sudo tail -f /var/log/maillog`}</pre>
                         <label className="field-label">TEST FIRE — ONE SHOT TO YOURSELF</label>
                         <div className="deck-row">
                           <input className="w-input" type="email" placeholder="you@yourdomain.com" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
-                          <button className="btn-sm deck-btn" disabled={busy || !testTo.includes('@')} onClick={() => run(async () => {
-                            const r = await api(token, '/api/test-send', { method: 'POST', body: { to: testTo, subject: draft.subject, html: draft.html, text: draft.text, attachments: draft.attachments } });
-                            showNotice(`Test accepted (${r.messageId || r.response || 'ok'}) - check ${testTo}.`); setTestTo('');
+                          <button className="btn-sm deck-btn" disabled={busy || !testTo.includes('@')} title={(draft.accounts || []).length ? 'Sends through this campaign’s linked senders' : 'No senders linked — uses the whole enabled pool'} onClick={() => run(async () => {
+                            const r = await api(token, '/api/test-send', { method: 'POST', body: {
+                              to: testTo, subject: draft.subject, html: draft.html, text: draft.text, attachments: draft.attachments,
+                              accountIds: draft.accounts || [], accountsRandom: draft.accountsRandom === true,
+                            } });
+                            showNotice(`Test accepted${r.account ? ` via ${r.account}` : ''} (${r.messageId || r.response || 'ok'}) - check ${testTo}.`); setTestTo('');
                           })}>SEND TEST</button>
+                        </div>
+                        <div className="dim-txt" style={{ marginTop: 6, fontSize: 11 }}>
+                          {(draft.accounts || []).length
+                            ? `Uses this campaign’s ${(draft.accounts || []).length} linked sender${(draft.accounts || []).length === 1 ? '' : 's'} (${sendMode.toUpperCase()} mode).`
+                            : 'No senders linked to this campaign — the test uses every enabled sender in the active pool.'}
                         </div>
                       </div>
                       <div className="deck-field">

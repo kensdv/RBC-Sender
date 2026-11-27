@@ -437,6 +437,11 @@ function loadSmtpPool(db, config, scopeIds = null) {
     .filter((r) => !r.cooldown_until || r.cooldown_until <= now)
     // daily quota: enforced when the counter belongs to today; a stale date resets on next send
     .filter((r) => !(r.daily_quota > 0 && r.sent_date === today && (r.sent_today || 0) >= r.daily_quota));
+  if (!rows.length && scopeIds?.length) {
+    // A campaign-linked subset that is entirely disabled/cooling/over quota must
+    // not silently fall back to the legacy account or the rest of the pool.
+    return [];
+  }
   if (rows.length) {
     return rows.map((r) => ({
       id: r.id,
@@ -1752,6 +1757,7 @@ export function createMailer({ db, config }) {
           message: { ...message, extraHeaders: buildHeaders(sender) },
         });
         markAccountResult(db, acct.id, true);
+        if (info && typeof info === 'object') info.account = acct.label || acct.username || sender;
         return info;
       };
 
@@ -1781,6 +1787,9 @@ export function createMailer({ db, config }) {
           }
           throw msErr || new Error('All MS mailbox accounts failed');
         }
+        if (scopeIds.length) {
+          throw new Error('None of this campaign’s linked MS senders are available — check they are enabled, not cooling down, under quota and in ACTIVE SENDERS');
+        }
         const { fromName, fromEmail, replyTo } = buildFrom(settings, null);
         if (!fromEmail && !settings.engineSendAs) throw new Error('Configure a from/direct email for Graph engine');
         return sendViaGraph({
@@ -1804,7 +1813,9 @@ export function createMailer({ db, config }) {
       // ── SMTP pool with round-robin + failover ──
       const pool = mode === 'smtp' ? loadSmtpPool(db, config, scopeIds) : [null];
       if (mode === 'smtp' && !pool.length) {
-        throw Object.assign(new Error('Configure at least one SMTP account'), { statusCode: 400 });
+        throw Object.assign(new Error(scopeIds.length
+          ? 'None of this campaign’s linked senders are available — check they are enabled, not cooling down, under quota and in ACTIVE SENDERS'
+          : 'Configure at least one SMTP account'), { statusCode: 400 });
       }
       // rotate starting point (or shuffle when the campaign asks for random)
       const order = orderPool(pool);
@@ -1825,6 +1836,9 @@ export function createMailer({ db, config }) {
           try {
             const info = await transporter.sendMail(mailOpts);
             markAccountResult(db, acct?.id, true);
+            if (info && typeof info === 'object' && acct) {
+              info.account = acct.label || acct.username || `${acct.host}:${acct.port}`;
+            }
             return info;
           } catch (err) {
             markAccountResult(db, acct?.id, false);
