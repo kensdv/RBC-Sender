@@ -1335,11 +1335,41 @@ code {
 .chat-msg-text.dim { color: var(--txt-dim); }
 .chat-foot {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 10px;
   border-top: 1px solid rgba(47, 224, 107, 0.25);
   flex-shrink: 0;
 }
+.chat-editing-note {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--cyan);
+}
+.chat-msg-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 3px;
+  opacity: 0.55;
+}
+.chat-msg:hover .chat-msg-tools { opacity: 1; }
+.chat-tool {
+  background: none;
+  border: 0;
+  color: var(--txt-dim);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 1px 2px;
+  cursor: pointer;
+}
+.chat-tool:hover { color: var(--green); }
+.chat-editing .chat-msg-text { outline: 1px dashed var(--cyan); }
 .chat-apply-row {
   display: flex;
   gap: 4px;

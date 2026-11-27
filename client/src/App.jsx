@@ -86,6 +86,7 @@ export default function App() {
   const [chatModel, setChatModel] = useState('');
   const [chatModels, setChatModels] = useState(null);
   const [chatBusy, setChatBusy] = useState(false);
+  const [chatEditIndex, setChatEditIndex] = useState(null);
   const [spamCheckOpen, setSpamCheckOpen] = useState(false);
   const [spamScore, setSpamScore] = useState(null);
   const [spamIssues, setSpamIssues] = useState([]);
@@ -522,12 +523,45 @@ export default function App() {
     }
   }
 
+  async function copyChatText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      showNotice('Copied.');
+      return;
+    } catch { /* fall through to the legacy path */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      showNotice('Copied.');
+    } catch {
+      showNotice('Copy failed — select the text and copy it.', 'err');
+    }
+  }
+
+  function editChatMessage(index) {
+    const msg = chatMsgs[index];
+    if (!msg || msg.role !== 'user' || chatBusy) return;
+    setChatInput(msg.content);
+    setChatEditIndex(index);
+  }
+
   async function sendChat(override) {
     const text = (typeof override === 'string' ? override : chatInput).trim();
     if (!text || chatBusy) return;
-    const msgs = [...chatMsgs, { role: 'user', content: text }];
+    // Editing an earlier prompt resends from that point and drops the old tail.
+    const base = (chatEditIndex !== null && typeof override !== 'string')
+      ? chatMsgs.slice(0, chatEditIndex)
+      : chatMsgs;
+    const msgs = [...base, { role: 'user', content: text }];
     setChatMsgs(msgs);
     setChatInput('');
+    setChatEditIndex(null);
     setChatBusy(true);
     try {
       const r = await Promise.race([
@@ -4207,7 +4241,7 @@ client_id:secret:tenant            app creds (no RT)
                   {chatModels.map((m) => <option key={m} value={m}>{m}</option>)}
                 </select>
               ) : null}
-              <button className="btn-sm" onClick={() => { setChatMsgs([]); }} title="Clear">↺</button>
+              <button className="btn-sm" onClick={() => { setChatMsgs([]); setChatEditIndex(null); setChatInput(''); }} title="Clear">↺</button>
               <button className="btn-sm" aria-label="Close Rubicon AI" onClick={() => setChatOpen(false)}>[ × ]</button>
             </div>
           </div>
@@ -4226,8 +4260,14 @@ client_id:secret:tenant            app creds (no RT)
               </>
             )}
             {chatMsgs.map((m, i) => (
-              <div key={i} className={`chat-msg ${m.role === 'user' ? 'chat-user' : 'chat-ai'}`}>
+              <div key={i} className={`chat-msg ${m.role === 'user' ? 'chat-user' : 'chat-ai'}${chatEditIndex === i ? ' chat-editing' : ''}`}>
                 <div className="chat-msg-text">{m.role === 'assistant' ? <ChatText text={m.content} /> : m.content}</div>
+                <div className="chat-msg-tools">
+                  <button type="button" className="chat-tool" title="Copy this text" aria-label="Copy this text" onClick={() => copyChatText(m.content)}>⧉</button>
+                  {m.role === 'user' && (
+                    <button type="button" className="chat-tool" title="Edit this prompt" aria-label="Edit this prompt" onClick={() => editChatMessage(i)}>✎</button>
+                  )}
+                </div>
                 {m.role === 'assistant' && m.target && m.target !== 'none' && (
                   <div className="chat-apply-row">
                     {[['subject', 'SUBJECT'], ['preheader', 'PREHEADER'], ['body', 'BODY'], ['text', 'TEXT']].map(([f, label]) => (
@@ -4253,6 +4293,12 @@ client_id:secret:tenant            app creds (no RT)
             <div ref={(el) => el?.scrollIntoView({ behavior: 'smooth', block: 'end' })} />
           </div>
           <div className="chat-foot">
+            {chatEditIndex !== null && (
+              <div className="chat-editing-note">
+                <span>Editing an earlier prompt — send to replace everything after it.</span>
+                <button type="button" className="btn-xs" onClick={() => { setChatEditIndex(null); setChatInput(''); }}>CANCEL</button>
+              </div>
+            )}
             <input
               className="w-input"
               value={chatInput}
