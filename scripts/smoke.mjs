@@ -18,12 +18,12 @@ page.on('console', (m) => { if (m.type() === 'error') errors.push(`CONSOLE: ${m.
 const apiFails = [];
 page.on('response', (r) => { if (r.status() >= 500) apiFails.push(`${r.status()} ${r.url().replace(BASE, '')}`); });
 
-await page.goto(BASE, { waitUntil: 'networkidle0' });
+await page.goto(BASE, { waitUntil: 'domcontentloaded' });
 await page.evaluate((t) => {
   sessionStorage.setItem('mailerToken', t);
   localStorage.setItem('rbc_intro_seen', '1');
 }, token);
-await page.reload({ waitUntil: 'networkidle0' });
+await page.reload({ waitUntil: 'domcontentloaded' });
 await new Promise((r) => setTimeout(r, 2500));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -49,7 +49,7 @@ await new Promise((r) => setTimeout(r, 2500));
 const theme = await page.evaluate(() => document.documentElement.dataset.theme);
 console.log('obsidian theme applied:', theme === 'obsidian');
 // chat panel opens
-await page.evaluate(() => document.querySelector('.chat-fab')?.click());
+await page.evaluate(() => (document.querySelector('.topbar-ai') || document.querySelector('.chat-fab'))?.click());
 await sleep(800);
 const chatOpen = await page.evaluate(() => !!document.querySelector('.chat-panel'));
 console.log('chat panel opens:', chatOpen);

@@ -38,6 +38,12 @@ async function importRecipient(app) {
   });
 }
 
+async function recipientList(app) {
+  const response = await app.inject({ method: 'GET', url: '/api/recipients', headers: authorization });
+  assert.equal(response.statusCode, 200);
+  return response.json().recipients;
+}
+
 async function configureSmtp(app) {
   return app.inject({
     method: 'PUT',
@@ -103,13 +109,37 @@ test('GET shows unsubscribe confirmation and POST suppresses the recipient', asy
   const url = `/api/unsubscribe?email=${encodeURIComponent(address)}&token=${encodeURIComponent(tokenValue)}`;
   const get = await app.inject({ method: 'GET', url });
   assert.equal(get.statusCode, 200);
-  let state = await app.inject({ method: 'GET', url: '/api/state', headers: authorization });
-  assert.equal(state.json().recipients[0].suppressed, false);
+  let recipients = await recipientList(app);
+  assert.equal(recipients[0].suppressed, false);
   const post = await app.inject({ method: 'POST', url, headers: { 'content-type': 'application/x-www-form-urlencoded' }, payload: 'List-Unsubscribe=One-Click' });
   assert.equal(post.statusCode, 200);
-  state = await app.inject({ method: 'GET', url: '/api/state', headers: authorization });
-  assert.equal(state.json().recipients[0].suppressed, true);
+  recipients = await recipientList(app);
+  assert.equal(recipients[0].suppressed, true);
+  const state = await app.inject({ method: 'GET', url: '/api/state', headers: authorization });
   assert.equal(state.json().bounces[0].kind, 'unsubscribe');
+});
+
+test('dashboard rates count bounces and complaints separately from unsubscribes', async (t) => {
+  const { app, db } = await fixture(t);
+  await importRecipient(app);
+  const id = await createCampaign(app);
+  const recipient = db.prepare('SELECT id FROM recipients LIMIT 1').get();
+  const now = new Date().toISOString();
+  db.prepare("INSERT INTO deliveries (campaign_id, recipient_id, status, sent_at) VALUES (?, ?, 'sent', ?)").run(id, recipient.id, now);
+  db.prepare("INSERT INTO bounces (email, kind, reason, classification, created_at) VALUES ('alex@example.com', 'bounce', '5.1.1 user unknown', 'hard', ?)").run(now);
+  db.prepare("INSERT INTO bounces (email, kind, reason, classification, created_at) VALUES ('alex@example.com', 'complaint', 'FBL complaint', 'complaint', ?)").run(now);
+  db.prepare("INSERT INTO bounces (email, kind, reason, created_at) VALUES ('alex@example.com', 'unsubscribe', 'Unsubscribed by recipient', ?)").run(now);
+
+  const state = (await app.inject({ method: 'GET', url: '/api/state', headers: authorization })).json();
+  assert.equal(state.rates.delivered30, 1);
+  assert.equal(state.rates.bounces30, 1);
+  assert.equal(state.rates.complaints30, 1);
+  assert.equal(state.rates.bounceRate, 100);
+  assert.equal(state.rates.complaintRate, 100);
+
+  const analytics = (await app.inject({ method: 'GET', url: '/api/analytics/overview', headers: authorization })).json();
+  assert.equal(analytics.bounces, 1);
+  assert.equal(analytics.complaints, 1);
 });
 
 test('duplicates any campaign as a reusable draft', async (t) => {
@@ -131,7 +161,8 @@ test('validates bounce webhook authentication and suppresses complaints', async 
   assert.equal(denied.statusCode, 401);
   const accepted = await app.inject({ method: 'POST', url: '/api/webhooks/bounce', headers: { 'x-webhook-token': 'webhook-token-with-at-least-24-characters' }, payload: { email: 'alex@example.com', kind: 'complaint', reason: 'Recipient complaint' } });
   assert.equal(accepted.statusCode, 200);
+  const recipients = await recipientList(app);
+  assert.equal(recipients[0].suppressed, true);
   const state = await app.inject({ method: 'GET', url: '/api/state', headers: authorization });
-  assert.equal(state.json().recipients[0].suppressed, true);
   assert.equal(state.json().bounces[0].kind, 'complaint');
 });

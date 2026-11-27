@@ -1,1282 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api.js';
-
-function RbcMascot({ size = 34 }) {
-  return (
-    <svg className="rbc-mascot" width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
-      <line className="ms-antenna" x1="32" y1="14" x2="32" y2="6" stroke="var(--green)" strokeWidth="2.4" strokeLinecap="round" />
-      <circle className="ms-antenna-tip" cx="32" cy="5" r="2.6" fill="var(--cyan)" />
-      <rect className="ms-ear-l" x="5" y="26" width="6" height="12" rx="3" fill="var(--green)" opacity="0.85" />
-      <rect className="ms-ear-r" x="53" y="26" width="6" height="12" rx="3" fill="var(--green)" opacity="0.85" />
-      <rect className="ms-head" x="10" y="14" width="44" height="30" rx="14" fill="var(--panel2)" stroke="var(--green)" strokeWidth="2" />
-      <ellipse className="ms-eye-l" cx="23" cy="29" rx="4.4" ry="5.2" fill="var(--cyan)" />
-      <ellipse className="ms-eye-r" cx="41" cy="29" rx="4.4" ry="5.2" fill="var(--cyan)" />
-      <circle className="ms-pupil-l" cx="24" cy="30" r="1.6" fill="var(--bg)" />
-      <circle className="ms-pupil-r" cx="42" cy="30" r="1.6" fill="var(--bg)" />
-      <rect className="ms-mouth" x="25" y="37" width="14" height="3" rx="1.5" fill="var(--green)" />
-      <rect className="ms-arm-l" x="2" y="45" width="10" height="4" rx="2" fill="var(--green)" />
-      <rect className="ms-arm-r" x="52" y="45" width="10" height="4" rx="2" fill="var(--green)" />
-      <rect className="ms-body" x="22" y="44" width="20" height="12" rx="5" fill="var(--panel2)" stroke="var(--green)" strokeWidth="2" />
-      <circle cx="32" cy="50" r="2.4" fill="var(--yellow)" />
-      <line className="ms-leg-l" x1="27" y1="56" x2="25" y2="62" stroke="var(--green)" strokeWidth="2.6" strokeLinecap="round" />
-      <line className="ms-leg-r" x1="37" y1="56" x2="39" y2="62" stroke="var(--green)" strokeWidth="2.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function ChromosomeBackground() {
-  const canvasRef = useRef(null);
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    let animId;
-    const resize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
-    window.addEventListener('resize', resize);
-    resize();
-
-    // ── Neon galaxy: static stars + slow nebula glow pulses ──
-    const STAR_COUNT = 400;
-    const NEBULA_COUNT = 6;
-
-    const stars = Array.from({ length: STAR_COUNT }, () => ({
-      x: Math.random() * window.innerWidth,
-      y: Math.random() * window.innerHeight,
-      r: 0.3 + Math.random() * 1.4,
-      alpha: 0.2 + Math.random() * 0.8,
-      cyan: Math.random() < 0.2,
-      pulse: Math.random() * Math.PI * 2,
-      pulseSpd: 0.008 + Math.random() * 0.012,
-    }));
-
-    const nebulas = Array.from({ length: NEBULA_COUNT }, () => ({
-      cx: Math.random() * window.innerWidth,
-      cy: Math.random() * window.innerHeight,
-      r: 120 + Math.random() * 200,
-      alpha: 0.06 + Math.random() * 0.12,
-      pulse: Math.random() * Math.PI * 2,
-      pulseSpd: 0.003 + Math.random() * 0.006,
-      col: ['0,255,65', '0,220,255', '68,255,136', '0,150,255'][Math.floor(Math.random() * 4)],
-    }));
-
-    const draw = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      const themeNow = document.documentElement.dataset.theme;
-      if (themeNow === 'obsidian') {
-        // ── OBSIDIAN: flat ink base + sparse dim stars, no glow gimmick ──
-        ctx.fillStyle = '#12140f';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        for (const s of stars) {
-          s.pulse += s.pulseSpd;
-          const a = s.alpha * 0.35 * (0.6 + 0.4 * Math.sin(s.pulse));
-          ctx.fillStyle = `rgba(232,230,223,${a * 0.5})`;
-          ctx.beginPath(); ctx.arc(s.x, s.y, s.r * 0.7, 0, Math.PI * 2); ctx.fill();
-        }
-      } else {
-        // Base — deep phosphor
-        ctx.fillStyle = '#020402';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        // Nebula clouds — slow pulsing radial gradients
-        for (const n of nebulas) {
-          n.pulse += n.pulseSpd;
-          const amp = 0.7 + 0.3 * Math.sin(n.pulse);
-          const g = ctx.createRadialGradient(n.cx, n.cy, 0, n.cx, n.cy, n.r * amp);
-          g.addColorStop(0,   `rgba(${n.col},${n.alpha * amp})`);
-          g.addColorStop(0.5, `rgba(${n.col},${n.alpha * 0.4 * amp})`);
-          g.addColorStop(1,   'rgba(0,0,0,0)');
-          ctx.fillStyle = g;
-          ctx.beginPath(); ctx.arc(n.cx, n.cy, n.r * amp, 0, Math.PI * 2); ctx.fill();
-        }
-
-        // Stars — static positions, pulsing brightness
-        for (const s of stars) {
-          s.pulse += s.pulseSpd;
-          const a = s.alpha * (0.6 + 0.4 * Math.sin(s.pulse));
-          const col = s.cyan ? '0,220,255' : '0,255,65';
-          ctx.fillStyle = `rgba(${col},${a})`;
-          ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
-          // Occasional bright cross for larger stars
-          if (s.r > 1 && Math.random() < 0.01) {
-            ctx.strokeStyle = `rgba(${col},${a * 0.8})`;
-            ctx.lineWidth = 0.6;
-            ctx.beginPath(); ctx.moveTo(s.x - s.r * 3, s.y); ctx.lineTo(s.x + s.r * 3, s.y); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(s.x, s.y - s.r * 3); ctx.lineTo(s.x, s.y + s.r * 3); ctx.stroke();
-          }
-        }
-      }
-
-      animId = requestAnimationFrame(draw);
-    };
-    draw();
-    return () => { cancelAnimationFrame(animId); window.removeEventListener('resize', resize); };
-  }, []);
-  return <canvas ref={canvasRef} style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }} />;
-}
-
-const emptyDraft = {
-  name: '', subject: '', preheader: '', providers: [], lists: [],
-  html: '<h1>Hello [Firstname]</h1>\n<p>Your account at ++rbc_domain1++ requires attention.</p>\n<p>Ref: ++rbc_number6++-++rbc_randstring++</p>',
-  text: '',
-  attachments: [],
-};
-const emptySmtp = { host: '', port: 587, secure: false, username: '', password: '', fromName: '', fromEmail: '', replyTo: '', ratePerMinute: 30 };
-const emptyAccount = { label: '', host: '', port: 587, secure: false, username: '', password: '', fromName: '', fromEmail: '', replyTo: '', weight: 1, dailyQuota: 0 };
-const emptySettings = {
-  sendMode: 'smtp',
-  directFromName: '', directFromEmail: '', directReplyTo: '', directRatePerMinute: 10,
-  relayHost: '', relayPort: 25, socks5Proxy: '',
-  encoding: 'base64', priority: 3, sendType: 'to', sleepMs: 0,
-  encryptLetter: false, encryptMode: 'unicode', fromNameEncrypt: false, subjectEncrypt: false,
-  customHeadersEnabled: false, customHeaders: [], timezone: 'UTC',
-  testEmailEnabled: false, testEvery: 100, testDestination: '',
-  fromNames: [], subjectsList: [], redirectUrl: '',
-  spoofFromName: '', spoofFromEmail: '', spoofReplyTo: '', returnPath: '',
-  msgidDomain: '', xMailer: '', fakeReceived: false,
-  dkimEnabled: false, dkimDomain: '', dkimSelector: '', dkimConfigured: false, dkimPrivateKey: '', dkimPublicKey: '',
-  textOnly: false, trackOpens: false, trackClicks: false, clickTrackerUrl: '',
-  parallelSends: 1, htmlRandomize: false, spamBypass: false,
-  subjectB64: false, fromnameB64: false, disclaimerText: '',
-  engineClientId: '', engineClientSecret: '', engineTenant: '', engineRefreshToken: '', engineSendAs: '',
-  engineMsRefreshToken: false, engineMsSendAs: '',
-  attachFormats: [], imageRecompress: false,
-  aiEndpoint: '', aiKey: '', aiModel: '', aiRules: '',
-  apiProvider: 'sendgrid', apiKey: '', apiKeySet: false, apiUser: '', apiDomain: '', apiUrl: '',
-  sendDays: [], sendFromMin: 480, sendToMin: 1200, scheduleEnabled: true, capsEnabled: false,
-  relaySecure: 0, relayUsername: '', relayPassword: '', relayPasswordSet: false, relayEhlo: '',
-  maxPerHour: 5000, maxPerDay: 50000, warmupEnabled: false, warmupStartedAt: '',
-  linkCloak: false,
-};
-
-function Pager({ total, page, setPage, size, setSize }) {
-  const pages = Math.max(1, Math.ceil(total / size));
-  return (
-    <div className="pager">
-      <button className="btn-xs" disabled={page <= 1} onClick={() => setPage(page - 1)}>[ ‹ PREV ]</button>
-      <span className="pager-info">PAGE {page} / {pages} · {total} ROWS</span>
-      <button className="btn-xs" disabled={page >= pages} onClick={() => setPage(page + 1)}>[ NEXT › ]</button>
-      <select className="w-select pager-size" value={size} onChange={(e) => { setSize(Number(e.target.value)); setPage(1); }}>
-        <option value={50}>50 / page</option>
-        <option value={100}>100 / page</option>
-        <option value={200}>200 / page</option>
-      </select>
-    </div>
-  );
-}
-
-const INTRO_STEPS = [
-  { title: 'Welcome to Rubicon Email Suite', desc: 'A self-hosted email suite with SMTP pools, direct-MX delivery, OAuth engines (Graph/Gmail API), anti-fingerprint tooling and live preview. This walkthrough takes 30 seconds.', tab: 'compose' },
-  { title: '1 · Configure a send engine', desc: 'Open SETTINGS and pick a mode: SMTP (authenticated provider or account pool), DIRECT MX, RELAY/PROXY, GRAPH API, GMAIL API or HTTP API (SendGrid/SES/Mailgun+). The SMTP tab has presets for 19 providers and a credential guide.', tab: 'delivery' },
-  { title: '2 · Import your list', desc: 'RECIPIENTS tab — paste CSV (email, first_name, last_name, company), confirm consent, import. VERIFY DNS checks MX/disposable/role addresses; SORT BY PROVIDER tags each mailbox.', tab: 'recipients' },
-  { title: '3 · Compose the letter', desc: 'COMPOSE tab — subject, preheader, placeholders (++rbc_*++), three body modes plus a block editor, attachments, and a live preview streaming on the right with desktop/mobile toggle.', tab: 'compose' },
-  { title: '4 · Delivery options', desc: 'SETTINGS tab — spoofed sender identity, DKIM signing, tracking pixel/click wrap, parallel sends (beast mode), HTML randomize, spam-word bypass, base64 subject, auto-attach formats.', tab: 'delivery' },
-  { title: '5 · Send & monitor', desc: 'SEND NOW or schedule a campaign. The queue throttles per your rate settings, retries failures, and the history table shows live sent/failed/queued counts with CSV export.', tab: 'send' },
-];
-
-const BLOCK_SNIPPETS = [
-  ['H1', '<h1 style="font-size:28px;margin:16px 0 8px">Heading</h1>'],
-  ['H2', '<h2 style="font-size:22px;margin:14px 0 6px">Subheading</h2>'],
-  ['TEXT', '<p style="margin:8px 0;line-height:1.6">Paragraph text goes here.</p>'],
-  ['BUTTON', '<p style="margin:16px 0"><a href="https://" style="display:inline-block;background:#16a34a;color:#ffffff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold">Click here</a></p>'],
-  ['IMAGE', '<p style="margin:12px 0"><img src="https://" alt="" style="max-width:100%;height:auto"></p>'],
-  ['DIVIDER', '<hr style="border:none;border-top:1px solid #dddddd;margin:24px 0">'],
-  ['SPACER', '<div style="height:24px"></div>'],
-  ['COLS', '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:12px 0"><tr><td width="50%" valign="top" style="padding-right:8px">Left column</td><td width="50%" valign="top" style="padding-left:8px">Right column</td></tr></table>'],
-  ['QUOTE', '<blockquote style="border-left:4px solid #16a34a;margin:12px 0;padding:4px 16px;color:#555555">Quote text</blockquote>'],
-  ['LIST', '<ul style="margin:8px 0;padding-left:24px"><li>Item one</li><li>Item two</li></ul>'],
-  ['CENTER', '<p style="text-align:center;margin:12px 0">Centered text</p>'],
-  ['SMALL', '<p style="font-size:12px;color:#888888;margin:8px 0">Small print / footer text</p>'],
-  ['CALENDAR', '<p style="margin:12px 0"><a href="webcal://" style="color:#2563eb">Add to calendar</a></p>'],
-];
-
-const SMTP_PRESETS = {
-  gmail:      { label: 'Gmail',                host: 'smtp.gmail.com',                 port: 587, secure: false },
-  gmailrelay: { label: 'Google SMTP Relay',    host: 'smtp-relay.gmail.com',          port: 587, secure: false },
-  outlook:    { label: 'Outlook / Hotmail',     host: 'smtp-mail.outlook.com',          port: 587, secure: false },
-  yahoo:      { label: 'Yahoo',                host: 'smtp.mail.yahoo.com',            port: 465, secure: true },
-  icloud:     { label: 'iCloud',               host: 'smtp.mail.me.com',               port: 587, secure: false },
-  zoho:       { label: 'Zoho Mail',            host: 'smtp.zoho.com',                  port: 587, secure: false },
-  sendgrid:   { label: 'SendGrid',             host: 'smtp.sendgrid.net',              port: 587, secure: false },
-  mailgun:    { label: 'Mailgun',              host: 'smtp.mailgun.org',               port: 587, secure: false },
-  brevo:      { label: 'Brevo',                host: 'smtp-relay.brevo.com',           port: 587, secure: false },
-  ses:        { label: 'AWS SES',              host: 'email-smtp.us-east-1.amazonaws.com', port: 587, secure: false },
-  postmark:   { label: 'Postmark',             host: 'smtp.postmarkapp.com',           port: 587, secure: false },
-  sparkpost:  { label: 'SparkPost',            host: 'smtp.sparkpostmail.com',         port: 587, secure: false },
-  elastic:    { label: 'Elastic Email',        host: 'smtp.elasticemail.com',          port: 2525, secure: false },
-  mandrill:   { label: 'Mandrill',             host: 'smtp.mandrillapp.com',           port: 587, secure: false },
-  fastmail:   { label: 'Fastmail',             host: 'smtp.fastmail.com',              port: 587, secure: false },
-  proton:     { label: 'ProtonMail',           host: 'smtp.protonmail.ch',             port: 587, secure: false },
-  yandex:     { label: 'Yandex',               host: 'smtp.yandex.com',                port: 465, secure: true },
-  mailru:     { label: 'Mail.ru',              host: 'smtp.mail.ru',                   port: 465, secure: true },
-  aol:        { label: 'AOL',                  host: 'smtp.aol.com',                   port: 587, secure: false },
-  gmx:        { label: 'GMX',                  host: 'mail.gmx.com',                   port: 587, secure: false },
-};
-
-const SMTP_GUIDES = [
-  {
-    title: 'Gmail / Google Workspace',
-    body: 'Server smtp.gmail.com · port 587 (STARTTLS) · user: your full email address · password: a 16-letter "app password" (Google Account → Security → 2-Step Verification → App passwords). Your normal Gmail password won\'t work.',
-    apply: { host: 'smtp.gmail.com', port: 587, secure: false },
-  },
-  {
-    title: 'Microsoft 365 / Outlook',
-    body: 'Server smtp.office365.com · port 587 (STARTTLS) · user: your full email address · password: your account password, or an app password if you use two-step verification. Whoever manages your Microsoft 365 must have "Authenticated SMTP" turned on for your mailbox.',
-    apply: { host: 'smtp.office365.com', port: 587, secure: false },
-  },
-  {
-    title: 'Your hosting email (cPanel, HostGator…)',
-    body: 'Server mail.yourdomain.com (or the one your hosting gives you) · port 465 (SSL/TLS) or 587 (STARTTLS) · user: the full mailbox address · password: that mailbox\'s password (the same as webmail).',
-    apply: { host: '', port: 465, secure: true },
-  },
-  {
-    title: 'Google Workspace without a password (SMTP relay)',
-    body: 'If your company uses Google Workspace, you can send through your account\'s "SMTP relay" with no username or password: Google authorizes it by this server\'s IP address. In admin.google.com → Apps → Google Workspace → Gmail → Routing → "SMTP relay service" → Configure: allowed senders "Only addresses in my domains", tick "Only accept mail from the specified IP addresses" and add this server\'s IP, do NOT tick "Require SMTP Authentication", tick "Require TLS encryption". Then type your address in "From Email" below.',
-    apply: { host: 'smtp-relay.gmail.com', port: 587, secure: false, relay: true },
-  },
-];
-
-const TIME_OPTIONS = Array.from({ length: 96 }, (_, i) => {
-  const m = i * 15;
-  const h24 = Math.floor(m / 60), mm = m % 60;
-  const h12 = h24 % 12 || 12;
-  const ap = h24 < 12 ? 'AM' : 'PM';
-  return { value: m, label: `${h12}:${String(mm).padStart(2, '0')} ${ap}` };
-});
-function RbcLogo({ size = 44 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" aria-hidden="true">
-      <defs>
-        <linearGradient id="rbcg" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#2fe06b" /><stop offset="1" stopColor="#00ffff" />
-        </linearGradient>
-      </defs>
-      <path d="M24 2 42 12v24L24 46 6 36V12L24 2Z" fill="url(#rbcg)" opacity="0.14" stroke="url(#rbcg)" strokeWidth="2" />
-      <path d="M14 20.5 24 27l10-6.5V32a2 2 0 0 1-2 2H16a2 2 0 0 1-2-2v-11.5Z" fill="none" stroke="#eafff6" strokeWidth="2.4" strokeLinejoin="round" />
-      <path d="m14 20.5 10 6.5 10-6.5-10-6.5-10 6.5Z" fill="#eafff6" />
-      <path d="M31 14.5c2.5.4 4.5 2.4 4.9 4.9M33.5 10.5c4 .7 7.3 4 8 8" stroke="#00e5a0" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-const DAY_LABELS = { 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat', 7: 'Sun' };
-const fmtMin = (m) => `${String(Math.floor((m ?? 0) / 60)).padStart(2, '0')}:${String((m ?? 0) % 60).padStart(2, '0')}`;
-
-function stripPageHtml(input) {
-  let out = String(input || '');
-  if (!/<!doctype|<html[\s>]/i.test(out)) return out;
-  const styles = [];
-  out = out.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, (m) => { styles.push(m); return ''; });
-  out = out
-    .replace(/<!doctype[^>]*>/gi, '')
-    .replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '')
-    .replace(/<\/?html[^>]*>/gi, '')
-    .replace(/<body([^>]*)>/i, '<div$1>')
-    .replace(/<\/body>/gi, '</div>');
-  return styles.join('\n') + '\n' + out.trim();
-}
-
-const LETTER_TEMPLATES = [
-  {
-    label: '— premium templates —',
-    subject: '', html: '', text: '',
-  },
-  {
-    label: 'Welcome / Onboarding',
-    subject: 'Welcome aboard, [Firstname] — your account is ready',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#1f2937">
-  <div style="background:linear-gradient(135deg,#0f172a,#1e3a8a);padding:32px 28px;border-radius:12px 12px 0 0">
-    <div style="color:#ffffff;font-size:22px;font-weight:700">Welcome, [Firstname]</div>
-    <div style="color:#93c5fd;font-size:13px;margin-top:6px">Your account at [Company] is ready</div>
-  </div>
-  <div style="border:1px solid #e5e7eb;border-top:none;padding:28px;border-radius:0 0 12px 12px">
-    <p style="font-size:15px;line-height:1.7;margin:0 0 16px">Hi [Firstname],</p>
-    <p style="font-size:15px;line-height:1.7;margin:0 0 16px">Your workspace is live. Everything you need to get started is below — most teams are up and running in under ten minutes.</p>
-    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:20px 0"><tr><td style="background:#2563eb;border-radius:8px"><a href="++rbc_url++" style="display:inline-block;padding:13px 30px;color:#ffffff;text-decoration:none;font-weight:bold;font-size:14px">Get started</a></td></tr></table>
-    <p style="font-size:13px;color:#6b7280;line-height:1.7;margin:0">If the button doesn't work, copy this link: ++rbc_url++</p>
-    <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
-    <p style="font-size:12px;color:#9ca3af;margin:0">Questions? Just reply to this email — a real person reads it.</p>
-  </div>
-</div>`,
-    text: `Hi [Firstname],\n\nYour account is ready. Get started: ++rbc_url++\n\nQuestions? Just reply.`,
-  },
-
-  {
-    label: 'Invoice / Receipt',
-    subject: 'Your invoice from [Company] — ref ++rbc_number6++',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#1f2937">
-  <div style="padding:28px;border-bottom:2px solid #111827">
-    <div style="font-size:20px;font-weight:800">[Company]</div>
-    <div style="font-size:13px;color:#6b7280">Invoice</div>
-  </div>
-  <div style="padding:28px">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;margin-bottom:24px">
-      <tr><td style="color:#6b7280;padding:6px 0">Bill to</td><td style="text-align:right;font-weight:600">[Firstname] [Lastname]<br><span style="color:#6b7280;font-weight:400">[~EMail~]</span></td></tr>
-      <tr><td style="color:#6b7280;padding:6px 0">Invoice #</td><td style="text-align:right">++rbc_number6++-++rbc_randstring++</td></tr>
-      <tr><td style="color:#6b7280;padding:6px 0">Date</td><td style="text-align:right">++rbc_date++</td></tr>
-    </table>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;font-size:14px">
-      <tr style="background:#f9fafb"><td style="padding:10px 14px;font-weight:600">Description</td><td style="padding:10px 14px;font-weight:600;text-align:right">Amount</td></tr>
-      <tr><td style="padding:12px 14px">Professional services</td><td style="padding:12px 14px;text-align:right">$1,250.00</td></tr>
-      <tr><td style="padding:12px 14px">Add-ons</td><td style="padding:12px 14px;text-align:right">$350.00</td></tr>
-      <tr style="border-top:2px solid #111827"><td style="padding:12px 14px;font-weight:700">Total due</td><td style="padding:12px 14px;text-align:right;font-weight:800;font-size:16px">$1,600.00</td></tr>
-    </table>
-    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px auto"><tr><td style="background:#111827;border-radius:8px"><a href="++rbc_url++" style="display:inline-block;padding:13px 30px;color:#ffffff;text-decoration:none;font-weight:bold;font-size:14px">Pay now</a></td></tr></table>
-    <p style="font-size:12px;color:#9ca3af;text-align:center;margin:0">Questions about this invoice? Reply to this email.</p>
-  </div>
-</div>`,
-    text: `Invoice ++rbc_number6++-++rbc_randstring++\n\nBill to: [Firstname] [Lastname] <[~EMail~]>\nProfessional services: $1,250.00\nAdd-ons: $350.00\nTOTAL DUE: $1,600.00\nPay: ++rbc_url++`,
-  },
-  {
-    label: 'Follow-up / Bump',
-    subject: 'Re: [Firstname] — quick follow-up',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#1f2937">
-  <div style="padding:28px">
-    <p style="font-size:15px;line-height:1.7;margin:0 0 16px">Hi [Firstname],</p>
-    <p style="font-size:15px;line-height:1.7;margin:0 0 16px">Bumping this to the top of your inbox — just in case it got buried.</p>
-    <p style="font-size:15px;line-height:1.7;margin:0 0 16px">The short version: we can have this done for you by <strong>++rbc_date++</strong>, and there's still room in this month's schedule.</p>
-    <p style="font-size:15px;line-height:1.7;margin:0 0 24px">Want me to lock in a slot? Reply YES and I'll send the details.</p>
-    <p style="font-size:13px;color:#6b7280;margin:0">— The [Company] team</p>
-  </div>
-</div>`,
-    text: `Hi [Firstname],\n\nBumping this — short version: we can have it done by ++rbc_date++. Reply YES and I'll send details.\n\n— [Company]`,
-  },
-  {
-    label: 'Newsletter',
-    subject: 'Your digest — [Firstname]',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#1f2937">
-  <div style="background:#0f172a;padding:28px;text-align:center;border-radius:12px 12px 0 0">
-    <div style="color:#ffffff;font-size:22px;font-weight:800">[Company] Digest</div>
-    <div style="color:#94a3b8;font-size:12px;margin-top:4px">++rbc_date++ · for [Firstname]</div>
-  </div>
-  <div style="border:1px solid #e5e7eb;border-top:none;padding:24px 28px;border-radius:0 0 12px 12px">
-    <div style="margin-bottom:24px"><div style="font-size:17px;font-weight:700;margin-bottom:6px">Story one headline</div><p style="font-size:14px;line-height:1.7;color:#4b5563;margin:0">Two or three sentences of teaser copy that makes the reader click through to the full piece.</p><a href="++rbc_url++" style="font-size:13px;color:#2563eb">Read more →</a></div>
-    <div style="margin-bottom:24px"><div style="font-size:17px;font-weight:700;margin-bottom:6px">Story two headline</div><p style="font-size:14px;line-height:1.7;color:#4b5563;margin:0">Second item summary goes here, kept short and punchy.</p><a href="++rbc_url++" style="font-size:13px;color:#2563eb">Read more →</a></div>
-    <div><div style="font-size:17px;font-weight:700;margin-bottom:6px">Story three headline</div><p style="font-size:14px;line-height:1.7;color:#4b5563;margin:0">Third item summary. Vary the topics to keep it fresh.</p><a href="++rbc_url++" style="font-size:13px;color:#2563eb">Read more →</a></div>
-    <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
-    <p style="font-size:12px;color:#9ca3af;text-align:center;margin:0"><a href="++rbc_url++" style="color:#9ca3af">View in browser</a> · <a href="[AbmeldeLink]" style="color:#9ca3af">Unsubscribe</a></p>
-  </div>
-</div>`,
-    text: `[Company] Digest — ++rbc_date++\n\n1. Story one headline — ++rbc_url++\n2. Story two headline — ++rbc_url++\n3. Story three headline — ++rbc_url++\n\nUnsubscribe: [AbmeldeLink]`,
-  },
-  {
-    label: 'RFQ / Quote Request',
-    subject: 'Request for quotation — [Firstname] / [Company]',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#1f2937">
-  <div style="padding:28px;border-bottom:2px solid #0f766e">
-    <div style="font-size:20px;font-weight:800;color:#0f766e">Request for Quotation</div>
-    <div style="font-size:13px;color:#6b7280;margin-top:4px">Ref RFQ-++rbc_number6++ · ++rbc_date++</div>
-  </div>
-  <div style="padding:28px">
-    <p style="font-size:15px;line-height:1.7;margin:0 0 16px">Dear [Firstname],</p>
-    <p style="font-size:15px;line-height:1.7;margin:0 0 16px">We are sourcing proposals for an upcoming project and your company came recommended. Could you share your best pricing and lead time for the scope below?</p>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;font-size:14px;margin:16px 0">
-      <tr style="background:#f0fdfa"><td style="padding:10px 14px;font-weight:600">Item</td><td style="padding:10px 14px;font-weight:600">Qty</td><td style="padding:10px 14px;font-weight:600;text-align:right">Target date</td></tr>
-      <tr><td style="padding:12px 14px">Item description one</td><td style="padding:12px 14px">10</td><td style="padding:12px 14px;text-align:right">++rbc_date++</td></tr>
-      <tr><td style="padding:12px 14px">Item description two</td><td style="padding:12px 14px">5</td><td style="padding:12px 14px;text-align:right">++rbc_date++</td></tr>
-    </table>
-    <p style="font-size:15px;line-height:1.7;margin:0 0 20px">Please reply with your quotation, payment terms and any questions — we'd like to decide by end of week.</p>
-    <p style="font-size:13px;color:#6b7280;margin:0">Regards,<br><strong>[Name]</strong><br>[Company] · [~EMail~]</p>
-  </div>
-</div>`,
-    text: `Dear [Firstname],\n\nRequest for quotation — Ref RFQ-++rbc_number6++ (++rbc_date++)\n\nScope:\n- Item one ×10\n- Item two ×5\n\nPlease reply with pricing, terms and lead time.`,
-  },
-  {
-    label: 'Meeting Request',
-    subject: 'Quick call? — [Firstname] / [Company]',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#1f2937">
-  <div style="padding:28px">
-    <p style="font-size:15px;line-height:1.7;margin:0 0 16px">Hi [Firstname],</p>
-    <p style="font-size:15px;line-height:1.7;margin:0 0 16px">I'd love to set up 20 minutes to walk you through what we're doing at [Company] — I think there's a real fit with what you're building.</p>
-    <p style="font-size:15px;line-height:1.7;margin:0 0 20px">Does <strong>++rbc_date++</strong> work? I'm flexible Thursday and Friday afternoon if not.</p>
-    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 20px"><tr><td style="background:#0f766e;border-radius:8px"><a href="++rbc_url++" style="display:inline-block;padding:12px 28px;color:#ffffff;text-decoration:none;font-weight:bold;font-size:14px">Pick a time</a></td></tr></table>
-    <p style="font-size:13px;color:#6b7280;margin:0">Or just reply with a couple of slots that suit you.</p>
-    <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
-    <p style="font-size:13px;color:#6b7280;margin:0">[Name] · [Company] · [~EMail~]</p>
-  </div>
-</div>`,
-    text: `Hi [Firstname],\n\n20-minute call about [Company]? Does ++rbc_date++ work — or reply with slots.\n\n[Name] · [~EMail~]`,
-  },
-  {
-    label: 'Payment Reminder',
-    subject: 'Friendly reminder — invoice ++rbc_number6++ due ++rbc_date++',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#1f2937">
-  <div style="padding:28px">
-    <p style="font-size:15px;line-height:1.7;margin:0 0 16px">Hi [Firstname],</p>
-    <p style="font-size:15px;line-height:1.7;margin:0 0 16px">Just a friendly nudge — invoice <strong>++rbc_number6++-++rbc_randstring++</strong> for <strong>$1,600.00</strong> is due <strong>++rbc_date++</strong>.</p>
-    <p style="font-size:15px;line-height:1.7;margin:0 0 20px">If it's already been taken care of, ignore this — and thanks again for the business.</p>
-    <table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="background:#111827;border-radius:8px"><a href="++rbc_url++" style="display:inline-block;padding:13px 30px;color:#ffffff;text-decoration:none;font-weight:bold;font-size:14px">Pay invoice</a></td></tr></table>
-    <p style="font-size:13px;color:#6b7280;margin:20px 0 0">Questions? Reply here or call us directly.</p>
-  </div>
-</div>`,
-    text: `Hi [Firstname],\n\nReminder: invoice ++rbc_number6++-++rbc_randstring++ ($1,600.00) due ++rbc_date++.\nPay: ++rbc_url++`,
-  },
-  {
-    label: 'Proposal / Estimate',
-    subject: 'Your proposal from [Company] — [Firstname]',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#1f2937">
-  <div style="background:linear-gradient(135deg,#111827,#312e81);padding:30px 28px;border-radius:12px 12px 0 0">
-    <div style="color:#ffffff;font-size:20px;font-weight:800">Proposal for [Firstname]</div>
-    <div style="color:#a5b4fc;font-size:13px;margin-top:6px">Prepared by [Company] · valid until ++rbc_date++</div>
-  </div>
-  <div style="border:1px solid #e5e7eb;border-top:none;padding:28px;border-radius:0 0 12px 12px">
-    <p style="font-size:15px;line-height:1.7;margin:0 0 16px">Hi [Firstname],</p>
-    <p style="font-size:15px;line-height:1.7;margin:0 0 16px">Attached is our proposal covering the scope we discussed. Here's the headline:</p>
-    <div style="background:#f9fafb;border-left:4px solid #4f46e5;padding:16px 20px;margin:0 0 20px;font-size:14px;line-height:1.7">
-      <strong>Investment:</strong> $4,800 one-time<br>
-      <strong>Timeline:</strong> 3 weeks from kickoff<br>
-      <strong>Includes:</strong> setup, training, 30-day support
-    </div>
-    <table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="background:#4f46e5;border-radius:8px"><a href="++rbc_url++" style="display:inline-block;padding:13px 30px;color:#ffffff;text-decoration:none;font-weight:bold;font-size:14px">Review proposal</a></td></tr></table>
-    <p style="font-size:13px;color:#6b7280;margin:20px 0 0">Happy to jump on a call and walk through any of it.</p>
-  </div>
-</div>`,
-    text: `Hi [Firstname],\n\nProposal from [Company] — Investment $4,800, 3-week timeline.\nReview: ++rbc_url++`,
-  },
-  {
-    label: 'Appointment Confirmation',
-    subject: 'Confirmed: your appointment ++rbc_date++ ++rbc_time++',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#1f2937">
-  <div style="padding:28px;text-align:center">
-    <div style="width:56px;height:56px;background:#dcfce7;border-radius:50%;margin:0 auto 16px;line-height:56px;font-size:26px">✓</div>
-    <div style="font-size:20px;font-weight:800;margin-bottom:4px">You're booked, [Firstname]</div>
-    <div style="font-size:14px;color:#6b7280">Appointment confirmed</div>
-  </div>
-  <div style="border:1px solid #e5e7eb;border-radius:12px;padding:24px;margin:0 28px 28px;text-align:center">
-    <div style="font-size:24px;font-weight:800;color:#0f766e">++rbc_date++</div>
-    <div style="font-size:15px;color:#4b5563;margin-top:4px">++rbc_time++</div>
-    <div style="font-size:13px;color:#9ca3af;margin-top:8px">with the [Company] team</div>
-    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:18px auto 0"><tr><td style="background:#0f766e;border-radius:8px"><a href="++rbc_url++" style="display:inline-block;padding:11px 26px;color:#ffffff;text-decoration:none;font-weight:bold;font-size:13px">Add to calendar</a></td></tr></table>
-  </div>
-  <p style="font-size:12px;color:#9ca3af;text-align:center;margin:0 28px 24px">Need to reschedule? Just reply to this email.</p>
-</div>`,
-    text: `Confirmed, [Firstname] — appointment ++rbc_date++ at ++rbc_time++ with [Company].\nReschedule: reply to this email.`,
-  },
-  {
-    label: 'Order Confirmation',
-    subject: 'Order confirmed — ref ++rbc_number6++',
-    html: `<div style="font-family:Georgia,'Times New Roman',serif;max-width:580px;margin:0 auto;color:#222">
-  <div style="padding:32px 28px;border-bottom:1px solid #ddd">
-    <div style="font-size:19px;font-weight:bold">[Company]</div>
-    <div style="font-size:12px;color:#777;margin-top:2px">Order confirmation</div>
-  </div>
-  <div style="padding:28px">
-    <p style="font-size:14px;line-height:1.8;margin:0 0 16px">Hi [Firstname],</p>
-    <p style="font-size:14px;line-height:1.8;margin:0 0 16px">Thanks for your order. We've received it and it's being processed — you'll get a shipping update once it leaves our warehouse.</p>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #ddd;font-size:13px;margin:18px 0">
-      <tr style="background:#f5f5f5"><td style="padding:8px 12px;font-weight:bold">Order ref</td><td style="padding:8px 12px;text-align:right">++rbc_number6++-++rbc_randstring++</td></tr>
-      <tr><td style="padding:8px 12px">Placed</td><td style="padding:8px 12px;text-align:right">++rbc_date++ ++rbc_time++</td></tr>
-      <tr><td style="padding:8px 12px">Ships to</td><td style="padding:8px 12px;text-align:right">[Firstname] [Lastname]</td></tr>
-    </table>
-    <p style="font-size:13px;color:#555;line-height:1.7;margin:0">Questions about the order? Just reply — it comes straight to us.</p>
-    <hr style="border:none;border-top:1px solid #ddd;margin:24px 0">
-    <p style="font-size:12px;color:#999;margin:0">[Company] · [~EMail~]</p>
-  </div>
-</div>`,
-    text: `Hi [Firstname],\n\nOrder confirmed — ref ++rbc_number6++-++rbc_randstring++ (placed ++rbc_date++).\nYou'll get a shipping update shortly.`,
-  },
-  {
-    label: 'Shipping / Delivery Notice',
-    subject: 'Your shipment is on its way — ref ++rbc_number6++',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:580px;margin:0 auto;color:#222">
-  <div style="padding:30px 28px;border-bottom:2px solid #444">
-    <div style="font-size:18px;font-weight:bold">Shipment update</div>
-    <div style="font-size:12px;color:#777;margin-top:2px">Ref ++rbc_number6++-++rbc_randstring++</div>
-  </div>
-  <div style="padding:28px">
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">Hi [Firstname],</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">Good news — your package shipped today and is out for delivery. Expected arrival: <strong>++rbc_date++</strong>.</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 20px">Track it here: <a href="++rbc_url++" style="color:#0645ad">++rbc_url++</a></p>
-    <p style="font-size:13px;color:#555;line-height:1.7;margin:0">Someone needs to be available to sign, or you can redirect delivery from the tracking page.</p>
-    <hr style="border:none;border-top:1px solid #ddd;margin:24px 0">
-    <p style="font-size:12px;color:#999;margin:0">[Company] Customer Service · [~EMail~]</p>
-  </div>
-</div>`,
-    text: `Hi [Firstname],\n\nYour shipment (ref ++rbc_number6++-++rbc_randstring++) shipped today — expected ++rbc_date++.\nTrack: ++rbc_url++`,
-  },
-  {
-    label: 'Service Recovery / Apology',
-    subject: 'Sorry about ++rbc_date++ — and what we are doing about it',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:580px;margin:0 auto;color:#222">
-  <div style="padding:30px 28px">
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">Hi [Firstname],</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">I'm writing personally about the delay you experienced. There's no good excuse — we missed our own deadline and that's on us.</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">Here's what we've done: the job is now assigned to a senior team member, you'll get daily updates until it's done, and I've applied a credit to your account for the inconvenience.</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 20px">If you'd rather talk it through, call me directly — my number is below. I want to make this right.</p>
-    <p style="font-size:14px;line-height:1.7;margin:0">[Name]<br><span style="color:#777;font-size:13px">[Company] · [~EMail~]</span></p>
-  </div>
-</div>`,
-    text: `Hi [Firstname],\n\nSorry about the delay — we missed our deadline and that's on us.\nThe job is reassigned, you'll get daily updates, and I've credited your account.\nCall me directly if you'd rather talk: [Name] · [~EMail~]`,
-  },
-  {
-    label: 'Contract / Agreement',
-    subject: 'Agreement for signature — [Company] / [Firstname]',
-    html: `<div style="font-family:Georgia,'Times New Roman',serif;max-width:580px;margin:0 auto;color:#222">
-  <div style="padding:30px 28px;border-bottom:1px solid #ddd">
-    <div style="font-size:18px;font-weight:bold">Service Agreement</div>
-    <div style="font-size:12px;color:#777;margin-top:2px">Between [Company] and [Firstname] [Lastname] · ++rbc_date++</div>
-  </div>
-  <div style="padding:28px">
-    <p style="font-size:14px;line-height:1.8;margin:0 0 14px">Dear [Firstname],</p>
-    <p style="font-size:14px;line-height:1.8;margin:0 0 14px">Please find the agreement for the work we discussed. Key terms are summarized below — the full document is attached.</p>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #ddd;font-size:13px;margin:18px 0">
-      <tr><td style="padding:8px 12px;border-bottom:1px solid #eee"><strong>Scope</strong></td><td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right">As discussed</td></tr>
-      <tr><td style="padding:8px 12px;border-bottom:1px solid #eee"><strong>Term</strong></td><td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right">12 months</td></tr>
-      <tr><td style="padding:8px 12px"><strong>Fee</strong></td><td style="padding:8px 12px;text-align:right">Per attached schedule</td></tr>
-    </table>
-    <p style="font-size:14px;line-height:1.8;margin:0 0 20px">You can review and sign electronically here: <a href="++rbc_url++" style="color:#0645ad">++rbc_url++</a></p>
-    <p style="font-size:14px;line-height:1.8;margin:0">Let me know if any clause needs clarification before you sign.</p>
-    <hr style="border:none;border-top:1px solid #ddd;margin:24px 0">
-    <p style="font-size:12px;color:#999;margin:0">[Name] · [Company] · [~EMail~]</p>
-  </div>
-</div>`,
-    text: `Dear [Firstname],\n\nService agreement attached — scope as discussed, 12-month term, fee per schedule.\nReview & sign: ++rbc_url++`,
-  },
-  {
-    label: 'Partnership / Intro',
-    subject: 'Quick intro — [Company] × [Firstname]',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:580px;margin:0 auto;color:#222">
-  <div style="padding:30px 28px">
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">Hi [Firstname],</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">I came across [Company] while researching partners in your space — what you're doing with ++rbc_domain1++ caught my eye.</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">We help companies like yours with [short description of offering]. I think there's a clean fit — happy to send a one-pager if useful.</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 20px">Worth a 15-minute call next week? I can work around your schedule.</p>
-    <p style="font-size:14px;line-height:1.7;margin:0">Best,<br><strong>[Name]</strong><br><span style="color:#777;font-size:13px">[Company] · [~EMail~]</span></p>
-  </div>
-</div>`,
-    text: `Hi [Firstname],\n\nCame across [Company] — liked what you're doing. We help with [offering]; think there's a fit.\nWorth 15 minutes next week?\n\n[Name] · [~EMail~]`,
-  },
-  {
-    label: 'Review / Testimonial Request',
-    subject: 'How did we do? — [Firstname]',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:580px;margin:0 auto;color:#222">
-  <div style="padding:30px 28px">
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">Hi [Firstname],</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">Your project wrapped up recently and I'd genuinely value your honest feedback — good or bad.</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 20px">It takes about two minutes: <a href="++rbc_url++" style="color:#0645ad">++rbc_url++</a></p>
-    <p style="font-size:13px;color:#555;line-height:1.7;margin:0">If anything fell short, tell me directly — I'd rather hear it from you than find out later.</p>
-    <hr style="border:none;border-top:1px solid #ddd;margin:24px 0">
-    <p style="font-size:12px;color:#999;margin:0">[Name] · [Company] · [~EMail~]</p>
-  </div>
-</div>`,
-    text: `Hi [Firstname],\n\nHow did we do? Honest feedback welcome — takes 2 min: ++rbc_url++`,
-  },
-
-  {
-    label: 'Event Invitation',
-    subject: 'You are invited — [event name], ++rbc_date++',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:580px;margin:0 auto;color:#222">
-  <div style="background:#1f2937;padding:34px 28px;text-align:center">
-    <div style="color:#fff;font-size:20px;font-weight:bold;letter-spacing:.5px">You're invited</div>
-    <div style="color:#d1d5db;font-size:14px;margin-top:6px">[event name] · hosted by [Company]</div>
-  </div>
-  <div style="border:1px solid #ddd;border-top:none;padding:28px;text-align:center">
-    <div style="font-size:26px;font-weight:bold;margin-bottom:4px">++rbc_date++</div>
-    <div style="font-size:15px;color:#444">++rbc_time++</div>
-    <div style="font-size:13px;color:#777;margin:8px 0 24px">[venue or video link]</div>
-    <a href="++rbc_url++" style="display:inline-block;background:#1f2937;color:#fff;padding:12px 32px;text-decoration:none;font-weight:bold;font-size:14px">RSVP</a>
-    <p style="font-size:12px;color:#999;margin:24px 0 0">Hi [Firstname] — spots are limited, RSVP by ++rbc_date++.</p>
-  </div>
-</div>`,
-    text: `You're invited — [event name]\n\n++rbc_date++ at ++rbc_time++ · [venue]\nRSVP: ++rbc_url++`,
-  },
-  {
-    label: 'Holiday / Office Hours',
-    subject: 'Office hours over the holidays — [Company]',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:580px;margin:0 auto;color:#222">
-  <div style="padding:30px 28px">
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">Hi [Firstname],</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">Quick heads-up on our holiday schedule so nothing catches you off guard:</p>
-    <ul style="font-size:14px;line-height:1.9;color:#333;padding-left:20px;margin:0 0 18px">
-      <li><strong>++rbc_date++ – ++rbc_date++:</strong> office closed, limited email monitoring</li>
-      <li><strong>++rbc_date++ onwards:</strong> full service resumes</li>
-      <li>Urgent issues: reply with URGENT in the subject and it gets escalated</li>
-    </ul>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 20px">Anything that can't wait, send it now and we'll pick it up first thing back.</p>
-    <p style="font-size:14px;line-height:1.7;margin:0">Happy holidays,<br><strong>The [Company] team</strong></p>
-  </div>
-</div>`,
-    text: `Hi [Firstname],\n\nHoliday hours: closed ++rbc_date++ – ++rbc_date++. Full service resumes ++rbc_date++.\nUrgent? Reply with URGENT in subject.\n\n— [Company]`,
-  },
-  {
-    label: 'Account Statement',
-    subject: 'Your statement — ++rbc_date++ · [Company]',
-    html: `<div style="font-family:Georgia,'Times New Roman',serif;max-width:580px;margin:0 auto;color:#222">
-  <div style="padding:30px 28px;border-bottom:1px solid #ddd">
-    <div style="font-size:18px;font-weight:bold">Account statement</div>
-    <div style="font-size:12px;color:#777;margin-top:2px">[Firstname] [Lastname] · [~EMail~] · ++rbc_date++</div>
-  </div>
-  <div style="padding:28px">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;margin-bottom:20px">
-      <tr style="background:#f5f5f5"><td style="padding:8px 12px;font-weight:bold">Date</td><td style="padding:8px 12px;font-weight:bold">Description</td><td style="padding:8px 12px;font-weight:bold;text-align:right">Amount</td></tr>
-      <tr><td style="padding:8px 12px">++rbc_date++</td><td style="padding:8px 12px">Service charge</td><td style="padding:8px 12px;text-align:right">$120.00</td></tr>
-      <tr><td style="padding:8px 12px">++rbc_date++</td><td style="padding:8px 12px">Add-on service</td><td style="padding:8px 12px;text-align:right">$85.00</td></tr>
-      <tr style="border-top:2px solid #222"><td colspan="2" style="padding:8px 12px;font-weight:bold">Balance due</td><td style="padding:8px 12px;text-align:right;font-weight:bold">$205.00</td></tr>
-    </table>
-    <p style="font-size:14px;line-height:1.7;margin:0">View the full statement online: <a href="++rbc_url++" style="color:#0645ad">++rbc_url++</a></p>
-    <hr style="border:none;border-top:1px solid #ddd;margin:24px 0">
-    <p style="font-size:12px;color:#999;margin:0">[Company] Billing · [~EMail~]</p>
-  </div>
-</div>`,
-    text: `Statement — ++rbc_date++\n\nService charge $120.00\nAdd-on $85.00\nBalance due: $205.00\nFull statement: ++rbc_url++`,
-  },
-  {
-    label: 'Price Quote / Estimate',
-    subject: 'Quote for [Firstname] — valid until ++rbc_date++',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:580px;margin:0 auto;color:#222">
-  <div style="padding:30px 28px;border-bottom:2px solid #2c5282">
-    <div style="font-size:18px;font-weight:bold;color:#2c5282">Quotation</div>
-    <div style="font-size:12px;color:#777;margin-top:2px">Prepared for [Firstname] [Lastname] · ++rbc_date++</div>
-  </div>
-  <div style="padding:28px">
-    <p style="font-size:14px;line-height:1.7;margin:0 0 16px">Hi [Firstname],</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 16px">As requested, here's our pricing for the work discussed:</p>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #ddd;font-size:13px;margin:16px 0">
-      <tr style="background:#ebf2fa"><td style="padding:9px 12px;font-weight:bold">Item</td><td style="padding:9px 12px;font-weight:bold;text-align:right">Price</td></tr>
-      <tr><td style="padding:9px 12px">Line item one — description</td><td style="padding:9px 12px;text-align:right">$450.00</td></tr>
-      <tr><td style="padding:9px 12px">Line item two — description</td><td style="padding:9px 12px;text-align:right">$780.00</td></tr>
-      <tr><td style="padding:9px 12px">Line item three — description</td><td style="padding:9px 12px;text-align:right">$320.00</td></tr>
-      <tr style="border-top:2px solid #2c5282"><td style="padding:9px 12px;font-weight:bold">Total</td><td style="padding:9px 12px;text-align:right;font-weight:bold">$1,550.00</td></tr>
-    </table>
-    <p style="font-size:13px;color:#555;line-height:1.7;margin:0 0 18px">Valid until ++rbc_date++. Payment terms: 50% upfront, balance on completion.</p>
-    <a href="++rbc_url++" style="display:inline-block;background:#2c5282;color:#fff;padding:11px 28px;text-decoration:none;font-weight:bold;font-size:13px">Accept quote</a>
-    <p style="font-size:13px;color:#555;margin:18px 0 0">Questions on any line? Reply and I'll walk you through it.</p>
-  </div>
-</div>`,
-    text: `Quote for [Firstname] — valid until ++rbc_date++\n\nItem one $450 · Item two $780 · Item three $320\nTOTAL: $1,550.00\nAccept: ++rbc_url++`,
-  },
-  {
-    label: 'Thank You Note',
-    subject: 'Thank you — [Firstname]',
-    html: `<div style="font-family:Georgia,'Times New Roman',serif;max-width:560px;margin:0 auto;color:#222">
-  <div style="padding:36px 32px">
-    <p style="font-size:15px;line-height:1.9;margin:0 0 16px">Hi [Firstname],</p>
-    <p style="font-size:15px;line-height:1.9;margin:0 0 16px">I just wanted to say thank you. The way you handled [recent thing] made a real difference on our end — it doesn't go unnoticed.</p>
-    <p style="font-size:15px;line-height:1.9;margin:0 0 24px">We're lucky to work with people like you. Looking forward to the next project.</p>
-    <p style="font-size:15px;line-height:1.9;margin:0">Warmly,<br><strong>[Name]</strong><br><span style="color:#777;font-size:13px">[Company] · [~EMail~]</span></p>
-  </div>
-</div>`,
-    text: `Hi [Firstname],\n\nThank you — the way you handled things recently made a real difference.\nLooking forward to next time.\n\n[Name] · [~EMail~]`,
-  },
-  {
-    label: 'NDA / Confidentiality',
-    subject: 'NDA for review — [Company] / [Firstname]',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:580px;margin:0 auto;color:#222">
-  <div style="padding:30px 28px;border-bottom:1px solid #ddd">
-    <div style="font-size:18px;font-weight:bold">Non-Disclosure Agreement</div>
-    <div style="font-size:12px;color:#777;margin-top:2px">Mutual NDA · prepared ++rbc_date++</div>
-  </div>
-  <div style="padding:28px">
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">Dear [Firstname],</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">Ahead of our discussions, I've attached a mutual NDA covering the information we'll share. It's a standard two-way agreement — nothing unusual.</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 20px">Please review and sign at your convenience: <a href="++rbc_url++" style="color:#0645ad">++rbc_url++</a>. Happy to adjust any terms if your legal team has preferences.</p>
-    <p style="font-size:14px;line-height:1.7;margin:0">Best,<br><strong>[Name]</strong><br><span style="color:#777;font-size:13px">[Company] · [~EMail~]</span></p>
-  </div>
-</div>`,
-    text: `Dear [Firstname],\n\nMutual NDA attached ahead of our discussions — standard two-way terms.\nReview & sign: ++rbc_url++`,
-  },
-  {
-    label: 'Reference / Recommendation',
-    subject: 'Reference for [Firstname] [Lastname]',
-    html: `<div style="font-family:Georgia,'Times New Roman',serif;max-width:580px;margin:0 auto;color:#222">
-  <div style="padding:36px 32px">
-    <p style="font-size:14px;line-height:1.9;margin:0 0 16px">To whom it may concern,</p>
-    <p style="font-size:14px;line-height:1.9;margin:0 0 16px">I am writing to recommend [Firstname] [Lastname], who worked with us at [Company] as [role] from ++rbc_date++ to ++rbc_date++.</p>
-    <p style="font-size:14px;line-height:1.9;margin:0 0 16px">During that time [Firstname] consistently [key strength]. What stood out most was [specific example]. I would hire them again without hesitation.</p>
-    <p style="font-size:14px;line-height:1.9;margin:0 0 24px">Please feel free to contact me with any questions.</p>
-    <p style="font-size:14px;line-height:1.9;margin:0">Sincerely,<br><strong>[Name]</strong><br>[Title], [Company]<br>[~EMail~]</p>
-  </div>
-</div>`,
-    text: `To whom it may concern,\n\nI recommend [Firstname] [Lastname] ([role], ++rbc_date++ – ++rbc_date++). Consistently strong on [strength]; standout example: [example]. Would rehire without hesitation.\n\n[Name] · [~EMail~]`,
-  },
-  {
-    label: 'Deadline / Action Notice',
-    subject: 'Action needed by ++rbc_date++ — [Company]',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:580px;margin:0 auto;color:#222">
-  <div style="padding:30px 28px">
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">Hi [Firstname],</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">This is a reminder that we need [the thing — e.g. signed agreement, updated details, payment] from you by <strong>++rbc_date++</strong> to keep everything on schedule.</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 20px">It takes about five minutes: <a href="++rbc_url++" style="color:#0645ad">++rbc_url++</a></p>
-    <p style="font-size:13px;color:#555;line-height:1.7;margin:0">If the deadline is a problem, let me know and we'll find another option — just don't let it slip silently.</p>
-    <hr style="border:none;border-top:1px solid #ddd;margin:24px 0">
-    <p style="font-size:12px;color:#999;margin:0">[Name] · [Company] · [~EMail~]</p>
-  </div>
-</div>`,
-    text: `Hi [Firstname],\n\nNeed [item] from you by ++rbc_date++ to stay on schedule.\nTakes 5 min: ++rbc_url++\nIssues? Just reply.`,
-  },
-  {
-    label: 'Job Application Follow-up',
-    subject: 'Following up — application for [position]',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:580px;margin:0 auto;color:#222">
-  <div style="padding:30px 28px">
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">Dear Hiring Manager,</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">I applied for the [position] role on ++rbc_date++ (ref ++rbc_number6++) and wanted to follow up on my application.</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">I've attached my updated CV and portfolio. I'm particularly drawn to [specific reason related to company], and I'd welcome the chance to discuss how my experience with [relevant skill] could contribute.</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 20px">Happy to make time for a call at your convenience.</p>
-    <p style="font-size:14px;line-height:1.7;margin:0">Thank you for your consideration,<br><strong>[Firstname] [Lastname]</strong><br><span style="color:#777;font-size:13px">[~EMail~] · [portfolio/LinkedIn]</span></p>
-  </div>
-</div>`,
-    text: `Dear Hiring Manager,\n\nFollowing up on my application for [position] (ref ++rbc_number6++, applied ++rbc_date++). CV + portfolio attached. Drawn to [reason]; happy to discuss [skill].\n\n[Firstname] [Lastname] · [~EMail~]`,
-  },
-  {
-    label: 'Product Update',
-    subject: 'What we shipped this month — [Company]',
-    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:580px;margin:0 auto;color:#222">
-  <div style="padding:30px 28px;border-bottom:1px solid #ddd">
-    <div style="font-size:18px;font-weight:bold">Product update</div>
-    <div style="font-size:12px;color:#777;margin-top:2px">[Company] · ++rbc_date++</div>
-  </div>
-  <div style="padding:28px">
-    <p style="font-size:14px;line-height:1.7;margin:0 0 14px">Hi [Firstname],</p>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 18px">Quick roundup of what changed since last month — mostly things you asked for:</p>
-    <ul style="font-size:14px;line-height:1.9;color:#333;padding-left:20px;margin:0 0 18px">
-      <li><strong>Faster exports</strong> — reports now generate in seconds, not minutes</li>
-      <li><strong>Bulk edits</strong> — update multiple records at once</li>
-      <li><strong>Fixed</strong> the sync issue a few of you flagged</li>
-    </ul>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 18px">Full changelog: <a href="++rbc_url++" style="color:#0645ad">++rbc_url++</a></p>
-    <p style="font-size:13px;color:#555;margin:0">Something missing? Reply and tell us — it goes straight to the roadmap.</p>
-    <hr style="border:none;border-top:1px solid #ddd;margin:24px 0">
-    <p style="font-size:12px;color:#999;margin:0">[Company] Product Team · [~EMail~]</p>
-  </div>
-</div>`,
-    text: `Hi [Firstname],\n\nThis month: faster exports, bulk edits, and the sync fix you flagged.\nChangelog: ++rbc_url++`,
-  },
-
-
-];
-
-const escapeHtmlText = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const plainPreviewDoc = (text) => `<!doctype html><html><body style="margin:0;background:#f4f4f5"><div style="max-width:600px;margin:24px auto;background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:32px;font-family:-apple-system,'Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.7;color:#27272a;white-space:pre-wrap">${escapeHtmlText(text)}</div></body></html>`;
-
-const PLACEHOLDER_GROUPS = [
-  {
-    label: 'RECIPIENT', color: 'green',
-    items: [
-      { tag: '[Firstname]', tip: 'First name' },
-      { tag: '[Lastname]', tip: 'Last name' },
-      { tag: '[Name]', tip: 'Full name' },
-      { tag: '[Company]', tip: 'Company' },
-      { tag: '[~EMail~]', tip: 'Email address' },
-      { tag: '[EMail_LocalPart]', tip: 'Local part (before @)' },
-      { tag: '[EMail_DomainPart]', tip: 'Domain (after @)' },
-      { tag: '++rbc_user++', tip: 'Email username' },
-      { tag: '++rbc_domain++', tip: 'Full domain' },
-      { tag: '++rbc_domain1++', tip: 'Domain label capitalized' },
-      { tag: '++rbc_secret_email++', tip: 'Email with middle masked' },
-    ],
-  },
-  {
-    label: 'CAMPAIGN', color: 'cyan',
-    items: [
-      { tag: '[~SUBJECT~]', tip: 'Email subject' },
-      { tag: '[AbmeldeLink]', tip: 'Unsubscribe URL' },
-      { tag: '++rbc_url++', tip: 'Cloaked tracking link (google.com)' },
-      { tag: '++rbc_link++', tip: 'Raw tracking link' },
-      { tag: '++rbc_short++', tip: 'Redirect link' },
-      { tag: '{{unsubscribe_url}}', tip: 'Unsubscribe URL (mustache)' },
-    ],
-  },
-  {
-    label: 'DATE / TIME', color: 'yellow',
-    items: [
-      { tag: '++rbc_date++', tip: 'Current date' },
-      { tag: '++rbc_time++', tip: 'Current time' },
-      { tag: '{{date}}', tip: 'Date (mustache)' },
-      { tag: '{{time}}', tip: 'Time (mustache)' },
-    ],
-  },
-  {
-    label: 'RANDOM', color: 'orange',
-    items: [
-      { tag: '++rbc_randstring++', tip: 'Random 10-char string' },
-      { tag: '{{random_id}}', tip: 'UUID' },
-      { tag: '++rbc_number3++', tip: '3-digit number' },
-      { tag: '++rbc_number4++', tip: '4-digit number' },
-      { tag: '++rbc_number5++', tip: '5-digit number' },
-      { tag: '++rbc_number6++', tip: '6-digit number' },
-      { tag: '++rbc_char3++', tip: '3 random chars' },
-      { tag: '++rbc_char5++', tip: '5 random chars' },
-      { tag: '++rbc_char8++', tip: '8 random chars' },
-    ],
-  },
-  {
-    label: 'SYSTEM', color: 'purple',
-    items: [
-      { tag: '++rbc_browser++', tip: 'Random browser UA' },
-      { tag: '++rbc_os++', tip: 'Random OS string' },
-      { tag: '++rbc_country++', tip: 'Random country name' },
-    ],
-  },
-  {
-    label: 'IDENTITY', color: 'green',
-    items: [
-      { tag: '++rbc_data_fname++', tip: 'Fake first name' },
-      { tag: '++rbc_data_lname++', tip: 'Fake last name' },
-      { tag: '++rbc_data_name++', tip: 'Fake full name' },
-      { tag: '++rbc_data_email++', tip: 'Fake email' },
-      { tag: '++rbc_data_uname++', tip: 'Fake username' },
-      { tag: '++rbc_data_secret_uname++', tip: 'Masked username' },
-      { tag: '++rbc_data_phone++', tip: 'Fake phone' },
-      { tag: '++rbc_data_secret_phone++', tip: 'Masked phone' },
-      { tag: '++rbc_data_company++', tip: 'Fake company' },
-      { tag: '++rbc_data_uuid++', tip: 'Fake UUID' },
-    ],
-  },
-  {
-    label: 'LOCATION', color: 'cyan',
-    items: [
-      { tag: '++rbc_data_country++', tip: 'Fake country' },
-      { tag: '++rbc_data_city++', tip: 'Fake city' },
-      { tag: '++rbc_data_state++', tip: 'Fake state' },
-      { tag: '++rbc_data_postcode++', tip: 'Fake postcode' },
-      { tag: '++rbc_data_addrs++', tip: 'Full fake address' },
-      { tag: '++rbc_data_street++', tip: 'Fake street' },
-    ],
-  },
-  {
-    label: 'FINANCE', color: 'yellow',
-    items: [
-      { tag: '++rbc_data_cc++', tip: 'Fake CC number' },
-      { tag: '++rbc_data_expr++', tip: 'Fake expiry date' },
-      { tag: '++rbc_data_ctype++', tip: 'Fake card type' },
-      { tag: '++rbc_data_iban++', tip: 'Fake IBAN' },
-    ],
-  },
-  {
-    label: 'HASH / MISC', color: 'orange',
-    items: [
-      { tag: '++rbc_data_md5++', tip: 'Fake MD5' },
-      { tag: '++rbc_data_sha1++', tip: 'Fake SHA1' },
-      { tag: '++rbc_data_sha256++', tip: 'Fake SHA256' },
-      { tag: '++rbc_data_ua++', tip: 'Fake user agent' },
-      { tag: '++rbc_data_site++', tip: 'Fake domain' },
-    ],
-  },
-];
-
-// Lucide-style stroke icons — crisp at 14px, no font dependency, no tofu.
-const NAV_ICONS = {
-  dashboard: 'M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z',
-  send: 'M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z',
-  compose: 'M4 4h16v16H4zM4 7l8 6 8-6',
-  aiwriter: 'M12 2l2.1 5.9L20 10l-5.9 2.1L12 18l-2.1-5.9L4 10l5.9-2.1zM19 15l.9 2.6L22.5 18.5l-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9z',
-  recipients: 'M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM21 21v-2a4 4 0 0 0-3-3.87M15.5 3.13a4 4 0 0 1 0 7.75',
-  sorter: 'M3 4h18l-7 8v5l-4 2v-7L3 4z',
-  smtp: 'M4 2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM4 14h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2zM6 6h.01M6 18h.01',
-  delivery: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
-  schedule: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2',
-  bounces: 'M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01',
-  analytics: 'M3 21h18M7 16v-5M12 16V8M17 16v-8',
-  help: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01',
-};
-function NavIcon({ name, size = 15 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d={NAV_ICONS[name] || NAV_ICONS.help} />
-    </svg>
-  );
-}
-
-const NAV_ITEMS = [
-  { id: 'dashboard',  label: 'DASHBOARD',   icon: 'dashboard' },
-  { id: 'send',       label: 'CAMPAIGN',    icon: 'send' },
-  { id: 'compose',    label: 'LETTER',      icon: 'compose' },
-  { id: 'aiwriter',   label: 'AI WRITER',   icon: 'aiwriter' },
-  { id: 'recipients', label: 'CONTACTS',    icon: 'recipients' },
-  { id: 'sorter',     label: 'SORTER',      icon: 'sorter' },
-  { id: 'smtp',       label: 'SMTP',        icon: 'smtp' },
-  { id: 'delivery',   label: 'SETTINGS',    icon: 'delivery' },
-  { id: 'schedule',   label: 'SCHEDULE',    icon: 'schedule' },
-  { id: 'bounces',    label: 'BOUNCES',     icon: 'bounces' },
-  { id: 'analytics',  label: 'ANALYTICS',   icon: 'analytics' },
-  { id: 'help',       label: 'HELP',        icon: 'help' },
-];
-
-const BLOCK_TYPES = [
-  { id: 'header', label: 'HEADER', icon: 'H' },
-  { id: 'image', label: 'IMAGE', icon: 'I' },
-  { id: 'text', label: 'TEXT', icon: 'T' },
-  { id: 'button', label: 'BUTTON', icon: 'B' },
-  { id: 'divider', label: 'DIVIDER', icon: '—' },
-  { id: 'social', label: 'SOCIAL', icon: 'S' },
-  { id: 'footer', label: 'FOOTER', icon: 'F' },
-];
-
-function VisualEditor({ draft, updateDraft, token, assets, setAssets }) {
-  const [blocks, setBlocks] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
-  const [draggedBlock, setDraggedBlock] = useState(null);
-  const [viewMode, setViewMode] = useState('desktop');
-  const [assetPanelOpen, setAssetPanelOpen] = useState(false);
-  const [assetName, setAssetName] = useState('');
-  const [assetType, setAssetType] = useState('image');
-  const [assetData, setAssetData] = useState('');
-
-  useEffect(() => {
-    if (blocks.length === 0 && draft.html) {
-      try {
-        const parsed = JSON.parse(draft.html);
-        if (Array.isArray(parsed)) setBlocks(parsed);
-      } catch {}
-    }
-  }, [draft.html]);
-
-  useEffect(() => {
-    updateDraft('html', JSON.stringify(blocks));
-    updateDraft('text', generatePlainText(blocks));
-  }, [blocks]);
-
-  function generatePlainText(blocks) {
-    return blocks.map(b => {
-      switch (b.type) {
-        case 'header': return b.text || '';
-        case 'text': return b.text || '';
-        case 'button': return `${b.text || 'Click here'}: ${b.url || ''}`;
-        case 'footer': return b.text || '';
-        default: return '';
-      }
-    }).filter(Boolean).join('\n\n');
-  }
-
-  function generateHtml(blocks, isPreview = true) {
-    const styles = {
-      container: 'max-width:600px;margin:0 auto;padding:20px;font-family:Arial,sans-serif;color:#333;',
-      header: 'font-size:24px;font-weight:bold;margin-bottom:16px;',
-      image: 'max-width:100%;height:auto;margin:12px 0;',
-      text: 'font-size:14px;line-height:1.6;margin-bottom:16px;',
-      button: 'display:inline-block;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold;',
-      divider: 'border:none;border-top:2px solid #ddd;margin:20px 0;',
-      social: 'display:flex;gap:12px;margin:16px 0;',
-      footer: 'font-size:12px;color:#666;margin-top:24px;padding-top:16px;border-top:1px solid #ddd;',
-    };
-    const html = blocks.map(b => {
-      switch (b.type) {
-        case 'header': return `<div style="${styles.header}color:${b.color || '#333'};text-align:${b.align || 'left'};font-size:${b.size || 24}px">${escapeHtml(b.text || '')}</div>`;
-        case 'image': return `<img src="${b.url || ''}" alt="${escapeHtml(b.alt || '')}" style="${styles.image}border-radius:${b.radius || 0}px" />`;
-        case 'text': return `<div style="${styles.text}color:${b.color || '#333'};text-align:${b.align || 'left'};font-size:${b.size || 14}px;line-height:${b.lineHeight || 1.6}">${escapeHtml(b.text || '')}</div>`;
-        case 'button': return `<a href="${b.url || '#'}" style="${styles.button}background:${b.bgColor || '#2fe06b'};color:${b.color || '#000'};padding:${b.padding || '12px 24px'};border-radius:${b.radius || 4}px;font-size:${b.size || 14}px">${escapeHtml(b.text || 'Click here')}</a>`;
-        case 'divider': return `<hr style="${styles.divider}border-top-color:${b.color || '#ddd'};margin:${b.margin || '20px 0'}" />`;
-        case 'social': return `<div style="${styles.social}justify-content:${b.align || 'left'}">${(b.icons || []).map(i => `<a href="${i.url || '#'}" style="display:inline-block;width:32px;height:32px;background:${i.bgColor || '#333'};color:#fff;text-align:center;line-height:32px;border-radius:50%;text-decoration:none;font-size:16px">${i.icon || 'S'}</a>`).join('')}</div>`;
-        case 'footer': return `<div style="${styles.footer}text-align:${b.align || 'center'};font-size:${b.size || 12}px">${escapeHtml(b.text || '')}</div>`;
-        default: return '';
-      }
-    }).join('');
-    return `<div style="${styles.container}">${html}</div>`;
-  }
-
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  }
-
-  function addBlock(type) {
-    const newBlock = { id: Date.now(), type, text: 'New ' + type, color: '#333', align: 'left', size: type === 'header' ? 24 : 14 };
-    if (type === 'button') newBlock.url = '#'; newBlock.bgColor = '#2fe06b'; newBlock.color = '#000'; newBlock.radius = 4; newBlock.padding = '12px 24px';
-    if (type === 'image') newBlock.url = ''; newBlock.alt = 'Image'; newBlock.radius = 0;
-    if (type === 'social') newBlock.icons = [{ icon: 'T', url: '#', bgColor: '#1DA1F2' }, { icon: 'F', url: '#', bgColor: '#4267B2' }, { icon: 'I', url: '#', bgColor: '#E1306C' }, { icon: 'L', url: '#', bgColor: '#0077B5' }];
-    if (type === 'footer') newBlock.text = 'You received this email because you subscribed. Unsubscribe | Privacy | Contact';
-    setBlocks([...blocks, newBlock]);
-    setSelectedId(newBlock.id);
-  }
-
-  function updateBlock(id, field, value) {
-    setBlocks(blocks.map(b => b.id === id ? { ...b, [field]: value } : b));
-  }
-
-  function deleteBlock(id) {
-    setBlocks(blocks.filter(b => b.id !== id));
-    if (selectedId === id) setSelectedId(null);
-  }
-
-  function moveBlock(from, to) {
-    const newBlocks = [...blocks];
-    const [removed] = newBlocks.splice(from, 1);
-    newBlocks.splice(to, 0, removed);
-    setBlocks(newBlocks);
-  }
-
-  function onDragStart(e, index) {
-    setDraggedBlock(index);
-    e.dataTransfer.effectAllowed = 'move';
-  }
-
-  function onDragOver(e, index) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  }
-
-  function onDrop(e, index) {
-    e.preventDefault();
-    if (draggedBlock === null || draggedBlock === index) return;
-    moveBlock(draggedBlock, index);
-    setDraggedBlock(null);
-  }
-
-  function saveAsset() {
-    if (!assetName || !assetData) return;
-    const type = assetType;
-    const dataUrl = assetData.startsWith('data:') ? assetData : `data:image/png;base64,${assetData}`;
-    api(token, '/api/assets', { method: 'POST', body: { name: assetName, type, dataUrl } }).then(r => {
-      setAssets([...assets, { id: r.id, name: assetName, type, dataUrl, createdAt: new Date().toISOString() }]);
-      setAssetName(''); setAssetData(''); setAssetType('image');
-    });
-  }
-
-  function loadAsset(asset) {
-    updateBlock(selectedId, 'url', asset.dataUrl);
-  }
-
-  const selectedBlock = blocks.find(b => b.id === selectedId);
-
-  return (
-    <div className="visual-editor">
-      <div className="ve-toolbar">
-        <span className="dim">VISUAL EDITOR</span>
-        <div className="btn-row">
-          <button className="btn-xs" onClick={() => setViewMode('desktop')}>DESKTOP</button>
-          <button className="btn-xs" onClick={() => setViewMode('mobile')}>MOBILE</button>
-          <button className="btn-xs" onClick={() => setAssetPanelOpen(!assetPanelOpen)}>ASSETS</button>
-        </div>
-      </div>
-      <div className="ve-layout">
-        <div className="ve-palette">
-          <div className="ve-palette-title">BLOCKS</div>
-          {BLOCK_TYPES.map(t => (
-            <div key={t.id} className="ve-palette-item" draggable onDragStart={() => setDraggedBlock(-1)} onDragEnd={() => setDraggedBlock(null)} onClick={() => addBlock(t.id)}>
-              <span className="ve-icon">{t.icon}</span>
-              <span>{t.label}</span>
-            </div>
-          ))}
-        </div>
-        <div className="ve-canvas">
-          <div className={`ve-canvas-inner ${viewMode}`}>
-            {blocks.length === 0 && (
-              <div className="ve-empty">DRAG BLOCKS HERE OR CLICK A BLOCK TYPE TO START</div>
-            )}
-            {blocks.map((b, i) => (
-              <div key={b.id} className={`ve-block ${selectedId === b.id ? 've-selected' : ''}`} draggable onDragStart={(e) => onDragStart(e, i)} onDragOver={(e) => onDragOver(e, i)} onDrop={(e) => onDrop(e, i)} onClick={() => setSelectedId(b.id)}>
-                {b.type === 'header' && <div style={{ fontSize: b.size, color: b.color, textAlign: b.align }}>{b.text}</div>}
-                {b.type === 'image' && (b.url ? <img src={b.url} alt={b.alt} style={{ maxWidth: '100%', borderRadius: b.radius }} /> : <div className="ve-placeholder">IMAGE: {b.alt}</div>)}
-                {b.type === 'text' && <div style={{ fontSize: b.size, color: b.color, textAlign: b.align, lineHeight: b.lineHeight }}>{b.text}</div>}
-                {b.type === 'button' && <a href="#" style={{ display: 'inline-block', padding: b.padding, background: b.bgColor, color: b.color, textDecoration: 'none', borderRadius: b.radius, fontSize: b.size }}>{b.text}</a>}
-                {b.type === 'divider' && <hr style={{ borderTop: `2px solid ${b.color}`, margin: b.margin }} />}
-                {b.type === 'social' && <div style={{ display: 'flex', gap: '12px', justifyContent: b.align }}>{(b.icons || []).map((i, idx) => <span key={idx} style={{ width: 32, height: 32, background: i.bgColor, color: '#fff', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>{i.icon}</span>)}</div>}
-                {b.type === 'footer' && <div style={{ fontSize: b.size, color: '#666', textAlign: b.align }}>{b.text}</div>}
-                <div className="ve-block-actions"><button className="btn-xs" onClick={(e) => { e.stopPropagation(); deleteBlock(b.id); }}>×</button></div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="ve-props">
-          <div className="ve-palette-title">PROPERTIES</div>
-          {!selectedBlock && <div className="ve-empty">SELECT A BLOCK</div>}
-          {selectedBlock && (
-            <div className="ve-props-form">
-              <label className="field-label">TEXT</label>
-              <input className="w-input" value={selectedBlock.text || ''} onChange={(e) => updateBlock(selectedId, 'text', e.target.value)} />
-              {selectedBlock.type === 'header' || selectedBlock.type === 'text' ? (
-                <>
-                  <label className="field-label">COLOR</label>
-                  <input className="w-input" type="color" value={selectedBlock.color || '#333'} onChange={(e) => updateBlock(selectedId, 'color', e.target.value)} />
-                  <label className="field-label">SIZE</label>
-                  <input className="w-input" type="number" value={selectedBlock.size || 14} onChange={(e) => updateBlock(selectedId, 'size', Number(e.target.value))} />
-                  <label className="field-label">ALIGN</label>
-                  <select className="w-select" value={selectedBlock.align || 'left'} onChange={(e) => updateBlock(selectedId, 'align', e.target.value)}>
-                    <option value="left">LEFT</option>
-                    <option value="center">CENTER</option>
-                    <option value="right">RIGHT</option>
-                  </select>
-                </>
-              ) : null}
-              {selectedBlock.type === 'text' && (
-                <>
-                  <label className="field-label">LINE HEIGHT</label>
-                  <input className="w-input" type="number" step="0.1" value={selectedBlock.lineHeight || 1.6} onChange={(e) => updateBlock(selectedId, 'lineHeight', Number(e.target.value))} />
-                </>
-              )}
-              {selectedBlock.type === 'button' && (
-                <>
-                  <label className="field-label">URL</label>
-                  <input className="w-input" value={selectedBlock.url || ''} onChange={(e) => updateBlock(selectedId, 'url', e.target.value)} />
-                  <label className="field-label">BG COLOR</label>
-                  <input className="w-input" type="color" value={selectedBlock.bgColor || '#2fe06b'} onChange={(e) => updateBlock(selectedId, 'bgColor', e.target.value)} />
-                  <label className="field-label">TEXT COLOR</label>
-                  <input className="w-input" type="color" value={selectedBlock.color || '#000'} onChange={(e) => updateBlock(selectedId, 'color', e.target.value)} />
-                  <label className="field-label">RADIUS</label>
-                  <input className="w-input" type="number" value={selectedBlock.radius || 4} onChange={(e) => updateBlock(selectedId, 'radius', Number(e.target.value))} />
-                  <label className="field-label">PADDING</label>
-                  <input className="w-input" value={selectedBlock.padding || '12px 24px'} onChange={(e) => updateBlock(selectedId, 'padding', e.target.value)} />
-                </>
-              )}
-              {selectedBlock.type === 'image' && (
-                <>
-                  <label className="field-label">URL</label>
-                  <input className="w-input" value={selectedBlock.url || ''} onChange={(e) => updateBlock(selectedId, 'url', e.target.value)} />
-                  <label className="field-label">ALT</label>
-                  <input className="w-input" value={selectedBlock.alt || ''} onChange={(e) => updateBlock(selectedId, 'alt', e.target.value)} />
-                  <label className="field-label">RADIUS</label>
-                  <input className="w-input" type="number" value={selectedBlock.radius || 0} onChange={(e) => updateBlock(selectedId, 'radius', Number(e.target.value))} />
-                </>
-              )}
-              {selectedBlock.type === 'footer' && (
-                <>
-                  <label className="field-label">SIZE</label>
-                  <input className="w-input" type="number" value={selectedBlock.size || 12} onChange={(e) => updateBlock(selectedId, 'size', Number(e.target.value))} />
-                  <label className="field-label">ALIGN</label>
-                  <select className="w-select" value={selectedBlock.align || 'center'} onChange={(e) => updateBlock(selectedId, 'align', e.target.value)}>
-                    <option value="left">LEFT</option>
-                    <option value="center">CENTER</option>
-                    <option value="right">RIGHT</option>
-                  </select>
-                </>
-              )}
-              {selectedBlock.type === 'image' && (
-                <div style={{ marginTop: 10 }}>
-                  <label className="field-label">SAVE ASSET</label>
-                  <input className="w-input" placeholder="Asset name" value={assetName} onChange={(e) => setAssetName(e.target.value)} />
-                  <select className="w-select" value={assetType} onChange={(e) => setAssetType(e.target.value)}>
-                    <option value="image">IMAGE</option>
-                    <option value="signature">SIGNATURE</option>
-                    <option value="logo">LOGO</option>
-                    <option value="banner">BANNER</option>
-                  </select>
-                  <button className="btn-xs" onClick={saveAsset} disabled={!assetName || !assetData}>SAVE</button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-      {assetPanelOpen && (
-        <div className="ve-asset-panel">
-          <div className="ve-palette-title">ASSETS</div>
-          <div className="ve-assets-list">
-            {assets.filter(a => a.type === 'image' || a.type === 'signature' || a.type === 'logo' || a.type === 'banner').map(a => (
-              <div key={a.id} className="ve-asset" onClick={() => selectedBlock && loadAsset(a)}>
-                <img src={a.dataUrl} alt={a.name} style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 4 }} />
-                <div className="ve-asset-name">{a.name}</div>
-                <button className="btn-xs" onClick={(e) => { e.stopPropagation(); setAssets(assets.filter(x => x.id !== a.id)); api(token, `/api/assets/${a.id}`, { method: 'DELETE' }); }}>×</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-const EVENT_STYLE = {
-  send_ok:          { icon: '✓', color: 'var(--green)',  label: 'SENT' },
-  send_fail:        { icon: '✗', color: 'var(--red)',    label: 'FAIL' },
-  campaign_start:   { icon: '▶', color: 'var(--cyan)',   label: 'START' },
-  campaign_queued:  { icon: '⇩', color: 'var(--cyan)',   label: 'QUEUE' },
-  campaign_done:    { icon: '■', color: 'var(--purple)', label: 'DONE' },
-  open:             { icon: '◉', color: 'var(--yellow)', label: 'OPEN' },
-  click:            { icon: '↗', color: 'var(--cyan)',   label: 'CLICK' },
-  bounce:           { icon: '⛔', color: 'var(--red)',    label: 'BOUNCE' },
-  unsubscribe:      { icon: '⊘', color: 'var(--orange)', label: 'UNSUB' },
-  telegram_fail:    { icon: '⚠', color: 'var(--orange)', label: 'TG-ERR' },
-  smtp_check:       { icon: '⇄', color: 'var(--cyan)',   label: 'SMTP' },
-  campaign_fail:    { icon: '✗', color: 'var(--red)',    label: 'FAIL' },
-  sorter:           { icon: '⇅', color: 'var(--cyan)',   label: 'SORT' },
-  info:             { icon: '·', color: 'var(--txt-dim)', label: 'INFO' },
-};
-
-function eventLine(ev) {
-  switch (ev.kind) {
-    case 'send_ok':         return `${ev.email}`;
-    case 'send_fail':       return `${ev.email} — ${ev.error || 'failed'}`;
-    case 'campaign_start':  return `${ev.name} — "${ev.subject || '(no subject)'}" · ${ev.total ?? '?'} recipients · ${ev.engine || ''}`;
-    case 'campaign_queued': return `${ev.name} — "${ev.subject || '(no subject)'}" · ${ev.total ?? '?'} queued${ev.scheduledFor ? ' · scheduled ' + new Date(ev.scheduledFor).toLocaleString() : ''}`;
-    case 'smtp_check':      return `${ev.ok ? '✓' : '✗'} ${ev.label || 'smtp'}${ev.host ? ' @ ' + ev.host : ''}${ev.ok ? '' : ' — ' + (ev.error || 'failed')}`;
-    case 'campaign_fail':   return `${ev.name} FAILED — ${ev.error || 'error'}`;
-    case 'campaign_done': {
-      const s = {};
-      for (const r of ev.stats || []) s[r.status] = r.c;
-      return `${ev.name} — sent ${s.sent || 0} · failed ${s.failed || 0} · left ${(s.queued || 0) + (s.sending || 0)}`;
-    }
-    case 'open':            return `${ev.email} opened ${ev.name ? `“${ev.name}”` : ''}`;
-    case 'click':           return `${ev.email} → ${String(ev.target || '').slice(0, 80)}`;
-    case 'bounce':          return `${ev.email} — ${ev.reason || ev.kind}`;
-    case 'unsubscribe':     return `${ev.email} unsubscribed`;
-    case 'telegram_fail':   return `telegram: ${ev.error}`;
-    default:                return ev.message || ev.kind;
-  }
-}
-
-function LiveConsole({ events }) {
-  const ref = useRef(null);
-  const list = (events || []).slice(-100);
-  useEffect(() => {
-    const el = ref.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [list.length]);
-  return (
-    <div className="console" ref={ref}>
-      {list.length === 0 && <div className="console-empty">[ AWAITING EVENTS — SENDS, OPENS, CLICKS, BOUNCES STREAM HERE ]</div>}
-      {list.map((ev, i) => {
-        const st = EVENT_STYLE[ev.kind] || EVENT_STYLE.info;
-        return (
-          <div key={i} className="console-line">
-            <span className="console-ts">{new Date(ev.ts).toLocaleTimeString('en-GB', { hour12: false })}</span>
-            <span className="console-ico" style={{ color: st.color }}>{st.icon}</span>
-            <span className="console-tag" style={{ color: st.color }}>{st.label}</span>
-            <span className="console-msg">{eventLine(ev)}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function chatInline(t) {
-  const out = [];
-  const re = /(\*\*[^*]+\*\*|__[^_]+__|(?<![\w*])\*[^*]+\*(?![\w*])|`[^`]+`)/g;
-  let last = 0, k = 0;
-  for (const m of t.matchAll(re)) {
-    if (m.index > last) out.push(t.slice(last, m.index));
-    const tok = m[0];
-    if (tok.startsWith('**') || tok.startsWith('__')) out.push(<strong key={k++}>{tok.slice(2, -2)}</strong>);
-    else if (tok.startsWith('`')) out.push(<code key={k++} className="chat-ic">{tok.slice(1, -1)}</code>);
-    else out.push(<em key={k++}>{tok.slice(1, -1)}</em>);
-    last = m.index + tok.length;
-  }
-  if (last < t.length) out.push(t.slice(last));
-  return out;
-}
-
-function ChatText({ text }) {
-  const lines = String(text || '').split('\n');
-  const blocks = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (/^```/.test(line)) {
-      const code = [];
-      i++;
-      while (i < lines.length && !/^```/.test(lines[i])) { code.push(lines[i]); i++; }
-      i++;
-      blocks.push(<pre key={blocks.length} className="chat-code">{code.join('\n')}</pre>);
-    } else if (/^#{1,4}\s/.test(line)) {
-      blocks.push(<div key={blocks.length} className="chat-h">{chatInline(line.replace(/^#{1,4}\s*/, ''))}</div>);
-      i++;
-    } else if (/^\s*[-*•]\s+/.test(line)) {
-      const items = [];
-      while (i < lines.length && /^\s*[-*•]\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*[-*•]\s+/, '')); i++; }
-      blocks.push(<ul key={blocks.length} className="chat-list">{items.map((t, j) => <li key={j}>{chatInline(t)}</li>)}</ul>);
-    } else if (/^\s*\d+[.)]\s+/.test(line)) {
-      const items = [];
-      while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*\d+[.)]\s+/, '')); i++; }
-      blocks.push(<ol key={blocks.length} className="chat-list">{items.map((t, j) => <li key={j}>{chatInline(t)}</li>)}</ol>);
-    } else if (line.trim()) {
-      blocks.push(<div key={blocks.length} className="chat-p">{chatInline(line)}</div>);
-      i++;
-    } else {
-      i++;
-    }
-  }
-  return <>{blocks}</>;
-}
+import {
+  emptyDraft, emptySmtp, emptyAccount, emptySettings,
+  INTRO_STEPS, BLOCK_SNIPPETS, SMTP_PRESETS, SMTP_GUIDES, TIME_OPTIONS,
+  DAY_LABELS, fmtMin, PLACEHOLDER_GROUPS, NAV_ITEMS,
+} from './config.js';
+import { LETTER_TEMPLATES } from './builtinTemplates.js';
+import { escapeHtmlText, plainPreviewDoc, stripPageHtml } from './html.js';
+import { RbcMascot, ChromosomeBackground, RbcLogo, NavIcon } from './components/Chrome.jsx';
+import Pager from './components/Pager.jsx';
+import VisualEditor from './components/VisualEditor.jsx';
+import LiveConsole, { eventLine } from './components/LiveConsole.jsx';
+import ChatText from './components/ChatText.jsx';
 
 export default function App() {
   const [token, setToken] = useState(() => sessionStorage.getItem('mailerToken') || '');
@@ -1307,6 +42,7 @@ export default function App() {
   const [previewDevice, setPreviewDevice] = useState('desktop');
   const [versionInfo, setVersionInfo] = useState(null);
   const [updateInfo, setUpdateInfo] = useState(null);
+  const [updateResult, setUpdateResult] = useState(null);
   const [updateOpen, setUpdateOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [updateDismissed, setUpdateDismissed] = useState(false);
@@ -1387,22 +123,47 @@ export default function App() {
   const [templateDropdownOpen, setTemplateDropdownOpen] = useState(false);
   const [analyticsData, setAnalyticsData] = useState(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [deliverability, setDeliverability] = useState(null);
+  const [deliverabilityLoading, setDeliverabilityLoading] = useState(false);
+  const [deliverabilityError, setDeliverabilityError] = useState('');
   const [visualEditorOpen, setVisualEditorOpen] = useState(false);
   const [assets, setAssets] = useState([]);
   const htmlRef = useRef(null);
   const pasteRef = useRef(null);
   const textRef = useRef(null);
 
-  async function refresh(activeToken = token) {
+  async function refreshState(activeToken = token) {
     const next = await api(activeToken, '/api/state');
     setState(next);
     setSmtp({ ...emptySmtp, ...next.smtp, password: '' });
     if (next.sendSettings) setSettings({ ...emptySettings, ...next.sendSettings });
-    const templatesRes = await api(activeToken, '/api/templates');
+    return next;
+  }
+
+  async function refresh(activeToken = token) {
+    const next = await refreshState(activeToken);
+    const [templatesRes, assetsRes] = await Promise.all([
+      api(activeToken, '/api/templates').catch(() => []),
+      api(activeToken, '/api/assets').catch(() => []),
+    ]);
     setTemplates(templatesRes || []);
-    const assetsRes = await api(activeToken, '/api/assets');
     setAssets(assetsRes || []);
     setRecipVersion((v) => v + 1);
+    return next;
+  }
+
+  async function loadDeliverability(force = false) {
+    if (!token) return;
+    setDeliverabilityLoading(true);
+    setDeliverabilityError('');
+    try {
+      const res = await api(token, `/api/deliverability${force ? '?refresh=1' : ''}`);
+      setDeliverability(res);
+    } catch (err) {
+      setDeliverabilityError(err.message || 'DNS check failed');
+    } finally {
+      setDeliverabilityLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -1463,6 +224,13 @@ export default function App() {
   }, [token, tab]);
 
   useEffect(() => {
+    if (!token || tab !== 'dashboard') return;
+    loadDeliverability(false);
+    const iv = setInterval(() => loadDeliverability(false), 10 * 60 * 1000);
+    return () => clearInterval(iv);
+  }, [token, tab]);
+
+  useEffect(() => {
     if (!token) return;
     let alive = true;
     const check = () => api(token, '/api/update/check')
@@ -1481,15 +249,19 @@ export default function App() {
     if (!chatOpen || !token) return;
     const saved = settings.aiModel || '';
     if (!chatModel && saved) setChatModel(saved);
-    if (chatModels === null) {
+    if (!settings.aiEndpoint || !settings.aiKey) {
+      setChatModels([]);
+      return;
+    }
+    if (!chatModels?.length) {
       api(token, '/api/ai/models').then((r) => {
         const list = r.models || [];
         setChatModels(list);
         const cur = chatModel || saved;
         setChatModel(list.includes(cur) ? cur : (list[0] || cur));
-      }).catch(() => {}); // leave null — retries on next open
+      }).catch(() => setChatModels([]));
     }
-  }, [chatOpen, token]);
+  }, [chatOpen, token, settings.aiEndpoint, settings.aiKey]);
 
   useEffect(() => {
     if (tab !== 'compose' || extraTemplates.length) return;
@@ -1498,8 +270,16 @@ export default function App() {
 
   useEffect(() => {
     if (!token || (tab !== 'send' && tab !== 'dashboard')) return;
-    const iv = setInterval(() => refresh(token).catch(() => {}), 3000);
-    return () => clearInterval(iv);
+    const tick = () => {
+      if (document.visibilityState === 'hidden') return;
+      refreshState(token).catch(() => {});
+    };
+    const iv = setInterval(tick, 3000);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      clearInterval(iv);
+      document.removeEventListener('visibilitychange', tick);
+    };
   }, [token, tab]);
 
   // Strip <style>/<script> and neutralize absolute positioning from pasted HTML
@@ -1629,8 +409,10 @@ export default function App() {
   }
 
   async function applyUpdate() {
+    const pending = updateInfo;
     setUpdating(true);
     setUpdateInfo(null);
+    setUpdateResult(null);
     setUpdateDismissed(false);
     setTimeout(() => setUpdateDismissed(true), 5000);
     try {
@@ -1648,7 +430,9 @@ export default function App() {
           if (fresh && s.log.includes('FAILED')) {
             clearInterval(poll);
             setUpdating(false);
-            showNotice(`Update failed — ${s.log.trim().split('\n').pop()}`, 'err');
+            showNotice('Update failed — see the update log.', 'err');
+            setUpdateInfo(pending);
+            setUpdateResult({ ok: false, log: s.log });
           } else if (fresh && s.log.includes('[update] OK')) {
             clearInterval(poll);
             setUpdating(false);
@@ -1659,12 +443,33 @@ export default function App() {
         if (tries > 30) {
           clearInterval(poll);
           setUpdating(false);
-          showNotice('Update still running — refresh in a minute to see the new build.');
+          try {
+            const s = await api(token, '/api/update/status');
+            const fresh = s.log?.includes('[update] STARTED');
+            if (fresh && s.log.includes('FAILED')) {
+              showNotice('Update failed — see the update log.', 'err');
+              setUpdateInfo(pending);
+              setUpdateResult({ ok: false, log: s.log });
+            } else if (fresh && s.log.includes('[update] OK')) {
+              showNotice('Update applied — reloading…');
+              setTimeout(() => location.reload(), 3000);
+            } else {
+              showNotice('Update still running — refresh in a minute to see the new build.');
+              setUpdateInfo(pending);
+              setUpdateResult({ ok: false, log: s.log || 'No update log yet — the updater may not have started.' });
+            }
+          } catch (err) {
+            showNotice(`Update status unavailable: ${err.message}`, 'err');
+            setUpdateInfo(pending);
+            setUpdateResult({ ok: false, log: `Could not read the update log: ${err.message}` });
+          }
         }
       }, 3000);
     } catch (err) {
       setUpdating(false);
       showNotice(`Update failed: ${err.message}`, 'err');
+      setUpdateInfo(pending);
+      setUpdateResult({ ok: false, log: err.message });
     }
   }
 
@@ -1686,10 +491,15 @@ export default function App() {
         }),
         new Promise((_, rej) => setTimeout(() => rej(new Error('RBC Helper timed out — provider not responding')), 150000)),
       ]);
-      setChatMsgs([...msgs, { role: 'assistant', content: r.reply || '(empty reply)', target: r.target || 'none', actions: r.actions || [] }]);
+      const replyText = String(r.reply || '').trim();
+      const actions = r.actions || [];
+      if (!replyText && !actions.length) throw new Error('AI provider returned an empty reply.');
+      setChatMsgs([...msgs, { role: 'assistant', content: replyText || 'Done — use the action buttons below.', target: r.target || 'none', actions }]);
       if (r.model && r.model !== chatModel) setChatModel(r.model);
     } catch (err) {
-      setChatMsgs([...msgs, { role: 'assistant', content: `⚠ ${err.message || 'chat failed'}` }]);
+      const message = err.message || 'chat failed';
+      setChatMsgs([...msgs, { role: 'assistant', content: `⚠ ${message}` }]);
+      showNotice(`AI: ${message}`, 'err');
     } finally {
       setChatBusy(false);
     }
@@ -1930,6 +740,23 @@ export default function App() {
     (acc, c) => ({ sent: acc.sent + c.sent, failed: acc.failed + c.failed, queued: acc.queued + c.queued }),
     { sent: 0, failed: 0, queued: 0 }
   );
+  const plural = (count, one, many) => `${count.toLocaleString()} ${count === 1 ? one : many}`;
+  const deliveryBase = totals.sent + totals.failed;
+  const deliveryRate = deliveryBase > 0 ? Math.round((totals.sent / deliveryBase) * 1000) / 10 : null;
+  const liveSenders = (state?.smtpAccounts || []).filter((a) => a.enabled).length;
+  const delivChecks = deliverability?.checks || null;
+  const delivEntries = delivChecks ? [
+    ['SPF', delivChecks.spf],
+    ['DKIM', delivChecks.dkim],
+    ['DMARC', delivChecks.dmarc],
+    ['PTR', delivChecks.ptr],
+    ['PORT 25', delivChecks.port25],
+    ['TRACKING', delivChecks.tracking],
+  ] : [];
+  const delivScored = delivEntries.filter(([, check]) => ['pass', 'warn', 'fail'].includes(check?.status));
+  const delivPassed = delivScored.filter(([, check]) => check.status === 'pass').length;
+  const delivFailing = delivEntries.filter(([, check]) => ['fail', 'warn'].includes(check?.status));
+  const dashCampaigns = (state?.campaigns || []).slice(0, 6);
 
   // ── LOGIN ──
   if (!token) {
@@ -1957,6 +784,7 @@ export default function App() {
   }
 
   const sendMode = settings.sendMode || 'smtp';
+  const aiReady = Boolean(settings.aiEndpoint && settings.aiKey);
   const pagedRecip = recipRows;
 
   function saveRecipField(r, patch) {
@@ -2075,8 +903,11 @@ export default function App() {
           </div>
           <div className="sb-net-row">
             <span className="stat-lbl">PORT 25</span>
-            <span className={`stat-val ${netInfo?.port25?.open ? 'sent-val' : 'fail-val'}`}>
-              {netInfo ? (netInfo.port25.open ? 'OPEN' : `BLOCKED (${netInfo.port25.reason || 'filtered'})`) : '…'}
+            <span className={`stat-val ${!['direct', 'socks5'].includes(sendMode) ? 'mode-val' : netInfo?.port25?.open ? 'sent-val' : 'fail-val'}`}
+              title={!['direct', 'socks5'].includes(sendMode)
+                ? `Outbound port 25 is not used in ${sendMode.toUpperCase()} mode`
+                : netInfo && !netInfo.port25.open ? `Port 25 ${netInfo.port25.reason || 'filtered'} - direct MX unavailable` : 'Outbound port 25'}>
+              {netInfo ? (['direct', 'socks5'].includes(sendMode) ? (netInfo.port25.open ? 'OPEN' : 'BLOCKED') : 'N/A') : '…'}
             </span>
           </div>
           <div className="sb-net-hint">click IP to copy · for relay whitelists</div>
@@ -2099,6 +930,10 @@ export default function App() {
             </div>
           )}
           {busy && <span className="busy-dot" role="status" aria-label="Working">●</span>}
+          <button className="topbar-ai" title="Rubicon AI" aria-label="Open Rubicon AI assistant"
+            onClick={() => setChatOpen((open) => !open)}>
+            <RbcMascot size={16} /> RUBICON AI
+          </button>
         </div>
 
         <div className="content">
@@ -2192,11 +1027,15 @@ export default function App() {
                                 method: 'POST',
                                 body: { prompt: aiPrompt, subject: draft.subject, html: draft.html, text: draft.text },
                               });
-                              setAiResponse(res.result || '');
+                              const resultText = String(res.result || '').trim();
+                              if (!resultText && !res.attachment) throw new Error('AI provider returned an empty result.');
+                              setAiResponse(resultText);
                               setAiTarget(res.target || 'body');
                               setAiAttachment(res.attachment || null);
                             } catch (err) {
-                              setAiResponse(`Error: ${err.message || 'AI request failed'}`);
+                              const message = err.message || 'AI request failed';
+                              setAiResponse(`Error: ${message}`);
+                              showNotice(`AI: ${message}`, 'err');
                             } finally {
                               setAiStreaming(false);
                             }
@@ -2748,8 +1587,10 @@ export default function App() {
                             method: 'POST',
                             body: { prompt: shaped, subject: draft.subject, html: draft.html, text: draft.text },
                           });
-                          setAwResult({ text: res.result || '', target: res.target || 'html' });
-                        } catch (err) { setAwResult({ text: `Error: ${err.message}`, target: 'none' }); }
+                          const resultText = String(res.result || '').trim();
+                          if (!resultText && !res.attachment) throw new Error('AI provider returned an empty result.');
+                          setAwResult({ text: resultText, target: res.target || 'html' });
+                        } catch (err) { setAwResult({ text: `Error: ${err.message}`, target: 'none' }); showNotice(`AI: ${err.message}`, 'err'); }
                         finally { setAwBusy(false); }
                       }}>{awBusy ? '[ WRITING... ]' : '[ WRITE ]'}</button>
                       <button className="btn-sm" disabled={awBusy} onClick={async () => {
@@ -2759,8 +1600,10 @@ export default function App() {
                             method: 'POST',
                             body: { prompt: `Generate 6 alternative subject lines for this email${awTone ? ` in a ${awTone} tone` : ''}. Output ONLY the 6 lines, one per line, no numbering, no commentary.${awAudience.trim() ? ` Audience: ${awAudience.trim()}.` : ''}`, subject: draft.subject, html: draft.html, text: draft.text },
                           });
-                          setAwResult({ text: res.result || '', target: 'subject', subject: draft.subject });
-                        } catch (err) { setAwResult({ text: `Error: ${err.message}`, target: 'none' }); }
+                          const resultText = String(res.result || '').trim();
+                          if (!resultText) throw new Error('AI provider returned no subject lines.');
+                          setAwResult({ text: resultText, target: 'subject', subject: draft.subject });
+                        } catch (err) { setAwResult({ text: `Error: ${err.message}`, target: 'none' }); showNotice(`AI: ${err.message}`, 'err'); }
                         finally { setAwBusy(false); }
                       }}>[ ✦ 6 SUBJECT LINES ]</button>
                     </div>
@@ -3077,10 +1920,10 @@ export default function App() {
                                   </span>
                                 </td>
                                 <td><span className={`badge ${r.suppressed ? 'badge-fail' : r.validSyntax === false ? 'badge-def' : 'badge-ok'}`}>{r.suppressed ? 'SUPPRESSED' : r.validSyntax === false ? 'INVALID' : 'ACTIVE'}</span></td>
-                                <td>{r.suppressed
+                                <td><div className="act-row">{r.suppressed
                                   ? <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Unsuppress ${r.email}? They will receive future campaigns again.`, { title: 'UNSUPPRESS RECIPIENT', confirmLabel: 'UNSUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/unsuppress`, { method: 'POST' }); await refresh(); }); }}>UNSUPPRESS</button>
                                   : <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Suppress ${r.email}?`, { title: 'SUPPRESS RECIPIENT', danger: true, confirmLabel: 'SUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/suppress`, { method: 'POST' }); await refresh(); }); }}>SUPPRESS</button>}
-                                  <button className="btn-xs btn-danger" onClick={async () => { if (await uiConfirm(`Delete ${r.email} from the list?`, { title: 'DELETE RECIPIENT', danger: true, confirmLabel: 'DELETE' })) run(async () => { await api(token, `/api/recipients/${r.id}`, { method: 'DELETE' }); await refresh(); }); }}>DEL</button></td>
+                                  <button className="btn-xs btn-danger" onClick={async () => { if (await uiConfirm(`Delete ${r.email} from the list?`, { title: 'DELETE RECIPIENT', danger: true, confirmLabel: 'DELETE' })) run(async () => { await api(token, `/api/recipients/${r.id}`, { method: 'DELETE' }); await refresh(); }); }}>DEL</button></div></td>
                               </tr>
                             );
                           })}
@@ -4396,7 +3239,12 @@ sudo tail -f /var/log/maillog`}</pre>
                   <div className="dash-head">
                     <div className="dash-head-left">
                       <div className="dash-title">OPERATIONS</div>
-                      <div className="dim-txt">{clockNow.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })} · {state.confirmed} confirmed recipients · {(state.campaigns || []).length} campaigns · {(state.smtpAccounts || []).filter((a) => a.enabled).length} live senders</div>
+                      <div className="dim-txt">
+                        {clockNow.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
+                        {' · '}{plural(state.confirmed, 'confirmed recipient', 'confirmed recipients')}
+                        {' · '}{plural((state.campaigns || []).length, 'campaign', 'campaigns')}
+                        {' · '}{liveSenders ? plural(liveSenders, 'live sender', 'live senders') : `${sendMode.toUpperCase()} engine`}
+                      </div>
                     </div>
                     <div className="dash-head-right">
                       <div className="dash-clock">
@@ -4426,39 +3274,53 @@ sudo tail -f /var/log/maillog`}</pre>
                     </div>
                   )}
 
+                  {delivFailing.length > 0 && (
+                    <div className="deliv-banner">
+                      <span className="deliv-banner-icon" aria-hidden="true">⚠</span>
+                      <div className="deliv-banner-body">
+                        <strong>DELIVERABILITY — {delivFailing.map(([label]) => label).join(', ')} {delivFailing.length === 1 ? 'needs' : 'need'} attention</strong>
+                        <span>{delivFailing[0][1].detail}</span>
+                      </div>
+                      <button className="btn-xs" onClick={() => setTab('delivery')}>FIX IN SETTINGS</button>
+                    </div>
+                  )}
+
                   <div className="kpi-row">
                     {[
-                      ['TOTAL SENT', totals.sent, 'var(--green)'],
-                      ['FAILED', totals.failed, 'var(--red)'],
-                      ['IN QUEUE', totals.queued, 'var(--yellow)'],
-                      ['RECIPIENTS', state.confirmed, 'var(--cyan)'],
-                      ['BOUNCES', (state.bounces || []).length, 'var(--orange, #fb923c)'],
-                      ['BOUNCE %', `${state.rates?.bounceRate ?? 0}%`, (state.rates?.bounceRate || 0) > 5 ? 'var(--red)' : 'var(--green)'],
-                      ['COMPLAINT %', `${state.rates?.complaintRate ?? 0}%`, (state.rates?.complaintRate || 0) > 0.1 ? 'var(--red)' : 'var(--green)'],
-                      ['ACCOUNTS', (state.smtpAccounts || []).filter((a) => a.enabled).length, 'var(--txt)'],
-                    ].map(([lbl, val, color]) => (
-                      <div key={lbl} className="kpi-card">
-                        <div className="kpi-val" style={{ color }}>{val}</div>
-                        <div className="kpi-lbl">{lbl}</div>
-                      </div>
+                      { label: 'TOTAL SENT', value: totals.sent.toLocaleString(), color: 'var(--green)', tab: 'send', hint: 'Open campaign setup' },
+                      { label: 'DELIVERY %', value: deliveryRate === null ? '—' : `${deliveryRate}%`, color: deliveryRate === null || deliveryRate >= 95 ? 'var(--green)' : deliveryRate >= 85 ? 'var(--yellow)' : 'var(--red)', tab: 'send', hint: 'Sent ÷ attempted across all campaigns' },
+                      { label: 'FAILED', value: totals.failed.toLocaleString(), color: totals.failed ? 'var(--red)' : 'var(--txt-dim)', tab: 'send', hint: 'Open campaign setup' },
+                      { label: 'IN QUEUE', value: totals.queued.toLocaleString(), color: totals.queued ? 'var(--yellow)' : 'var(--txt-dim)', tab: 'send', hint: 'Open campaign setup' },
+                      { label: 'RECIPIENTS', value: state.confirmed.toLocaleString(), color: 'var(--cyan)', tab: 'recipients', hint: 'Open contacts' },
+                      { label: 'BOUNCES 30D', value: (state.rates?.bounces30 ?? 0).toLocaleString(), color: (state.rates?.bounces30 || 0) ? 'var(--orange, #fb923c)' : 'var(--txt-dim)', tab: 'bounces', hint: 'Open suppression log' },
+                      { label: 'BOUNCE %', value: `${state.rates?.bounceRate ?? 0}%`, color: (state.rates?.bounceRate || 0) > 5 ? 'var(--red)' : 'var(--green)', tab: 'bounces', hint: 'Bounces ÷ delivered, last 30 days' },
+                      { label: 'COMPLAINT %', value: `${state.rates?.complaintRate ?? 0}%`, color: (state.rates?.complaintRate || 0) > 0.1 ? 'var(--red)' : 'var(--green)', tab: 'bounces', hint: 'Complaints ÷ delivered, last 30 days' },
+                    ].map((item) => (
+                      <button key={item.label} type="button" className="kpi-card kpi-card-btn" title={item.hint} onClick={() => setTab(item.tab)}>
+                        <div className="kpi-val" style={{ color: item.color }}>{item.value}</div>
+                        <div className="kpi-lbl">{item.label}</div>
+                      </button>
                     ))}
                   </div>
 
                   <div className="dash-grid">
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                     <div className="pane">
-                      <div className="pane-head"><span>CAMPAIGNS</span></div>
+                      <div className="pane-head">
+                        <span>RECENT CAMPAIGNS <span className="dim">({(state.campaigns || []).length})</span></span>
+                        <button className="btn-xs" onClick={() => setTab('send')}>VIEW ALL →</button>
+                      </div>
                       <div className="tbl-wrap" style={{ maxHeight: 380 }}>
                         <table className="w-table">
                           <thead><tr><th>#</th><th>NAME</th><th>STATUS</th><th>PROGRESS</th><th>SENT</th><th>FAIL</th><th>QUEUE</th></tr></thead>
                           <tbody>
-                            {state.campaigns.map((c) => {
+                            {dashCampaigns.map((c) => {
                               const pct = c.total > 0 ? Math.round(((c.sent + c.failed) / c.total) * 100) : 0;
                               return (
-                                <tr key={c.id}>
+                                <tr key={c.id} className="dash-camp-row" title="Open in campaign library" onClick={() => setTab('send')}>
                                   <td className="dim">{c.id}</td>
                                   <td>{c.name}</td>
-                                  <td><span className={`badge ${c.status === 'completed' ? 'badge-ok' : c.status === 'failed' ? 'badge-fail' : 'badge-def'}`}>{c.status.toUpperCase()}</span></td>
+                                  <td><span className={`badge ${c.status === 'completed' ? 'badge-ok' : c.status === 'failed' ? 'badge-fail' : 'badge-def'}`}>{c.paused ? 'PAUSED' : c.status.toUpperCase()}</span></td>
                                   <td style={{ minWidth: 120 }}>
                                     <div className="prog-bar"><div className="prog-fill" style={{ width: `${pct}%` }} /></div>
                                     <span className="dim" style={{ fontSize: 10 }}>{pct}%</span>
@@ -4469,7 +3331,7 @@ sudo tail -f /var/log/maillog`}</pre>
                                 </tr>
                               );
                             })}
-                            {!state.campaigns.length && <tr><td colSpan={7} className="dim" style={{ textAlign: 'center' }}>No campaigns yet — compose a letter and send.</td></tr>}
+                            {!dashCampaigns.length && <tr><td colSpan={7} className="dim" style={{ textAlign: 'center', padding: 18 }}>No campaigns yet — <button className="dash-inline-link" onClick={(e) => { e.stopPropagation(); setTab('compose'); }}>compose a letter</button> and send.</td></tr>}
                           </tbody>
                         </table>
                       </div>
@@ -4485,14 +3347,64 @@ sudo tail -f /var/log/maillog`}</pre>
                       <div className="pane">
                         <div className="pane-head"><span>ENGINE STATUS</span></div>
                         <div className="engine-grid">
+                          <div className="engine-row"><span className="dim">STATUS</span><strong className={engineReady ? 'sent-val' : 'fail-val'}>{engineReady ? 'READY' : 'NOT READY'}</strong></div>
                           <div className="engine-row"><span className="dim">MODE</span><strong>{sendMode.toUpperCase()}</strong></div>
+                          <div className="engine-row"><span className="dim">FROM</span><strong title={settings.spoofFromEmail || settings.directFromEmail || smtp.fromEmail || ''}>{(settings.spoofFromEmail || settings.directFromEmail || smtp.fromEmail || 'not set').slice(0, 34)}</strong></div>
+                          {sendMode === 'relay' && <div className="engine-row"><span className="dim">RELAY</span><strong title={`${settings.relayHost}:${settings.relayPort}`}>{(settings.relayHost || 'not set') + (settings.relayPort ? `:${settings.relayPort}` : '')}</strong></div>}
                           <div className="engine-row"><span className="dim">PARALLEL</span><strong>×{settings.parallelSends || 1}</strong></div>
-                          <div className="engine-row"><span className="dim">POOL ACCOUNTS</span><strong>{(state.smtpAccounts || []).filter((a) => a.enabled).length} active</strong></div>
+                          <div className="engine-row"><span className="dim">POOL ACCOUNTS</span><strong>{liveSenders} active</strong></div>
                           <div className="engine-row"><span className="dim">HOURS</span><strong>{settings.sendDays?.length ? `${settings.sendDays.length}d/wk` : 'every day'} {String(Math.floor((settings.sendFromMin ?? 480) / 60)).padStart(2, '0')}:{String((settings.sendFromMin ?? 480) % 60).padStart(2, '0')}–{String(Math.floor((settings.sendToMin ?? 1200) / 60)).padStart(2, '0')}:{String((settings.sendToMin ?? 1200) % 60).padStart(2, '0')}</strong></div>
                           <div className="engine-row"><span className="dim">CAPS</span><strong>{settings.maxPerHour}/h · {settings.maxPerDay}/d{settings.warmupEnabled ? ' · warmup' : ''}</strong></div>
                           <div className="engine-row"><span className="dim">DKIM</span><strong>{settings.dkimEnabled ? (settings.dkimConfigured ? 'ON' : 'KEY MISSING') : 'OFF'}</strong></div>
                           <div className="engine-row"><span className="dim">TRACKING</span><strong>{settings.trackOpens ? 'opens' : ''}{settings.trackOpens && settings.trackClicks ? ' + ' : ''}{settings.trackClicks ? 'clicks' : ''}{!settings.trackOpens && !settings.trackClicks ? 'OFF' : ''}</strong></div>
                         </div>
+                        {!engineReady && <div className="engine-warning">! {engineHint} — <button className="dash-inline-link" onClick={() => setTab('delivery')}>open settings</button></div>}
+                      </div>
+
+                      <div className="pane">
+                        <div className="pane-head">
+                          <span>DELIVERABILITY</span>
+                          <button className="btn-xs" disabled={deliverabilityLoading} onClick={() => loadDeliverability(true)}>
+                            {deliverabilityLoading ? 'CHECKING…' : 'RECHECK'}
+                          </button>
+                        </div>
+                        {deliverabilityError ? (
+                          <div className="deliv-error">
+                            <span>{deliverabilityError}</span>
+                            <button className="btn-xs" onClick={() => loadDeliverability(true)}>RETRY</button>
+                          </div>
+                        ) : !deliverability ? (
+                          <p className="dim-txt">Checking SPF, DKIM, DMARC, PTR and the sending path…</p>
+                        ) : (
+                          <>
+                            <div className="deliv-head">
+                              <div>
+                                <div className="deliv-domain">{deliverability.domain || 'no sending domain'}</div>
+                                <div className="dim-txt">{deliverability.fromEmail || 'Set a from address in SETTINGS'}</div>
+                              </div>
+                              <span className={`deliv-score ${delivScored.length && delivPassed === delivScored.length ? 'ok' : delivPassed ? 'warn' : 'bad'}`}>
+                                {delivScored.length ? `${delivPassed}/${delivScored.length}` : '—'}
+                              </span>
+                            </div>
+                            <div className="deliv-list">
+                              {delivEntries.map(([label, check]) => (
+                                <div className="deliv-row" key={label} title={check?.detail || ''}>
+                                  <span className={`deliv-dot ${check?.status || 'unknown'}`} aria-hidden="true" />
+                                  <span className="deliv-lbl">{label}</span>
+                                  <span className={`deliv-state ${check?.status || 'unknown'}`}>{check?.label || '—'}</span>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="deliv-note">
+                              {!delivScored.length
+                                ? 'Set a from address in SETTINGS to run DNS checks.'
+                                : delivPassed === delivScored.length
+                                  ? 'All checked records are in place.'
+                                  : 'Fix red rows first — they directly affect inbox placement.'}
+                              <span className="dim"> · cached 5 min</span>
+                            </div>
+                          </>
+                        )}
                       </div>
 
                       <div className="pane">
@@ -4514,14 +3426,18 @@ sudo tail -f /var/log/maillog`}</pre>
                       </div>
 
                       <div className="pane">
-                        <div className="pane-head"><span>RECENT BOUNCES</span></div>
+                        <div className="pane-head">
+                          <span>RECENT SUPPRESSIONS</span>
+                          <button className="btn-xs" onClick={() => setTab('bounces')}>VIEW ALL →</button>
+                        </div>
                         {(state.bounces || []).slice(0, 5).map((b) => (
-                          <div key={b.id} className="dash-bounce">
-                            <span className="red-txt">{b.email}</span>
-                            <span className="dim">{b.reason}</span>
+                          <div key={b.id} className="dash-bounce" title={b.reason || ''}>
+                            <span className={`badge ${b.kind === 'bounce' ? 'badge-fail' : b.kind === 'complaint' ? 'badge-def' : 'badge-ok'}`}>{b.kind === 'unsubscribe' ? 'UNSUB' : (b.classification || b.kind || '').toUpperCase()}</span>
+                            <span className="dash-bounce-email">{b.email}</span>
+                            <span className="dash-bounce-time">{new Date(b.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
                           </div>
                         ))}
-                        {!(state.bounces || []).length && <p className="dim-txt">No bounces recorded.</p>}
+                        {!(state.bounces || []).length && <p className="dim-txt">No bounces or complaints recorded.</p>}
                       </div>
                     </div>
                   </div>
@@ -5091,9 +4007,6 @@ client_id:secret:tenant            app creds (no RT)
 
 
       {/* ── RHS AI CHATBOT ── */}
-      {!chatOpen && (
-        <button className="chat-fab" title="Rubicon AI" aria-label="Open Rubicon AI assistant" onClick={() => setChatOpen(true)}><RbcMascot size={22} /> RUBICON AI</button>
-      )}
       {chatOpen && (
         <div className="chat-panel">
           <div className="chat-head">
@@ -5109,12 +4022,15 @@ client_id:secret:tenant            app creds (no RT)
             </div>
           </div>
           <div className="chat-body">
+            {!aiReady && (
+              <div className="chat-note">AI endpoint is not configured. Add an endpoint + key in <button className="dash-inline-link" onClick={() => { setChatOpen(false); setTab('delivery'); }}>SETTINGS</button>.</div>
+            )}
             {!chatMsgs.length && (
               <>
                 <div className="dim-txt" style={{ padding: 10 }}>Ask anything — rewrites, deliverability, pool health, provider questions. Or:</div>
                 <div className="chat-sugg">
                   {chatSugg.map((s) => (
-                    <button key={s} className="chat-sugg-chip" onClick={() => sendChat(s)}>{s}</button>
+                    <button key={s} className="chat-sugg-chip" disabled={!aiReady} onClick={() => sendChat(s)}>{s}</button>
                   ))}
                 </div>
               </>
@@ -5152,10 +4068,10 @@ client_id:secret:tenant            app creds (no RT)
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
-              placeholder="Talk to Rubicon AI…"
-              disabled={chatBusy}
+              placeholder={aiReady ? 'Talk to Rubicon AI…' : 'Configure AI in SETTINGS first…'}
+              disabled={chatBusy || !aiReady}
             />
-            <button className="btn-sm" aria-label="Send message" disabled={chatBusy || !chatInput.trim()} onClick={sendChat}>➤</button>
+            <button className="btn-sm" aria-label="Send message" disabled={chatBusy || !aiReady || !chatInput.trim()} onClick={sendChat}>➤</button>
           </div>
         </div>
       )}
@@ -5169,6 +4085,22 @@ client_id:secret:tenant            app creds (no RT)
               Pulling the latest build and applying it.<br /><br />
               The server will restart automatically when done.<br />
               <strong>Refresh this page in ~30 seconds.</strong>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── UPDATE RESULT (real updater output) ── */}
+      {updateResult && (
+        <div className="dlg-overlay" onClick={() => setUpdateResult(null)}>
+          <div className="dlg-card update-card" onClick={(e) => e.stopPropagation()}>
+            <div className="dlg-title" style={{ color: updateResult.ok ? 'var(--green)' : 'var(--red)' }}>
+              {updateResult.ok ? 'UPDATE COMPLETE' : 'UPDATE FAILED'}
+            </div>
+            <pre className="update-log">{updateResult.log || 'No updater output was returned.'}</pre>
+            <div className="dlg-actions">
+              <button className="btn-sm" onClick={() => { navigator.clipboard?.writeText(updateResult.log || ''); showNotice('Update log copied.'); }}>COPY LOG</button>
+              <button className="btn-primary" onClick={() => setUpdateResult(null)}>CLOSE</button>
             </div>
           </div>
         </div>

@@ -10,7 +10,7 @@ A self-hosted email sending platform. Fastify + SQLite backend, React dashboard,
 - **SMTP pool** — multiple accounts with round-robin rotation, per-account rate limits, cooldowns and failover
 - **Sending rules** — day/time schedule windows in your timezone, rolling hourly/daily caps, warmup ramp
 - **Deliverability tooling** — open pixel + click tracking, link cloaking (google.com or your own redirect base), preheader injection, HTML randomization, spam-word bypass, base64 subject/from-name encoding, custom headers, DKIM signing, List-Unsubscribe headers
-- **Dashboard** — KPIs, campaign progress, engine status, recent bounces
+- **Dashboard** — KPIs, campaign progress, engine status, live DNS deliverability checks (SPF / DKIM / DMARC / PTR / port 25), recent suppressions
 
 ## Requirements
 

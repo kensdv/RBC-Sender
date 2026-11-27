@@ -7,7 +7,8 @@ function fixture(t, send) {
   const db = openDatabase(':memory:');
   const now = new Date().toISOString();
   db.prepare("INSERT INTO smtp_settings (id, host, port, secure, username, password_encrypted, from_name, from_email, reply_to, rate_per_minute, updated_at) VALUES (1, 'smtp.test', 587, 0, 'user', 'unused', 'Sender', 'sender@example.com', '', 60, ?)").run(now);
-  db.prepare("INSERT INTO send_settings (id, send_from_min, send_to_min, updated_at) VALUES (1, 0, 1439, ?)").run(now);
+  db.prepare(`INSERT INTO send_settings (id, send_from_min, send_to_min, updated_at) VALUES (1, 0, 1439, ?)
+    ON CONFLICT(id) DO UPDATE SET send_from_min = excluded.send_from_min, send_to_min = excluded.send_to_min, updated_at = excluded.updated_at`).run(now);
   const worker = createWorker({ db, mailer: { send }, logger: { error() {} } });
   t.after(async () => {
     await worker.stop();

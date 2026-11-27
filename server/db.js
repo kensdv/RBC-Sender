@@ -43,7 +43,7 @@ export function openDatabase(path) {
       preheader TEXT NOT NULL DEFAULT '',
       html TEXT NOT NULL DEFAULT '',
       text TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'queued', 'scheduled', 'sending', 'completed', 'cancelled')),
+      status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'queued', 'scheduled', 'sending', 'completed', 'cancelled', 'failed')),
       scheduled_for TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -422,6 +422,20 @@ export function openDatabase(path) {
   // campaigns.status CHECK predates the 'failed' state — rebuild the table once
   const campaignSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'campaigns'").get()?.sql || '';
   if (!campaignSql.includes("'failed'")) {
+    // Copy every column the database already has. The rebuild used to list a fixed
+    // subset, which silently dropped lists/accounts/tiers added by later migrations.
+    const rebuildColumns = [
+      'id', 'name', 'subject', 'preheader', 'html', 'text', 'attachments_json', 'providers_json',
+      'lists_json', 'accounts_json', 'accounts_random', 'tiers_json', 'paused',
+      'send_time_optimization_enabled', 'status', 'scheduled_for', 'created_at', 'updated_at',
+    ];
+    const copyColumns = rebuildColumns.filter((name) => campaignCols.has(name));
+    const defaults = {
+      preheader: "''", html: "''", text: "''", attachments_json: "'[]'", providers_json: "'[]'",
+      lists_json: "'[]'", accounts_json: "'[]'", accounts_random: '0', tiers_json: "'[]'",
+      paused: '0', send_time_optimization_enabled: '0', status: "'draft'",
+    };
+    const selectColumns = copyColumns.map((name) => (defaults[name] ? `COALESCE(${name}, ${defaults[name]})` : name));
     db.exec('PRAGMA foreign_keys = OFF');
     try {
       db.exec(`
@@ -435,6 +449,10 @@ export function openDatabase(path) {
           text TEXT NOT NULL DEFAULT '',
           attachments_json TEXT NOT NULL DEFAULT '[]',
           providers_json TEXT NOT NULL DEFAULT '[]',
+          lists_json TEXT NOT NULL DEFAULT '[]',
+          accounts_json TEXT NOT NULL DEFAULT '[]',
+          accounts_random INTEGER NOT NULL DEFAULT 0,
+          tiers_json TEXT NOT NULL DEFAULT '[]',
           paused INTEGER NOT NULL DEFAULT 0,
           send_time_optimization_enabled INTEGER NOT NULL DEFAULT 0,
           status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'queued', 'scheduled', 'sending', 'completed', 'cancelled', 'failed')),
@@ -442,7 +460,8 @@ export function openDatabase(path) {
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
-        INSERT INTO campaigns_migrated SELECT id, name, subject, preheader, html, text, COALESCE(attachments_json, '[]'), COALESCE(providers_json, '[]'), COALESCE(paused, 0), COALESCE(send_time_optimization_enabled, 0), status, scheduled_for, created_at, updated_at FROM campaigns;
+        INSERT INTO campaigns_migrated (${copyColumns.join(', ')})
+          SELECT ${selectColumns.join(', ')} FROM campaigns;
         DROP TABLE campaigns;
         ALTER TABLE campaigns_migrated RENAME TO campaigns;
         COMMIT;

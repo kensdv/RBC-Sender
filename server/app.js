@@ -17,6 +17,7 @@ import { DEFAULT_AI_RULES } from './default-ai-rules.js';
 import { EXTRA_TEMPLATES } from '../client/src/letterTemplates.js';
 import { createEmitter, telegramStatus, saveTelegram, sendTelegram, formatEvent } from './telegram.js';
 import { listEvents } from './events.js';
+import { createDeliverability } from './deliverability.js';
 
 function fail(message, statusCode = 400) {
   throw Object.assign(new Error(message), { statusCode });
@@ -213,28 +214,54 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
   app.get('/api/health', async () => ({ ok: true }));
 
   let netInfoCache = { at: 0, data: null };
-  async function getNetInfo() {
-    if (netInfoCache.data && Date.now() - netInfoCache.at < 60000) return netInfoCache.data;
-    let publicIp = '';
-    for (const url of ['https://api.ipify.org', 'https://ifconfig.me/ip', 'https://icanhazip.com']) {
-      try {
-        const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
-        if (r.ok) {
-          const ip = (await r.text()).trim();
-          if (/^[\d.:a-fA-F]+$/.test(ip)) { publicIp = ip; break; }
-        }
-      } catch {}
-    }
-    const port25 = await new Promise((done) => {
-      const sock = net.connect({ host: 'gmail-smtp-in.l.google.com', port: 25, timeout: 5000 });
-      sock.on('connect', () => { sock.destroy(); done({ open: true }); });
-      sock.on('timeout', () => { sock.destroy(); done({ open: false, reason: 'timeout' }); });
-      sock.on('error', (e) => done({ open: false, reason: e.code || 'error' }));
+  let netInfoPending = null;
+  async function lookupPublicIp() {
+    const sources = ['https://api.ipify.org', 'https://ifconfig.me/ip', 'https://icanhazip.com'];
+    const results = await Promise.allSettled(sources.map(async (url) => {
+      const r = await fetch(url, { signal: AbortSignal.timeout(2500) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const ip = (await r.text()).trim();
+      if (!/^[\d.:a-fA-F]+$/.test(ip)) throw new Error('invalid address');
+      return ip;
+    }));
+    for (const result of results) if (result.status === 'fulfilled') return result.value;
+    return netInfoCache.data?.publicIp || '';
+  }
+  async function probePort25() {
+    return new Promise((done) => {
+      const sock = net.connect({ host: 'gmail-smtp-in.l.google.com', port: 25, timeout: 2500 });
+      let settled = false;
+      const finish = (value) => { if (settled) return; settled = true; sock.destroy(); done(value); };
+      sock.on('connect', () => finish({ open: true }));
+      sock.on('timeout', () => finish({ open: false, reason: 'timeout' }));
+      sock.on('error', (e) => finish({ open: false, reason: e.code || 'error' }));
     });
-    netInfoCache = { at: Date.now(), data: { publicIp, port25 } };
-    return netInfoCache.data;
+  }
+  async function getNetInfo() {
+    if (netInfoCache.data && Date.now() - netInfoCache.at < 5 * 60 * 1000) return netInfoCache.data;
+    if (netInfoPending) return netInfoPending;
+    netInfoPending = (async () => {
+      const [publicIp, port25] = await Promise.all([lookupPublicIp(), probePort25()]);
+      netInfoCache = { at: Date.now(), data: { publicIp, port25 } };
+      return netInfoCache.data;
+    })().finally(() => { netInfoPending = null; });
+    return netInfoPending;
   }
   app.get('/api/netinfo', async () => getNetInfo());
+
+  const deliverability = createDeliverability({ getNetInfo });
+  app.get('/api/deliverability', async (request) => {
+    const settings = publicSendSettings(db, config);
+    const smtp = publicSmtp(db);
+    const fromEmail = settings.spoofFromEmail
+      || (settings.sendMode === 'smtp' ? smtp.fromEmail : '')
+      || settings.engineSendAs
+      || settings.directFromEmail;
+    return deliverability.check(
+      { settings: { ...settings, publicBaseUrl: config.publicBaseUrl }, fromEmail, smtp },
+      { refresh: request.query?.refresh === '1' },
+    );
+  });
 
   app.get('/api/telegram', async () => telegramStatus(db, config));
 
@@ -269,10 +296,16 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const bounces = db.prepare('SELECT id, email, kind, reason, classification, suppression_action, created_at AS createdAt FROM bounces ORDER BY id DESC LIMIT 500').all();
     const confirmed = db.prepare('SELECT COUNT(*) AS count FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0').get().count;
     const last30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const deliv30 = db.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE sent_at > ?").get(last30).c || 1;
+    const delivered30 = db.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE status = 'sent' AND sent_at > ?").get(last30).c;
+    const bounces30 = db.prepare("SELECT COUNT(*) AS c FROM bounces WHERE kind = 'bounce' AND created_at > ?").get(last30).c;
+    const complaints30 = db.prepare("SELECT COUNT(*) AS c FROM bounces WHERE (kind = 'complaint' OR classification = 'complaint') AND created_at > ?").get(last30).c;
+    const rateBase = Math.max(1, delivered30);
     const rates = {
-      bounceRate: Math.round((db.prepare("SELECT COUNT(*) AS c FROM bounces WHERE created_at > ?").get(last30).c / deliv30) * 1000) / 10,
-      complaintRate: Math.round((db.prepare("SELECT COUNT(*) AS c FROM bounces WHERE classification = 'spam_complaint' AND created_at > ?").get(last30).c / deliv30) * 1000) / 10,
+      delivered30,
+      bounces30,
+      complaints30,
+      bounceRate: Math.round((bounces30 / rateBase) * 1000) / 10,
+      complaintRate: Math.round((complaints30 / rateBase) * 1000) / 10,
     };
     const reputationAlerts = db.prepare('SELECT target, source, listed_at AS listedAt FROM reputation_alerts WHERE resolved_at IS NULL ORDER BY listed_at DESC').all();
     seedPoolFromLegacy();
@@ -1309,8 +1342,8 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     const last30Days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const opens = db.prepare("SELECT COUNT(*) as count FROM analytics_events WHERE kind = 'open' AND occurred_at > ?").get(last30Days).count;
     const clicks = db.prepare("SELECT COUNT(*) as count FROM analytics_events WHERE kind = 'click' AND occurred_at > ?").get(last30Days).count;
-    const bounces = db.prepare('SELECT COUNT(*) as count FROM bounces WHERE created_at > ?').get(last30Days).count;
-    const complaints = db.prepare("SELECT COUNT(*) as count FROM bounces WHERE classification = 'spam_complaint' AND created_at > ?").get(last30Days).count;
+    const bounces = db.prepare("SELECT COUNT(*) as count FROM bounces WHERE kind = 'bounce' AND created_at > ?").get(last30Days).count;
+    const complaints = db.prepare("SELECT COUNT(*) as count FROM bounces WHERE (kind = 'complaint' OR classification = 'complaint') AND created_at > ?").get(last30Days).count;
     const campaigns = db.prepare('SELECT COUNT(*) as count FROM campaigns WHERE created_at > ?').get(last30Days).count;
     const recipients = db.prepare('SELECT COUNT(*) as count FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0').get().count;
     const heatmapRows = db.prepare('SELECT hour, SUM(opens) AS opens, SUM(clicks) AS clicks FROM engagement_heatmap GROUP BY hour').all();
@@ -2733,7 +2766,10 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
   app.setErrorHandler((error, request, reply) => {
     const statusCode = error.statusCode || 500;
     if (statusCode >= 500) request.log.error(error);
-    reply.code(statusCode).send({ error: statusCode >= 500 ? 'Internal server error' : error.message });
+    // AI and updater failures are diagnostic — return the real provider/updater
+    // message instead of a generic 500 so the UI can show what actually broke.
+    const expose = statusCode < 500 || /^\/api\/(ai|update)\b/.test(request.url);
+    reply.code(statusCode).send({ error: expose ? (error.message || 'Request failed') : 'Internal server error' });
   });
 
   const clientDist = resolve('client/dist');
