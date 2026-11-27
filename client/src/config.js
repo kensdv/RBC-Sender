@@ -7,7 +7,7 @@ const emptyDraft = {
   attachments: [],
 };
 const emptySmtp = { host: '', port: 587, secure: false, username: '', password: '', fromName: '', fromEmail: '', replyTo: '', ratePerMinute: 30 };
-const emptyAccount = { label: '', host: '', port: 587, secure: false, username: '', password: '', fromName: '', fromEmail: '', replyTo: '', weight: 1, dailyQuota: 0 };
+const emptyAccount = { label: '', host: '', port: 587, secure: false, username: '', password: '', refreshToken: '', fromName: '', fromEmail: '', replyTo: '', weight: 1, dailyQuota: 0 };
 const emptySettings = {
   sendMode: 'smtp',
   directFromName: '', directFromEmail: '', directReplyTo: '', directRatePerMinute: 10,

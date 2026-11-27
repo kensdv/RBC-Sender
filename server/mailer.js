@@ -573,7 +573,13 @@ async function msRtAccessToken(clientId, refreshToken, tenant = 'common') {
     res = await post();
     data = await res.json().catch(() => ({}));
   }
-  if (!res.ok) throw new Error(`MS RT token failed: ${data.error_description || data.error || res.status}`);
+  if (!res.ok) {
+    const detail = String(data.error_description || data.error || res.status);
+    if (/AADSTS50173|AADSTS700082|invalid_grant|revoked|expired/i.test(detail)) {
+      throw Object.assign(new Error(`MS RT token revoked or expired — re-import a fresh refresh token for this mailbox. (${detail.split('.')[0]})`), { code: 'REAUTH' });
+    }
+    throw new Error(`MS RT token failed: ${detail}`);
+  }
   tokenCache[key] = { token: data.access_token, exp: Date.now() + (Number(data.expires_in) - 60) * 1000 };
   return tokenCache[key].token;
 }

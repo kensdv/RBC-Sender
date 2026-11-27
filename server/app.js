@@ -1527,6 +1527,12 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     if (request.body?.dailyQuota !== undefined) {
       db.prepare('UPDATE smtp_accounts SET daily_quota = ? WHERE id = ?').run(Math.min(1000000, Math.max(0, Number(request.body.dailyQuota) || 0)), id);
     }
+    const freshRt = String(request.body?.refreshToken || '').trim();
+    if (freshRt && current.auth_type === 'ms_rt') {
+      db.prepare(`UPDATE smtp_accounts SET ms_rt_encrypted = ?, fails = 0, cooldown_until = NULL,
+        last_error = '', updated_at = ? WHERE id = ?`)
+        .run(encryptSecret(freshRt, config.credentialKey), new Date().toISOString(), id);
+    }
     return { ok: true };
   });
 
@@ -1596,8 +1602,15 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
 
   const makeMsInserter = (quota) => (authType, clientId, secret, tenant, email, name) => {
     const dup = db.prepare('SELECT id FROM smtp_accounts WHERE auth_type = ? AND ms_client_id = ? AND username = ?').get(authType, clientId, email);
-    if (dup) return { ok: false, error: `already imported (account #${dup.id})`, email };
     const now = new Date().toISOString();
+    if (dup) {
+      // Re-importing the same mailbox replaces its credential. This is how a
+      // revoked/expired MS RT token gets fixed without deleting the account.
+      db.prepare(`UPDATE smtp_accounts SET label = COALESCE(NULLIF(?, ''), label), from_name = COALESCE(NULLIF(?, ''), from_name),
+        ms_rt_encrypted = ?, ms_tenant = ?, enabled = 1, fails = 0, cooldown_until = NULL, last_error = '', updated_at = ? WHERE id = ?`)
+        .run(name || '', name || '', encryptSecret(secret, config.credentialKey), tenant, now, dup.id);
+      return { ok: true, updated: true, id: dup.id, email, name };
+    }
     const r = db.prepare(`INSERT INTO smtp_accounts (label, host, port, secure, username, password_encrypted, from_name, from_email, reply_to, enabled, weight, auth_type, ms_client_id, ms_rt_encrypted, ms_tenant, daily_quota, created_at, updated_at)
       VALUES (?, 'graph.microsoft.com', 443, 1, ?, '', ?, ?, '', 1, 1, ?, ?, ?, ?, ?, ?, ?)`)
       .run(name || email, email, name || '', email, authType, clientId, encryptSecret(secret, config.credentialKey), tenant, quota, now, now);

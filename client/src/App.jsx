@@ -741,6 +741,7 @@ export default function App() {
     { sent: 0, failed: 0, queued: 0 }
   );
   const plural = (count, one, many) => `${count.toLocaleString()} ${count === 1 ? one : many}`;
+  const needsMsReauth = (account) => /AADSTS50173|AADSTS700082|invalid_grant|revoked|reauth/i.test(account?.lastError || '');
   const deliveryBase = totals.sent + totals.failed;
   const deliveryRate = deliveryBase > 0 ? Math.round((totals.sent / deliveryBase) * 1000) / 10 : null;
   const liveSenders = (state?.smtpAccounts || []).filter((a) => a.enabled).length;
@@ -804,6 +805,7 @@ export default function App() {
   });
   const pagedCampaigns = filteredCampaigns.slice((histPage - 1) * pageSize, histPage * pageSize);
   const pagedAccounts = (state?.smtpAccounts || []).slice((acctPage - 1) * pageSize, acctPage * pageSize);
+  const editingAccount = editingAcct ? (state?.smtpAccounts || []).find((a) => a.id === editingAcct) : null;
   const draftEmpty = !draft.html.trim() && !draft.text.trim();
   const canQueue = !draftEmpty && draft.subject.trim().length > 0;
   const engineCheck = {
@@ -2367,14 +2369,14 @@ sudo tail -f /var/log/maillog`}</pre>
                             <td className="dim">{a.fromEmail}</td>
                             <td>{a.weight}</td>
                             <td className="dim" style={{whiteSpace:'nowrap'}}>{a.dailyQuota ? `${a.sentToday}/${a.dailyQuota}` : '∞'}{a.sentToday > 0 ? <button className="btn-xs" style={{marginLeft:6}} title="Reset daily counter" aria-label="Reset daily quota counter" onClick={() => run(async () => { await api(token, `/api/smtp/accounts/${a.id}/reset-quota`, { method: 'POST' }); await refresh(); })}>↺</button> : null}</td>
-                            <td><span className={`badge ${a.enabled ? 'badge-ok' : 'badge-def'}`}>{a.cooldownUntil && a.cooldownUntil > new Date().toISOString() ? 'COOLDOWN' : a.enabled ? 'ACTIVE' : 'OFF'}</span>{a.fails ? <span className="dim"> ({a.fails}f)</span> : null}
+                            <td><span className={`badge ${needsMsReauth(a) ? 'badge-fail' : a.enabled ? 'badge-ok' : 'badge-def'}`} title={needsMsReauth(a) ? 'Refresh token revoked — re-import a fresh token for this mailbox' : undefined}>{needsMsReauth(a) ? 'REAUTH' : a.cooldownUntil && a.cooldownUntil > new Date().toISOString() ? 'COOLDOWN' : a.enabled ? 'ACTIVE' : 'OFF'}</span>{a.fails ? <span className="dim"> ({a.fails}f)</span> : null}
                               {a.lastError ? <div className="red-txt" style={{fontSize:11}} title={a.lastError}>{a.lastError.slice(0, 60)}</div>
                                 : a.lastCheck ? <div className="dim-txt" style={{fontSize:11}}>ok {new Date(a.lastCheck).toLocaleTimeString()}</div> : null}</td>
                             <td>
                               <div className="act-row">
                                 <button className="btn-xs" onClick={() => {
                                   setEditingAcct(a.id);
-                                  setAcctForm({ label: a.label, host: a.host, port: a.port, secure: a.secure, username: a.username, password: '', fromName: a.fromName, fromEmail: a.fromEmail, replyTo: a.replyTo, weight: a.weight, dailyQuota: a.dailyQuota });
+                                  setAcctForm({ label: a.label, host: a.host, port: a.port, secure: a.secure, username: a.username, password: '', refreshToken: '', fromName: a.fromName, fromEmail: a.fromEmail, replyTo: a.replyTo, weight: a.weight, dailyQuota: a.dailyQuota });
                                 }}>EDIT</button>
                                 <button className="btn-xs" onClick={() => run(async () => { await api(token, `/api/smtp/accounts/${a.id}`, { method: 'PUT', body: { label: a.label, host: a.host, port: a.port, secure: a.secure, username: a.username, fromName: a.fromName, fromEmail: a.fromEmail, replyTo: a.replyTo, weight: a.weight, enabled: !a.enabled } }); await refresh(); })}>{a.enabled ? 'DISABLE' : 'ENABLE'}</button>
                                 {a.authType?.startsWith('ms_') && <button className="btn-xs" title="Extract this mailbox's contacts into a mail list" onClick={() => startExtract(a)}>EXTRACT</button>}
@@ -2403,6 +2405,9 @@ sudo tail -f /var/log/maillog`}</pre>
                       <div><label className="field-label">PORT</label><input className="w-input" type="number" value={acctForm.port} onChange={(e) => setAcctForm({ ...acctForm, port: Number(e.target.value) })} /></div>
                       <div><label className="field-label">USERNAME</label><input className="w-input" value={acctForm.username} onChange={(e) => setAcctForm({ ...acctForm, username: e.target.value })} /></div>
                       <div><label className="field-label">PASSWORD {editingAcct ? <span className="dim">(blank = keep)</span> : <span className="dim">(blank = no auth — IP allowlist relays)</span>}</label><input className="w-input" type="password" value={acctForm.password} onChange={(e) => setAcctForm({ ...acctForm, password: e.target.value })} /></div>
+                      {editingAccount?.authType === 'ms_rt' && (
+                        <div><label className="field-label">REFRESH TOKEN <span className="dim">(paste a fresh token; blank = keep)</span></label><input className="w-input" type="password" value={acctForm.refreshToken || ''} onChange={(e) => setAcctForm({ ...acctForm, refreshToken: e.target.value })} placeholder="1//0g... or fresh MS RT" /></div>
+                      )}
                       <div><label className="field-label">FROM EMAIL</label><input className="w-input" type="email" value={acctForm.fromEmail} onChange={(e) => setAcctForm({ ...acctForm, fromEmail: e.target.value })} /></div>
                       <div><label className="field-label">FROM NAME</label><input className="w-input" value={acctForm.fromName} onChange={(e) => setAcctForm({ ...acctForm, fromName: e.target.value })} /></div>
                       <div><label className="field-label">REPLY-TO</label><input className="w-input" type="email" value={acctForm.replyTo} onChange={(e) => setAcctForm({ ...acctForm, replyTo: e.target.value })} /></div>
