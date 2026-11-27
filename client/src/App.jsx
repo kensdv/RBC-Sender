@@ -2137,8 +2137,11 @@ export default function App() {
                     <button className="btn-primary" disabled={busy} onClick={() => run(async () => { await api(token, '/api/smtp', { method: 'PUT', body: smtp }); showNotice('SMTP saved.'); await refresh(); })}>[ SAVE SMTP ]</button>
                     <button className="btn-sm" disabled={busy || !smtp.configured} onClick={() => run(async () => { await api(token, '/api/smtp/verify', { method: 'POST' }); showNotice('Connection verified.'); })}>[ TEST ]</button>
                     <input className="w-input" style={{ maxWidth: 220 }} type="email" placeholder="test send to…" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
-                    <button className="btn-sm" disabled={busy || !testTo.includes('@')} onClick={() => run(async () => { const r = await api(token, '/api/test-send', { method: 'POST', body: { to: testTo, subject: draft.subject, html: draft.html, text: draft.text, forceMode: 'smtp' } }); showNotice(`SMTP test accepted (${r.messageId || r.response || 'ok'}).`); setTestTo(''); })}>[ SEND TEST ]</button>
+                    <button className="btn-sm" disabled={busy || !testTo.includes('@')} onClick={() => run(async () => { const r = await api(token, '/api/test-send', { method: 'POST', body: { to: testTo, subject: draft.subject, html: draft.html, text: draft.text } }); showNotice(`Test accepted via ${String(r.mode || sendMode).toUpperCase()} (${r.messageId || r.response || 'ok'}).`); setTestTo(''); })}>[ SEND TEST — {sendMode.toUpperCase()} ]</button>
                   </div>
+                  <p className="dim-txt" style={{ marginTop: 6 }}>
+                    SEND TEST uses the active engine (<strong>{sendMode.toUpperCase()}</strong>). TEST only checks the SMTP server above.
+                  </p>
                 </div>
 
                 {/* QUICK GUIDES */}

@@ -381,8 +381,12 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     if (!info || info.skipped) {
       fail(`Send skipped: ${info?.reason || 'the engine did not accept the message'}`);
     }
+    const activeMode = body.forceMode
+      || db.prepare('SELECT send_mode FROM send_settings WHERE id = 1').get()?.send_mode
+      || 'smtp';
     return {
       ok: true,
+      mode: activeMode,
       messageId: info.messageId || '',
       response: info.response || info.accepted?.join(', ') || 'accepted',
     };
