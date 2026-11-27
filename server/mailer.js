@@ -782,6 +782,65 @@ async function msGraphContactCount(baseUrl, token) {
   } catch { return 0; }
 }
 
+// Fallback 1: /people (People.Read.All for app creds, People.Read delegated).
+async function msGraphCollectPeople(url, token, cap = 2000, onProgress = null) {
+  const contacts = [];
+  while (url && contacts.length < cap) {
+    const res = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20000) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`people read failed ${res.status}: ${data.error?.message || res.statusText}`);
+    for (const p of data.value || []) {
+      const addr = (p.scoredEmailAddresses || []).find((a) => (a.address || '').includes('@'));
+      if (addr) contacts.push({ email: addr.address.toLowerCase(), displayName: p.displayName || addr.name || '' });
+    }
+    if (onProgress) onProgress(contacts.length);
+    url = data['@odata.nextLink'] || null;
+  }
+  return contacts;
+}
+
+// Fallback 2: the tenant directory (User.Read.All for app creds). Every member
+// mailbox becomes a contact — still useful for outreach even without Contacts.Read.
+async function msGraphCollectDirectory(url, token, cap = 2000, onProgress = null) {
+  const contacts = [];
+  while (url && contacts.length < cap) {
+    const res = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20000) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`directory read failed ${res.status}: ${data.error?.message || res.statusText}`);
+    for (const u of data.value || []) {
+      const email = u.mail || u.userPrincipalName || '';
+      if (email.includes('@')) contacts.push({ email: email.toLowerCase(), displayName: u.displayName || email });
+    }
+    if (onProgress) onProgress(contacts.length);
+    url = data['@odata.nextLink'] || null;
+  }
+  return contacts;
+}
+
+// Fallback 3 (delegated only): correspondents from the mailbox (Mail.Read).
+async function msGraphCollectCorrespondents(url, token, cap = 2000, onProgress = null) {
+  const contacts = [];
+  const seen = new Set();
+  while (url && contacts.length < cap) {
+    const res = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20000) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`messages read failed ${res.status}: ${data.error?.message || res.statusText}`);
+    for (const m of data.value || []) {
+      const people = [m.from, ...(m.toRecipients || []), ...(m.ccRecipients || [])];
+      for (const p of people) {
+        const addr = p?.emailAddress;
+        if (addr?.address?.includes('@') && !seen.has(addr.address.toLowerCase())) {
+          seen.add(addr.address.toLowerCase());
+          contacts.push({ email: addr.address.toLowerCase(), displayName: addr.name || addr.address });
+        }
+      }
+    }
+    if (onProgress) onProgress(contacts.length);
+    url = data['@odata.nextLink'] || null;
+  }
+  return contacts;
+}
+
 export async function msRtListContacts(clientId, refreshToken, tenant = 'common', onProgress = null) {
   const token = await msRtAccessToken(clientId, refreshToken, tenant);
   const base = 'https://graph.microsoft.com/v1.0/me/contacts';
@@ -790,10 +849,18 @@ export async function msRtListContacts(clientId, refreshToken, tenant = 'common'
     const contacts = await msGraphCollectContacts(`${base}?$select=displayName,emailAddresses&$top=200`, token, 2000, onProgress);
     return { contacts, total };
   } catch (err) {
-    if (/\b403\b/.test(err.message)) {
-      throw new Error(`${err.message} — reconnect the Microsoft account and consent to the delegated Contacts.Read permission.`);
-    }
-    throw err;
+    if (!/\b403\b/.test(err.message)) throw err;
+    // Delegated tokens often have Mail.Read/People.Read but not Contacts.Read.
+    // Harvest what the consent does allow instead of failing the whole pull.
+    try {
+      const contacts = await msGraphCollectPeople('https://graph.microsoft.com/v1.0/me/people?$select=displayName,scoredEmailAddresses&$top=200', token, 2000, onProgress);
+      if (contacts.length) return { contacts, total: contacts.length };
+    } catch { /* try messages */ }
+    try {
+      const contacts = await msGraphCollectCorrespondents('https://graph.microsoft.com/v1.0/me/messages?$select=from,toRecipients,ccRecipients&$top=200', token, 2000, onProgress);
+      if (contacts.length) return { contacts, total: contacts.length };
+    } catch { /* fall through */ }
+    throw new Error(`${err.message} — reconnect the Microsoft account and consent to the delegated Contacts.Read (or Mail.Read) permission.`);
   }
 }
 
@@ -806,10 +873,18 @@ export async function msCcListContacts(clientId, clientSecret, tenant, mailbox, 
     const contacts = await msGraphCollectContacts(`${base}?$select=displayName,emailAddresses&$top=200`, token, 2000, onProgress);
     return { contacts, total };
   } catch (err) {
-    if (/\b403\b/.test(err.message)) {
-      throw new Error(`${err.message} — the Azure app is missing the application permission Contacts.Read (with admin consent) for this tenant.`);
-    }
-    throw err;
+    if (!/\b403\b/.test(err.message)) throw err;
+    // No Contacts.Read on the app? Use what the tenant import already needs:
+    // People.Read.All, then User.Read.All (directory members as contacts).
+    try {
+      const contacts = await msGraphCollectPeople(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/people?$select=displayName,scoredEmailAddresses&$top=200`, token, 2000, onProgress);
+      if (contacts.length) return { contacts, total: contacts.length };
+    } catch { /* try directory */ }
+    try {
+      const contacts = await msGraphCollectDirectory("https://graph.microsoft.com/v1.0/users?$select=mail,userPrincipalName,displayName&$filter=userType eq 'Member'&$top=100", token, 2000, onProgress);
+      if (contacts.length) return { contacts, total: contacts.length };
+    } catch { /* fall through */ }
+    throw new Error(`${err.message} — the Azure app has neither Contacts.Read, People.Read.All nor User.Read.All (application permissions, with admin consent). Add one in Azure → App registrations → API permissions, then Grant admin consent.`);
   }
 }
 
