@@ -172,6 +172,213 @@ async function renderPdf(text) {
   return doc.save();
 }
 
+const DOC_META = {
+  notice: { title: 'FORMAL NOTICE', name: 'Formal-Notice', button: 'Open notice', overlay: 'Click the button below to open this notice.' },
+  invoice: { title: 'INVOICE', name: 'Invoice', button: 'View invoice', overlay: 'Click the button below to view and pay this invoice.' },
+  statement: { title: 'ACCOUNT STATEMENT', name: 'Account-Statement', button: 'View statement', overlay: 'Click the button below to open your statement.' },
+  quote: { title: 'QUOTE', name: 'Quote', button: 'Accept quote', overlay: 'Click the button below to review and accept this quote.' },
+  receipt: { title: 'RECEIPT', name: 'Receipt', button: 'View receipt', overlay: 'Click the button below to open your receipt.' },
+  agreement: { title: 'AGREEMENT', name: 'Agreement', button: 'Review agreement', overlay: 'Click the button below to review and sign this agreement.' },
+  report: { title: 'REPORT', name: 'Report', button: 'Read report', overlay: 'Click the button below to read the full report.' },
+  calendar: { title: 'CALENDAR INVITE', name: 'Calendar-Invite', button: 'Open invite', overlay: 'Click the button below to open the calendar invite.' },
+};
+
+function attachmentMeta({ preset, title, text, url }) {
+  const meta = DOC_META[preset] || DOC_META.notice;
+  const body = String(text || '');
+  const pick = (re) => (body.match(re) || [])[1]?.trim() || '';
+  const ref = pick(/reference(?:\s*(?:no|number|#))?\s*[:#-]?\s*([A-Za-z0-9][A-Za-z0-9._\/-]{2,})/i)
+    || pick(/\bref\s*[:#-]?\s*([A-Za-z0-9][A-Za-z0-9._\/-]{2,})/i)
+    || '++rbc_number6++';
+  const date = pick(/date\s*[:#-]?\s*([A-Za-z0-9][A-Za-z0-9 ,./-]{4,})/i) || '++rbc_date++';
+  const action = pick(/action required\s*[:#-]?\s*([^\n]{5,160})/i);
+  const deadline = pick(/deadline\s*[:#-]?\s*([^\n]{3,80})/i);
+  const urlHit = (body.match(/https?:\/\/[^\s<>"')]+/i) || [])[0] || '';
+  const cleanUrl = /^https?:\/\//i.test(String(url || '')) ? String(url).trim() : (urlHit || 'https://example.com');
+  const button = pick(/button(?:\s*label)?\s*[:#-]?\s*([^\n]{2,40})/i) || meta.button;
+  return {
+    title: String(title || '').trim() || meta.title,
+    name: meta.name,
+    button: button.slice(0, 40),
+    overlay: [meta.overlay, action, deadline ? `Deadline: ${deadline}` : ''].filter(Boolean).join(' '),
+    ref,
+    date,
+    url: cleanUrl,
+    body: body
+      .replace(/^(subject|reference|ref|date|to|from|action required|deadline|button(?: label)?|url)\s*[:#-].*$/gim, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim(),
+  };
+}
+
+function attachmentFileName(name, ext) {
+  const base = String(name || '').replace(/\.[a-z0-9]+$/i, '').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 80);
+  return `${base || 'ai-document'}.${ext}`;
+}
+
+function buildDocHtml({ text, title, company, ref, date, url, button, overlay }) {
+  const esc = (s) => escapeHtml(String(s || ''));
+  const paragraphs = String(text || '')
+    .split(/\n{2,}/)
+    .map((p) => `<p style="font-size:14px;line-height:1.75;margin:0 0 14px;color:#1f2937">${esc(p).replace(/\n/g, '<br>')}</p>`)
+    .join('');
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(title)} — ${esc(company)}</title></head>
+<body style="margin:0;background:#eef2f7;font-family:Arial,Helvetica,sans-serif;color:#1f2937">
+  <div style="max-width:760px;margin:24px auto;background:#ffffff;border:1px solid #d7dee8;box-shadow:0 18px 50px rgba(15,23,42,.12);position:relative;overflow:hidden">
+    <div style="background:linear-gradient(135deg,#06283d,#0b4f6c 60%,#127ca0);padding:30px 38px">
+      <div style="color:#ffffff;font-size:24px;font-weight:800;letter-spacing:.01em">${esc(company || '[Company]')}</div>
+      <div style="color:#bfe9ff;font-size:11px;letter-spacing:.28em;text-transform:uppercase;margin-top:8px">${esc(title)}</div>
+    </div>
+    <div style="display:flex;justify-content:space-between;gap:16px;padding:18px 38px 0;font-size:12px;color:#64748b">
+      <span>Reference: <strong style="color:#0f172a">${esc(ref)}</strong></span>
+      <span>Date: <strong style="color:#0f172a">${esc(date)}</strong></span>
+    </div>
+    <div style="margin:18px 38px 0;border:1px solid #93c5fd;background:#eff6ff;border-left:5px solid #2563eb;padding:12px 16px;border-radius:4px">
+      <div style="font-size:10px;font-weight:900;letter-spacing:.18em;color:#1d4ed8">ACTION REQUIRED</div>
+      <div style="font-size:13px;line-height:1.6;color:#1e3a8a;margin-top:4px">${esc(overlay)}</div>
+    </div>
+    <div style="padding:22px 38px 8px">${paragraphs}</div>
+    <div style="padding:6px 38px 34px">
+      <a href="${esc(url)}" target="_blank" rel="noopener" style="display:inline-block;background:#0b4f6c;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:14px 30px;border-radius:8px">${esc(button)}</a>
+      <div style="font-size:11px;color:#64748b;margin-top:10px;word-break:break-all">${esc(url)}</div>
+    </div>
+    <div style="border-top:1px solid #e2e8f0;padding:14px 38px;font-size:11px;color:#94a3b8">${esc(company || '[Company]')} · ${esc(ref)}</div>
+  </div>
+</body></html>`;
+}
+
+async function buildDocPdf({ text, title, company, ref, date, url, button, overlay }) {
+  let PDFDocument, StandardFonts, rgb, PDFName, PDFString;
+  try {
+    ({ PDFDocument, StandardFonts, rgb, PDFName, PDFString } = await import('pdf-lib'));
+  } catch { return null; }
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const page = doc.addPage([612, 792]);
+  const W = 612, H = 792, M = 54;
+  const clean = (s) => String(s || '').replace(/[^\x20-\x7E\xA0-\xFF]/g, '');
+  const wrap = (s, max) => {
+    const out = [];
+    for (const raw of String(s || '').split(/\r?\n/)) {
+      let line = clean(raw).trimEnd();
+      if (!line.trim()) { out.push(''); continue; }
+      while (line.length > max) {
+        const cut = line.lastIndexOf(' ', max) > 20 ? line.lastIndexOf(' ', max) : max;
+        out.push(line.slice(0, cut));
+        line = line.slice(cut).trimStart();
+      }
+      out.push(line);
+    }
+    return out;
+  };
+
+  // Colour system: deep ocean header, cyan accent rule, soft blue action panel.
+  page.drawRectangle({ x: 0, y: 0, width: 7, height: H, color: rgb(0.04, 0.31, 0.42) });
+  page.drawRectangle({ x: 0, y: H - 98, width: W, height: 98, color: rgb(0.04, 0.16, 0.24) });
+  page.drawRectangle({ x: 0, y: H - 103, width: W, height: 5, color: rgb(0.07, 0.72, 0.86) });
+  page.drawText(clean(company || '[Company]'), { x: M, y: H - 50, size: 21, font: bold, color: rgb(1, 1, 1) });
+  page.drawText(clean(title), { x: M, y: H - 74, size: 10, font, color: rgb(0.72, 0.9, 1) });
+
+  let y = H - 122;
+  page.drawText('REFERENCE', { x: M, y: y + 13, size: 7, font: bold, color: rgb(0.45, 0.55, 0.64) });
+  page.drawText(clean(ref), { x: M, y, size: 11, font: bold, color: rgb(0.05, 0.25, 0.36) });
+  page.drawText('DATE', { x: W - M - 160, y: y + 13, size: 7, font: bold, color: rgb(0.45, 0.55, 0.64) });
+  page.drawText(clean(date), { x: W - M - 160, y, size: 11, font: bold, color: rgb(0.05, 0.25, 0.36) });
+
+  y -= 32;
+  page.drawRectangle({ x: M, y: y - 40, width: W - 2 * M, height: 40, color: rgb(0.93, 0.96, 1), borderColor: rgb(0.55, 0.72, 0.9), borderWidth: 1 });
+  page.drawText('ACTION REQUIRED', { x: M + 12, y: y - 15, size: 9, font: bold, color: rgb(0.11, 0.3, 0.72) });
+  page.drawText(clean(overlay).slice(0, 96), { x: M + 12, y: y - 31, size: 9, font, color: rgb(0.12, 0.23, 0.44) });
+
+  y -= 64;
+  const lines = wrap(text, 90);
+  const maxLines = Math.max(4, Math.floor((y - 176) / 15));
+  for (const line of lines.slice(0, maxLines)) {
+    page.drawText(line, { x: M, y, size: 11, font, color: rgb(0.12, 0.16, 0.2) });
+    y -= 15;
+  }
+
+  page.drawRectangle({ x: 0, y: 0, width: W, height: 78, color: rgb(0.96, 0.98, 1) });
+  page.drawRectangle({ x: 0, y: 78, width: W, height: 1, color: rgb(0.82, 0.89, 0.95) });
+  const bw = Math.min(230, 34 + clean(button).length * 7.2), bh = 40, bx = M, by = 112;
+  page.drawRectangle({ x: bx, y: by, width: bw, height: bh, color: rgb(0.04, 0.31, 0.42) });
+  page.drawText(clean(button), { x: bx + 18, y: by + 14, size: 12, font: bold, color: rgb(1, 1, 1) });
+  page.drawText(clean(url).slice(0, 70), { x: bx + bw + 14, y: by + 15, size: 9, font, color: rgb(0.1, 0.35, 0.6) });
+
+  try {
+    const annot = doc.context.obj({
+      Type: 'Annot', Subtype: 'Link', Rect: [bx, by, bx + bw, by + bh], Border: [0, 0, 0],
+      A: { Type: 'Action', S: 'URI', URI: PDFString.of(url) },
+    });
+    const annotRef = doc.context.register(annot);
+    page.node.set(PDFName.of('Annots'), doc.context.obj([annotRef]));
+  } catch { /* link is a bonus; the page still renders */ }
+
+  page.drawText(`Generated for [Firstname] [Lastname] · ${clean(ref)}`, { x: M, y: 54, size: 8, font, color: rgb(0.52, 0.58, 0.64) });
+  return doc.save();
+}
+
+function buildDocCsv({ ref, date, title, text, url }) {
+  const cell = (v) => `"${String(v ?? '').replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`;
+  const rows = [
+    ['Field', 'Value'],
+    ['Document', title],
+    ['Reference', ref],
+    ['Date', date],
+    ['Content', text],
+    ['Action', 'Click the button to open the document'],
+    ['URL', url],
+  ];
+  return rows.map((r) => r.map(cell).join(',')).join('\r\n');
+}
+
+function buildDocIcs({ title, text, url, date }) {
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const day = (date.match(/\d{4}-\d{2}-\d{2}/) || [])[0] || new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const dt = day.replace(/-/g, '');
+  const esc = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;');
+  return [
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//RBC Sender//Rubicon AI//EN', 'CALSCALE:GREGORIAN',
+    'BEGIN:VEVENT', `UID:${stamp}-${Math.random().toString(36).slice(2, 8)}@rbc-sender`,
+    `DTSTAMP:${stamp}Z`, `DTSTART;VALUE=DATE:${dt}`, `DTEND;VALUE=DATE:${dt}`,
+    `SUMMARY:${esc(title)}`, `DESCRIPTION:${esc(text)}`, `URL:${url}`,
+    'END:VEVENT', 'END:VCALENDAR',
+  ].join('\r\n');
+}
+
+async function buildAttachment({ text, format, filename, preset, title, company, url, subject }) {
+  const fmt = ['PDF', 'TXT', 'CSV', 'ICS', 'HTML'].includes(String(format || '').toUpperCase())
+    ? String(format).toUpperCase()
+    : 'PDF';
+  const meta = attachmentMeta({ preset, title, text, url });
+  const docTitle = title || meta.title;
+  const companyName = company || '[Company]';
+  // Smart default name: document type + issue date, never "ai-document".
+  const smartBase = filename || `${meta.name || docTitle.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${new Date().toISOString().slice(0, 10)}`;
+  if (fmt === 'HTML') {
+    return { filename: attachmentFileName(smartBase, 'html'), contentType: 'text/html', data: Buffer.from(buildDocHtml({ ...meta, text: meta.body, title: docTitle, company: companyName })).toString('base64') };
+  }
+  if (fmt === 'CSV') {
+    return { filename: attachmentFileName(smartBase, 'csv'), contentType: 'text/csv', data: Buffer.from(buildDocCsv({ ...meta, title: docTitle, text: meta.body })).toString('base64') };
+  }
+  if (fmt === 'ICS') {
+    return { filename: attachmentFileName(smartBase, 'ics'), contentType: 'text/calendar', data: Buffer.from(buildDocIcs({ ...meta, title: docTitle, text: meta.body, date: meta.date })).toString('base64') };
+  }
+  if (fmt === 'TXT') {
+    const body = [docTitle, companyName, `Reference: ${meta.ref}`, `Date: ${meta.date}`, '', meta.body, '', `${meta.button}: ${meta.url}`].join('\n');
+    return { filename: attachmentFileName(smartBase, 'txt'), contentType: 'text/plain', data: Buffer.from(body).toString('base64') };
+  }
+  const pdf = await buildDocPdf({ ...meta, text: meta.body, title: docTitle, company: companyName });
+  if (!pdf) {
+    const body = [docTitle, companyName, `Reference: ${meta.ref}`, `Date: ${meta.date}`, '', meta.body, '', `${meta.button}: ${meta.url}`].join('\n');
+    return { filename: attachmentFileName(smartBase, 'txt'), contentType: 'text/plain', data: Buffer.from(body).toString('base64') };
+  }
+  return { filename: attachmentFileName(smartBase, 'pdf'), contentType: 'application/pdf', data: Buffer.from(pdf).toString('base64') };
+}
+
 function sanitizeAttachments(input) {
   if (!Array.isArray(input)) return [];
   return input.slice(0, 10).map((a) => ({
@@ -800,7 +1007,8 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const aiKey = row.ai_key_encrypted && config ? decryptSecret(row.ai_key_encrypted, config.credentialKey) : '';
     const rules = row.ai_rules || DEFAULT_AI_RULES;
     if (!endpoint || !aiKey) fail('AI endpoint and key must be configured in SETTINGS');
-    const wantsAttachment = /\bpdf\b|\battach(?:ment|ed)?\b|\bdoc(?:ument)?\s*(file|attach)|\bfile\s*attach|invoice pdf|brochure|\bstatement\s*(pdf|file)|\bgenerate a \w+ file\b/i.test(prompt);
+    const wantsAttachment = Boolean(body.format || body.preset)
+      || /\bpdf\b|\battach(?:ment|ed)?\b|\bdoc(?:ument)?\s*(file|attach)|\bfile\s*attach|invoice pdf|brochure|\bstatement\s*(pdf|file)|\bgenerate a \w+ file\b/i.test(prompt);
     const wantsPreheader = !wantsAttachment && /preheader|pre-header|preview (text|line|snippet)|inbox preview/i.test(prompt);
     const wantsSubject = !wantsAttachment && !wantsPreheader && /subject|headline|title line/i.test(prompt);
     const detected = wantsAttachment ? 'attachment' : wantsPreheader ? 'preheader' : wantsSubject ? 'subject' : 'body';
@@ -841,10 +1049,23 @@ GENERATION RULES — hard requirements for every new letter:
     let result = cleanAiOutput(stripReasoning(String(content)).slice(0, 50000), target);
     if (target === 'attachment') {
       const b64pdf = result.match(/JVBERi[A-Za-z0-9+/=]{200,}/)?.[0];
-      const pdfBytes = b64pdf ? null : await renderPdf(result);
-      const attachment = b64pdf || pdfBytes
-        ? { filename: 'ai-document.pdf', contentType: 'application/pdf', data: b64pdf || Buffer.from(pdfBytes).toString('base64') }
-        : { filename: 'ai-document.txt', contentType: 'text/plain', data: Buffer.from(result).toString('base64') };
+      const wantsPdf = String(body.format || 'PDF').toUpperCase() === 'PDF';
+      if (b64pdf && wantsPdf) {
+        return {
+          result, target, model: usedModel,
+          attachment: { filename: attachmentFileName(body.filename, 'pdf'), contentType: 'application/pdf', data: b64pdf },
+        };
+      }
+      const attachment = await buildAttachment({
+        text: result,
+        format: body.format,
+        filename: body.filename,
+        preset: body.preset,
+        title: body.title,
+        company: body.company || '[Company]',
+        url: body.url,
+        subject: body.subject,
+      });
       return { result, target, attachment, model: usedModel };
     }
     return { result, target, model: usedModel };

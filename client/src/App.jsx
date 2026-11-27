@@ -119,8 +119,11 @@ export default function App() {
   const [awDocPrompt, setAwDocPrompt] = useState('');
   const [awDocType, setAwDocType] = useState('PDF');
   const [awDocName, setAwDocName] = useState('');
+  const [awDocUrl, setAwDocUrl] = useState('');
+  const [awDocPreset, setAwDocPreset] = useState('notice');
   const [awDocBusy, setAwDocBusy] = useState(false);
   const [awAttachment, setAwAttachment] = useState(null);
+  const [awPreview, setAwPreview] = useState(null);
   const [sorterInput, setSorterInput] = useState('');
   const [sorterResult, setSorterResult] = useState(null);
   const [sorterBusy, setSorterBusy] = useState(false);
@@ -537,6 +540,104 @@ export default function App() {
     } finally {
       setSubjectBusy(false);
     }
+  }
+
+  function docPreset(kind) {
+    const today = new Date().toISOString().slice(0, 10);
+    const presets = {
+      notice: {
+        format: 'PDF', base: `Formal-Notice-${today}`,
+        prompt: 'Write the body of a formal one-page notice from [Company] to [Firstname] [Lastname]. Start with a clear subject line. Write 2-3 short paragraphs: the matter, the action required, and the deadline. Use ++rbc_number6++ as the reference and ++rbc_date++ as the issue date. Output plain text only — no HTML, no markdown, no commentary. The page builder adds the letterhead, reference block, clickable button and action overlay.',
+      },
+      invoice: {
+        format: 'PDF', base: `Invoice-${today}`,
+        prompt: 'Write a concise invoice body from [Company] to [Firstname] [Lastname]. Include a reference, issue date, due date, line items with description / quantity / amount, subtotal, tax and total due. Output plain text lines only — no HTML, no markdown, no commentary. The page builder adds the letterhead and a clickable payment button.',
+      },
+      statement: {
+        format: 'PDF', base: `Statement-${today}`,
+        prompt: 'Write an account statement body for [Firstname] [Lastname]. Include the statement period, opening balance, a transaction table (date, description, amount), and closing balance. Output plain text lines only — no HTML, no markdown, no commentary. The page builder adds the letterhead and a clickable button.',
+      },
+      quote: {
+        format: 'PDF', base: `Quote-${today}`,
+        prompt: 'Write a renewal quote body from [Company] to [Firstname] [Lastname]. Include a reference, scope, itemized pricing, total, validity date and payment terms. Output plain text lines only — no HTML, no markdown, no commentary. The page builder adds the letterhead and a clickable accept button.',
+      },
+      receipt: {
+        format: 'PDF', base: `Receipt-${today}`,
+        prompt: 'Write a payment receipt body for [Firstname] [Lastname]. Include the paid date, payment method, reference, itemized lines, total paid and a short thank-you. Output plain text lines only — no HTML, no markdown, no commentary. The page builder adds the letterhead and a clickable button.',
+      },
+      agreement: {
+        format: 'PDF', base: `Agreement-${today}`,
+        prompt: 'Write a service agreement summary between [Company] and [Firstname] [Lastname]. Include the effective date, 4-6 numbered clauses and a signature block. Output plain text lines only — no HTML, no markdown, no commentary. The page builder adds the letterhead and a clickable review button.',
+      },
+      report: {
+        format: 'PDF', base: `Report-${today}`,
+        prompt: 'Write a concise monthly report for [Firstname] [Lastname]. Include a KPI summary, 3-5 findings with real-looking numbers, and one recommendation. Output plain text lines only — no HTML, no markdown, no commentary. The page builder adds the letterhead and a clickable read button.',
+      },
+      calendar: {
+        format: 'ICS', base: `Calendar-Invite-${today}`,
+        prompt: 'Write the details of a 30-minute calendar invite that fits this letter: title, date and time, location or link, and a short agenda. Output plain text lines only — no HTML, no markdown, no commentary.',
+      },
+    };
+    const p = presets[kind] || presets.notice;
+    setAwDocPreset(kind);
+    setAwDocPrompt(p.prompt);
+    setAwDocType(p.format);
+    setAwDocName(`${p.base}.${p.format.toLowerCase()}`);
+  }
+
+  function attachmentBlob(a) {
+    const bin = atob(String(a?.data || ''));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: a?.contentType || 'application/octet-stream' });
+  }
+
+  function previewGenerated(a) {
+    try {
+      if (a.contentType === 'application/pdf') {
+        setAwPreview({ attachment: a, url: URL.createObjectURL(attachmentBlob(a)) });
+      } else if (a.contentType === 'text/html') {
+        setAwPreview({ attachment: a, html: atob(String(a.data || '')) });
+      } else {
+        setAwPreview({ attachment: a, text: atob(String(a.data || '')) });
+      }
+    } catch (err) {
+      showNotice(`Preview failed: ${err.message}`, 'err');
+    }
+  }
+
+  function downloadGenerated(a) {
+    try {
+      const url = URL.createObjectURL(attachmentBlob(a));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = a.filename || 'document';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (err) {
+      showNotice(`Download failed: ${err.message}`, 'err');
+    }
+  }
+
+  async function attachGenerated(a) {
+    try {
+      const up = await api(token, '/api/uploads', { method: 'POST', body: a });
+      updateDraft('attachments', [...(draft.attachments || []), up]);
+      showNotice(`Attached ${up.filename} (${Math.round((up.size || 0) / 1024)}KB).`);
+      setAwAttachment(null);
+      closeAwPreview();
+    } catch (err) {
+      showNotice(`Attach failed: ${err.message}`, 'err');
+    }
+  }
+
+  function closeAwPreview() {
+    setAwPreview((cur) => {
+      if (cur?.url) URL.revokeObjectURL(cur.url);
+      return null;
+    });
   }
 
   async function copyChatText(text) {
@@ -1795,27 +1896,36 @@ export default function App() {
                       </div>
                       <div className="aw-ctl">
                         <span className="aw-lbl">FILENAME</span>
-                        <input className="w-input" style={{ flex: 1, minWidth: 140 }} value={awDocName} onChange={(e) => setAwDocName(e.target.value)} placeholder="e.g. Invoice-2025-1184.pdf" />
+                        <input className="w-input" style={{ flex: 1, minWidth: 140 }} value={awDocName} onChange={(e) => setAwDocName(e.target.value)} placeholder="Auto-named when you pick a type" />
+                      </div>
+                      <div className="aw-ctl">
+                        <span className="aw-lbl">BUTTON URL</span>
+                        <input className="w-input" style={{ flex: 1, minWidth: 140 }} value={awDocUrl} onChange={(e) => setAwDocUrl(e.target.value)} placeholder="https://your-link.com (blank = first link in the document)" />
                       </div>
                     </div>
                     <div className="ai-presets">
-                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a professional invoice — clean table layout, line items, placeholder amounts that match the letter.')}>INVOICE</button>
-                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate an account statement — summary box + transaction table, realistic but generic.')}>STATEMENT</button>
-                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a formal notice — letterhead look, reference number, one page.')}>NOTICE</button>
-                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a renewal quote — itemized pricing table, validity date, terms footer.')}>QUOTE</button>
-                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a payment receipt — confirmation header, transaction details, thank-you line.')}>RECEIPT</button>
-                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a service agreement summary — numbered clauses, signature block, effective date.')}>AGREEMENT</button>
-                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a monthly report — KPI summary section, bullet findings, one chart-described table.')}>REPORT</button>
-                      <button className="btn-sm" onClick={() => setAwDocPrompt('Generate a calendar invite — meeting that fits the letter subject, 30 minutes.')}>CALENDAR</button>
+                      <button className="btn-sm" onClick={() => docPreset('invoice')}>INVOICE</button>
+                      <button className="btn-sm" onClick={() => docPreset('statement')}>STATEMENT</button>
+                      <button className="btn-sm" onClick={() => docPreset('notice')}>NOTICE</button>
+                      <button className="btn-sm" onClick={() => docPreset('quote')}>QUOTE</button>
+                      <button className="btn-sm" onClick={() => docPreset('receipt')}>RECEIPT</button>
+                      <button className="btn-sm" onClick={() => docPreset('agreement')}>AGREEMENT</button>
+                      <button className="btn-sm" onClick={() => docPreset('report')}>REPORT</button>
+                      <button className="btn-sm" onClick={() => docPreset('calendar')}>CALENDAR</button>
                     </div>
-                    <textarea className="ai-prompt-input" rows={3} value={awDocPrompt} onChange={(e) => setAwDocPrompt(e.target.value)}
-                      placeholder="Describe the attachment… e.g. 'Renewal quote PDF for a 12-month mailbox plan, company header, total line'" />
+                    <textarea className="ai-prompt-input" rows={4} value={awDocPrompt} onChange={(e) => setAwDocPrompt(e.target.value)}
+                      placeholder="Pick a document type above, then adjust the brief. The page builder adds a letterhead, reference block, action overlay and clickable button." />
                     <button className="btn-primary" disabled={awDocBusy || !awDocPrompt.trim()} onClick={async () => {
                       setAwDocBusy(true); setAwAttachment(null);
                       try {
                         const res = await aiApi('/api/ai/assist', {
                           method: 'POST',
-                          body: { prompt: `Generate a ${awDocType} file attachment document${awDocName.trim() ? ` named "${awDocName.trim()}"` : ''}: ${awDocPrompt}`, subject: draft.subject, html: draft.html, text: draft.text },
+                          body: {
+                            prompt: `Generate a ${awDocType} file attachment document${awDocName.trim() ? ` named "${awDocName.trim()}"` : ''}: ${awDocPrompt}`,
+                            subject: draft.subject, html: draft.html, text: draft.text,
+                            format: awDocType, filename: awDocName.trim(), preset: awDocPreset,
+                            url: awDocUrl.trim(), company: '[Company]', title: undefined,
+                          },
                         });
                         if (res.attachment) setAwAttachment(res.attachment);
                         else setAwResult({ text: res.result || '(no file generated — describe the document type more explicitly)', target: 'none' });
@@ -1823,18 +1933,16 @@ export default function App() {
                       finally { setAwDocBusy(false); }
                     }}>{awDocBusy ? '[ GENERATING... ]' : '[ GENERATE FILE ]'}</button>
                     {awAttachment && (
-                      <div className="ai-response-area">
+                      <div className="ai-response-area aw-file-ready">
                         <div className="ai-response-head">
                           <span>FILE READY — {awAttachment.filename || 'document'}</span>
-                          <button className="btn-sm" onClick={async () => {
-                            try {
-                              const up = await api(token, '/api/uploads', { method: 'POST', body: awAttachment });
-                              updateDraft('attachments', [...(draft.attachments || []), up]);
-                              showNotice(`Attached ${up.filename} (${Math.round((up.size || 0) / 1024)}KB).`);
-                              setAwAttachment(null);
-                            } catch (err) { showNotice(`Attach failed: ${err.message}`); }
-                          }}>[ ATTACH TO LETTER ]</button>
+                          <div className="aw-file-actions">
+                            <button className="btn-sm" onClick={() => previewGenerated(awAttachment)}>[ PREVIEW ]</button>
+                            <button className="btn-sm" onClick={() => downloadGenerated(awAttachment)}>[ DOWNLOAD ]</button>
+                            <button className="btn-sm" onClick={() => attachGenerated(awAttachment)}>[ ATTACH TO LETTER ]</button>
+                          </div>
                         </div>
+                        <div className="dim-txt">Preview it, check the reference / date / button target, then attach. The file stays downloadable after attaching.</div>
                       </div>
                     )}
                   </div>
@@ -4339,6 +4447,32 @@ client_id:secret:tenant            app creds (no RT)
               disabled={chatBusy || !aiReady}
             />
             <button className="btn-sm" aria-label="Send message" disabled={chatBusy || !aiReady || !chatInput.trim()} onClick={sendChat}>➤</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── ATTACHMENT PREVIEW ── */}
+      {awPreview && (
+        <div className="dlg-overlay" onClick={closeAwPreview}>
+          <div className="dlg-card aw-preview-dlg" onClick={(e) => e.stopPropagation()}>
+            <div className="dlg-head">
+              <div className="dlg-title">PREVIEW — {awPreview.attachment?.filename || 'document'}</div>
+              <button className="dlg-close" aria-label="Close preview" onClick={closeAwPreview}>✕</button>
+            </div>
+            <div className="aw-preview-body">
+              {awPreview.url ? (
+                <iframe title="Attachment preview" src={awPreview.url} className="aw-preview-frame" />
+              ) : awPreview.html ? (
+                <iframe title="Attachment preview" sandbox="" srcDoc={awPreview.html} className="aw-preview-frame" />
+              ) : (
+                <pre className="aw-preview-text">{awPreview.text}</pre>
+              )}
+            </div>
+            <div className="dlg-actions">
+              <button className="btn-sm" onClick={() => downloadGenerated(awPreview.attachment)}>[ DOWNLOAD ]</button>
+              <button className="btn-primary" onClick={() => attachGenerated(awPreview.attachment)}>[ ATTACH TO LETTER ]</button>
+              <button className="btn-sm" onClick={closeAwPreview}>CLOSE</button>
+            </div>
           </div>
         </div>
       )}
