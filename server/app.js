@@ -1537,6 +1537,80 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     return { id: Number(r.lastInsertRowid) };
   });
 
+  // ── SMTP pool bulk import ──
+  // One account per line: host|port|user|pass|from. Accepts | , ; : tab as
+  // separators; from is optional and defaults to the login address.
+  function splitSmtpLine(line) {
+    const raw = String(line || '').trim();
+    if (!raw || raw.startsWith('#')) return null;
+    const sep = ['|', '\t', ';', ','].find((s) => raw.includes(s));
+    if (sep) {
+      const parts = raw.split(sep).map((p) => p.trim());
+      if (parts.length < 4) return null;
+      const [host, port, user] = parts;
+      if (parts.length >= 5) {
+        return { host, port, user, pass: parts.slice(3, -1).join(sep), from: parts[parts.length - 1] };
+      }
+      return { host, port, user, pass: parts.slice(3).join(sep), from: '' };
+    }
+    // colon form — a password may itself contain colons, so keep the tail whole
+    const rawParts = raw.split(':').map((p) => p.trim());
+    if (rawParts.length < 4) return null;
+    const [host, port] = rawParts;
+    const rest = rawParts.slice(2);
+    const userIdx = rest.findIndex((p) => p.includes('@'));
+    if (userIdx < 0) return null;
+    const user = rest[userIdx];
+    const after = rest.slice(userIdx + 1);
+    let from = '';
+    if (after.length >= 2 && after[after.length - 1].includes('@')) from = after.pop();
+    return { host, port, user, pass: after.join(':'), from };
+  }
+
+  app.post('/api/smtp/accounts/import', async (request) => {
+    const body = request.body || {};
+    const quota = Math.min(1000000, Math.max(0, Number(body.dailyQuota ?? body.quota) || 0));
+    const lines = String(body.data || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) fail('Nothing to import — paste host|port|user|pass|from lines');
+    if (lines.length > 500) fail('Max 500 accounts per import');
+    const results = [];
+    let imported = 0, updated = 0;
+    const now = new Date().toISOString();
+    for (const line of lines) {
+      const p = splitSmtpLine(line);
+      if (!p) { results.push({ ok: false, error: 'unparseable line', line: line.slice(0, 80) }); continue; }
+      const host = String(p.host || '').replace(/^smtps?:\/\//i, '').replace(/\/.*$/, '').trim();
+      const port = Number(p.port);
+      const username = String(p.user || '').trim();
+      const password = String(p.pass || '');
+      const fromEmail = String(p.from || (username.includes('@') ? username : '')).trim().toLowerCase();
+      if (!host) { results.push({ ok: false, error: 'host missing', line: line.slice(0, 80) }); continue; }
+      if (!Number.isInteger(port) || port < 1 || port > 65535) { results.push({ ok: false, error: `port invalid (${p.port})`, line: host }); continue; }
+      if (!username) { results.push({ ok: false, error: 'username missing', line: host }); continue; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fromEmail)) { results.push({ ok: false, error: 'from email missing/invalid — use host:port:user:pass:from', line: username }); continue; }
+      const secure = port === 465 ? 1 : 0;
+      const existing = db.prepare("SELECT id FROM smtp_accounts WHERE auth_type = 'password' AND host = ? AND port = ? AND username = ?").get(host, port, username);
+      try {
+        if (existing) {
+          db.prepare(`UPDATE smtp_accounts SET password_encrypted = ?, from_email = ?, enabled = 1,
+            fails = 0, cooldown_until = NULL, last_error = '', updated_at = ? WHERE id = ?`)
+            .run(password ? encryptSecret(password, config.credentialKey) : '', fromEmail, now, existing.id);
+          updated++;
+          results.push({ ok: true, updated: true, id: existing.id, email: username });
+        } else {
+          const r = db.prepare(`INSERT INTO smtp_accounts (label, host, port, secure, username, password_encrypted, from_name, from_email, reply_to, enabled, weight, daily_quota, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, '', ?, '', 1, 1, ?, ?, ?)`)
+            .run(`${host}:${port}`, host, port, secure, username, password ? encryptSecret(password, config.credentialKey) : '', fromEmail, quota, now, now);
+          imported++;
+          results.push({ ok: true, id: Number(r.lastInsertRowid), email: username });
+        }
+      } catch (err) {
+        results.push({ ok: false, error: String(err.message || err).slice(0, 160), line: username });
+      }
+    }
+    return { imported, updated, failed: results.filter((r) => !r.ok).length, results };
+  });
+
   app.put('/api/smtp/accounts/:id', async (request) => {
     const id = Number(request.params.id);
     const current = db.prepare('SELECT * FROM smtp_accounts WHERE id = ?').get(id);

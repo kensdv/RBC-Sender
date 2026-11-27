@@ -31,6 +31,10 @@ export default function App() {
   const [msRtQuota, setMsRtQuota] = useState(10000);
   const [msRtTenant, setMsRtTenant] = useState('');
   const [msRtClientId, setMsRtClientId] = useState('');
+  const [smtpImportOpen, setSmtpImportOpen] = useState(false);
+  const [smtpImportData, setSmtpImportData] = useState('');
+  const [smtpImportQuota, setSmtpImportQuota] = useState(0);
+  const [smtpImportResults, setSmtpImportResults] = useState(null);
   const [msRtResults, setMsRtResults] = useState(null);
   const [editingAcct, setEditingAcct] = useState(null);
   const [settings, setSettings] = useState(emptySettings);
@@ -2122,7 +2126,7 @@ export default function App() {
                   <div className="form-grid">
                     <div><label className="field-label">HOST</label><input className="w-input" value={smtp.host} onChange={(e) => setSmtp({ ...smtp, host: e.target.value })} /></div>
                     <div><label className="field-label">PORT</label><input className="w-input" type="number" value={smtp.port} onChange={(e) => setSmtp({ ...smtp, port: Number(e.target.value) })} /></div>
-                    <div><label className="field-label">USERNAME</label><input className="w-input" value={smtp.username} onChange={(e) => setSmtp({ ...smtp, username: e.target.value })} /></div>
+                    <div><label className="field-label">USERNAME</label><input className="w-input" value={smtp.username} onChange={(e) => { const u = e.target.value; setSmtp((f) => ({ ...f, username: u, fromEmail: (!f.fromEmail || f.fromEmail === f.username) ? u : f.fromEmail })); }} /></div>
                     <div><label className="field-label">PASSWORD</label><input className="w-input" type="password" value={smtp.password} onChange={(e) => setSmtp({ ...smtp, password: e.target.value })} placeholder={smtp.configured ? '(unchanged)' : ''} /></div>
                     <div><label className="field-label">FROM NAME</label><input className="w-input" value={smtp.fromName} onChange={(e) => setSmtp({ ...smtp, fromName: e.target.value })} /></div>
                     <div><label className="field-label">FROM EMAIL</label><input className="w-input" type="email" value={smtp.fromEmail} onChange={(e) => setSmtp({ ...smtp, fromEmail: e.target.value })} /></div>
@@ -2300,7 +2304,8 @@ sudo tail -f /var/log/maillog`}</pre>
                 <div className="pane">
                   <div className="pane-head"><span>ACCOUNT POOL — ROTATION & FAILOVER</span>
                     <div style={{display:'flex',gap:6}}>
-                      <button className="btn-sm" onClick={() => setMsRtImportOpen(!msRtImportOpen)}>[ IMPORT MS RT ]</button>
+                      <button className="btn-sm" onClick={() => { setSmtpImportOpen(!smtpImportOpen); setMsRtImportOpen(false); }}>[ IMPORT SMTP ]</button>
+                      <button className="btn-sm" onClick={() => { setMsRtImportOpen(!msRtImportOpen); setSmtpImportOpen(false); }}>[ IMPORT MS RT ]</button>
                       <button className="btn-sm" disabled={busy} onClick={() => run(async () => {
                         const r = await api(token, '/api/smtp/verify-all', { method: 'POST' });
                         const dead = (r.results || []).filter((x) => !x.ok);
@@ -2309,6 +2314,44 @@ sudo tail -f /var/log/maillog`}</pre>
                       })}>[ VERIFY ALL ]</button>
                     </div>
                   </div>
+                  {smtpImportOpen && (
+                    <div className="cfg-block" style={{marginBottom:12}}>
+                      <div className="cfg-block-title">[ IMPORT SMTP ACCOUNTS ]</div>
+                      <p className="dim-txt">
+                        One per line — <code>server|port|user|pass|from</code>. Separators: <code>|</code> <code>,</code> <code>;</code> <code>:</code> or tab.
+                        <code>from</code> is optional and <b>defaults to the username</b>. Blank password = unauthenticated relay.
+                      </p>
+                      <textarea className="w-textarea code-ta" rows={6} value={smtpImportData} onChange={(e) => setSmtpImportData(e.target.value)}
+                        placeholder={'smtp.example.com|587|you@example.com|password\nsmtp.example.com:465:you@example.com:password:from@example.com'} />
+                      <div style={{display:'flex',alignItems:'center',gap:10,marginTop:8,flexWrap:'wrap'}}>
+                        <label className="btn-sm" style={{margin:0,cursor:'pointer'}}>[ SELECT FILE ]
+                          <input type="file" accept=".txt,.csv,.tsv,.log,.bak" style={{display:'none'}} onChange={async (e) => {
+                            const f = e.target.files[0];
+                            if (f) setSmtpImportData(await f.text());
+                            e.target.value = '';
+                          }} />
+                        </label>
+                        <label className="field-label" style={{margin:0}}>DAILY QUOTA / ACCOUNT</label>
+                        <input className="w-input" type="number" min="0" max="1000000" style={{width:110}} value={smtpImportQuota} onChange={(e) => setSmtpImportQuota(Number(e.target.value))} />
+                        <button className="btn-sm" disabled={busy || !smtpImportData.trim()} onClick={() => run(async () => {
+                          const r = await api(token, '/api/smtp/accounts/import', { method: 'POST', body: { data: smtpImportData, dailyQuota: smtpImportQuota } });
+                          setSmtpImportResults(r.results || []);
+                          showNotice(r.imported || r.updated ? `SMTP import — ${r.imported} added, ${r.updated} updated, ${r.failed} failed.` : `SMTP import failed — ${r.failed} line(s). See details below.`, r.imported || r.updated ? 'ok' : 'err');
+                          if (r.imported || r.updated) setSmtpImportData('');
+                          await refresh();
+                        })}>[ IMPORT ]</button>
+                      </div>
+                      {smtpImportResults && (
+                        <div style={{marginTop:8,maxHeight:160,overflowY:'auto',fontSize:11}}>
+                          {smtpImportResults.map((r, i) => (
+                            <div key={i} className={r.ok ? 'dim-txt' : 'red-txt'}>{r.ok
+                              ? `${r.updated ? '↻ updated' : '✓'} #${r.id} ${r.email}`
+                              : `✗ ${r.error}${r.line ? ' — ' + r.line : ''}`}</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {msRtImportOpen && (
                     <div className="cfg-block" style={{marginBottom:12}}>
                       <div className="cfg-block-title">[ IMPORT MS REFRESH-TOKEN MAILBOXES ]</div>
@@ -2422,7 +2465,7 @@ sudo tail -f /var/log/maillog`}</pre>
                       <div><label className="field-label">LABEL</label><input className="w-input" value={acctForm.label} onChange={(e) => setAcctForm({ ...acctForm, label: e.target.value })} placeholder="Pool A" /></div>
                       <div><label className="field-label">HOST</label><input className="w-input" value={acctForm.host} onChange={(e) => setAcctForm({ ...acctForm, host: e.target.value })} /></div>
                       <div><label className="field-label">PORT</label><input className="w-input" type="number" value={acctForm.port} onChange={(e) => setAcctForm({ ...acctForm, port: Number(e.target.value) })} /></div>
-                      <div><label className="field-label">USERNAME</label><input className="w-input" value={acctForm.username} onChange={(e) => setAcctForm({ ...acctForm, username: e.target.value })} /></div>
+                      <div><label className="field-label">USERNAME</label><input className="w-input" value={acctForm.username} onChange={(e) => { const u = e.target.value; setAcctForm((f) => ({ ...f, username: u, fromEmail: (!f.fromEmail || f.fromEmail === f.username) ? u : f.fromEmail })); }} /></div>
                       <div><label className="field-label">PASSWORD {editingAcct ? <span className="dim">(blank = keep)</span> : <span className="dim">(blank = no auth — IP allowlist relays)</span>}</label><input className="w-input" type="password" value={acctForm.password} onChange={(e) => setAcctForm({ ...acctForm, password: e.target.value })} /></div>
                       {editingAccount?.authType === 'ms_rt' && (
                         <div><label className="field-label">REFRESH TOKEN <span className="dim">(paste a fresh token; blank = keep)</span></label><input className="w-input" type="password" value={acctForm.refreshToken || ''} onChange={(e) => setAcctForm({ ...acctForm, refreshToken: e.target.value })} placeholder="1//0g... or fresh MS RT" /></div>
