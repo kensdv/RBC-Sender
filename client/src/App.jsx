@@ -2640,7 +2640,7 @@ sudo tail -f /var/log/maillog`}</pre>
                       <div className="cfg-block-title">[ {sendMode === 'graph' ? 'MICROSOFT GRAPH' : 'GMAIL API'} ENGINE ]</div>
                       <p className="dim-txt">
                         {sendMode === 'graph'
-                          ? 'Two auth modes: (A) App-only — Azure AD app registration with Mail.Send application permission + admin consent. (B) Delegated — connect any Microsoft 365 / Outlook account via OAuth; also unlocks Contacts extraction.'
+                          ? 'Two auth modes: (A) App-only / MS CC — Azure app with APPLICATION permissions Mail.Send, Contacts.Read, User.Read.All + admin consent. (B) Delegated / MS RT — connect a Microsoft 365 / Outlook account via OAuth; also unlocks Contacts extraction.'
                           : 'Google Cloud OAuth client (type "Web application") with Gmail API enabled. Add this redirect URI in the client: '}
                         {sendMode === 'gmail' && <code>{state?.publicBaseUrl}/api/engine/gmail/callback</code>}
                       </p>
@@ -2675,6 +2675,16 @@ sudo tail -f /var/log/maillog`}</pre>
                               <li>Overview → copy <strong>Application (client) ID</strong> and <strong>Directory (tenant) ID</strong></li>
                               <li>Paste CLIENT ID, CLIENT SECRET, TENANT ID below → <strong>SAVE SETTINGS</strong></li>
                               <li>Hit <strong>CONNECT MICROSOFT ACCOUNT</strong> → sign in → delegated token auto-stored encrypted</li>
+                            </ol>
+                          </details>
+                          <details style={{ border: '1px solid rgba(0,255,65,0.1)', padding: '10px 14px', background: 'rgba(0,8,0,0.3)' }}>
+                            <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 11 }}>Setup guide — Graph app-only / MS CC (imported mailboxes)</summary>
+                            <ol className="dim-txt" style={{ margin: '8px 0', paddingLeft: 20, lineHeight: 1.8, fontSize: 11 }}>
+                              <li>Same Azure app registration as above — CLIENT ID + CLIENT SECRET + TENANT ID</li>
+                              <li>API permissions → Add → Microsoft Graph → <strong>Application permissions</strong> (not Delegated) → <strong>Mail.Send</strong>, <strong>Contacts.Read</strong>, <strong>User.Read.All</strong></li>
+                              <li>Click <strong>Grant admin consent for [tenant]</strong> — without this every call returns 403 Access is denied</li>
+                              <li>Contacts extraction reads <code>/users/&lt;mailbox&gt;/contacts</code>; sending reads <code>/users/&lt;mailbox&gt;/sendMail</code></li>
+                              <li>Imported MS CC accounts send as their own mailbox — a From address from another domain is rejected 403</li>
                             </ol>
                           </details>
                         </div>

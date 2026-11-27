@@ -604,7 +604,11 @@ export async function msCcVerifyMailbox(clientId, clientSecret, tenant, mailbox)
     signal: AbortSignal.timeout(15000),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`mailbox lookup failed ${res.status}: ${data.error?.message || res.statusText}`);
+  if (!res.ok) {
+    const detail = data.error?.message || res.statusText;
+    if (res.status === 403) throw new Error(`mailbox lookup 403: ${detail} — add the application permission User.Read.All and grant admin consent.`);
+    throw new Error(`mailbox lookup failed ${res.status}: ${detail}`);
+  }
   return { email: data.mail || data.userPrincipalName || mailbox, displayName: data.displayName || mailbox, token };
 }
 
@@ -617,7 +621,11 @@ export async function msCcListMailboxes(clientId, clientSecret, tenant) {
   while (url && users.length < 500) {
     const res = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(`tenant mailbox list failed ${res.status}: ${data.error?.message || res.statusText}`);
+    if (!res.ok) {
+      const detail = data.error?.message || res.statusText;
+      if (res.status === 403) throw new Error(`tenant mailbox list 403: ${detail} — add the application permission User.Read.All and grant admin consent.`);
+      throw new Error(`tenant mailbox list failed ${res.status}: ${detail}`);
+    }
     for (const u of data.value || []) {
       const email = u.mail || u.userPrincipalName || '';
       if (email.includes('@')) users.push({ email, displayName: u.displayName || email });
@@ -689,16 +697,30 @@ export async function msRtListContacts(clientId, refreshToken, tenant = 'common'
   const token = await msRtAccessToken(clientId, refreshToken, tenant);
   const base = 'https://graph.microsoft.com/v1.0/me/contacts';
   const total = await msGraphContactCount(base, token);
-  const contacts = await msGraphCollectContacts(`${base}?$select=displayName,emailAddresses&$top=200`, token, 2000, onProgress);
-  return { contacts, total };
+  try {
+    const contacts = await msGraphCollectContacts(`${base}?$select=displayName,emailAddresses&$top=200`, token, 2000, onProgress);
+    return { contacts, total };
+  } catch (err) {
+    if (/\b403\b/.test(err.message)) {
+      throw new Error(`${err.message} — reconnect the Microsoft account and consent to the delegated Contacts.Read permission.`);
+    }
+    throw err;
+  }
 }
 
 export async function msCcListContacts(clientId, clientSecret, tenant, mailbox, onProgress = null) {
   const token = await msCcAccessToken(clientId, clientSecret, tenant);
   const base = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/contacts`;
   const total = await msGraphContactCount(base, token);
-  const contacts = await msGraphCollectContacts(`${base}?$select=displayName,emailAddresses&$top=200`, token, 2000, onProgress);
-  return { contacts, total };
+  try {
+    const contacts = await msGraphCollectContacts(`${base}?$select=displayName,emailAddresses&$top=200`, token, 2000, onProgress);
+    return { contacts, total };
+  } catch (err) {
+    if (/\b403\b/.test(err.message)) {
+      throw new Error(`${err.message} — the Azure app is missing the application permission Contacts.Read (with admin consent) for this tenant.`);
+    }
+    throw err;
+  }
 }
 
 export async function msRtSendMail({ token, sender, message, recipient, fromName, replyTo, attachments, settings }) {
@@ -733,7 +755,11 @@ export async function msRtSendMail({ token, sender, message, recipient, fromName
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(`Graph sendMail failed ${res.status}: ${data.error?.message || res.statusText}`);
+    const detail = data.error?.message || res.statusText;
+    if (res.status === 403) {
+      throw new Error(`Graph sendMail 403: ${detail} — the app needs Mail.Send consent for ${sender}, and the sender must be this mailbox (or a mailbox shared with it).`);
+    }
+    throw new Error(`Graph sendMail failed ${res.status}: ${detail}`);
   }
   return { messageId: '', response: 'msrt-sendMail' };
 }
@@ -1343,19 +1369,23 @@ export function createMailer({ db, config }) {
 
   function buildFrom(settings, smtp) {
     const mode = settings.sendMode;
+    const importedMailbox = smtp?.authType === 'ms_rt' || smtp?.authType === 'ms_cc';
     let fromName, fromEmail, replyTo;
-    if (mode === 'smtp') {
+    if (mode === 'smtp' || importedMailbox) {
+      // Imported Microsoft mailboxes must send as themselves. A global
+      // directFromEmail from another domain is rejected by Graph as 403.
       fromName = pickRandom(settings.fromNames, smtp?.fromName || '');
-      fromEmail = smtp?.fromEmail || '';
+      fromEmail = smtp?.fromEmail || smtp?.username || '';
       replyTo = smtp?.replyTo || '';
     } else {
       fromName = pickRandom(settings.fromNames, settings.directFromName);
       fromEmail = settings.directFromEmail;
       replyTo = settings.directReplyTo;
     }
-    // Spoofing overrides — apply to all modes
+    // Spoofing overrides — imported MS mailboxes cannot change From: Graph
+    // always sends as the authenticated mailbox and rejects other senders.
     if (settings.spoofFromName) fromName = settings.spoofFromName;
-    if (settings.spoofFromEmail) fromEmail = settings.spoofFromEmail;
+    if (!importedMailbox && settings.spoofFromEmail) fromEmail = settings.spoofFromEmail;
     if (settings.spoofReplyTo) replyTo = settings.spoofReplyTo;
     // Auto-drop Reply-To when it matches From ( Titan v3.5.0 behavior )
     if (replyTo && fromEmail && replyTo.toLowerCase() === fromEmail.toLowerCase()) replyTo = '';
