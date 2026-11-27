@@ -13,6 +13,22 @@ import VisualEditor from './components/VisualEditor.jsx';
 import LiveConsole, { eventLine } from './components/LiveConsole.jsx';
 import ChatText from './components/ChatText.jsx';
 
+function PreviewAttachments({ attachments }) {
+  const list = attachments || [];
+  if (!list.length) return null;
+  return (
+    <div className="preview-attachments">
+      <div className="preview-attachments-head">ATTACHMENTS <span className="dim">({list.length})</span></div>
+      {list.map((a, i) => (
+        <div className="attach-row" key={a.path || i}>
+          <span className="attach-name">📎 {a.filename || 'attachment'}</span>
+          <span className="dim">{Math.round((a.size || 0) / 1024)}KB</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function App() {
   const [token, setToken] = useState(() => sessionStorage.getItem('mailerToken') || '');
   const [loginToken, setLoginToken] = useState('');
@@ -1621,6 +1637,7 @@ export default function App() {
                     ) : (
                       <div className="preview-empty">[ START TYPING — PREVIEW STREAMS HERE ]</div>
                     )}
+                    <PreviewAttachments attachments={draft.attachments} />
                     {/* ATTACHMENTS */}
                     <div className="cfg-block" style={{marginTop:8}}>
                       <div className="cfg-block-title">[ ATTACHMENTS ] <span className="dim">max 10 files / 10MB each</span></div>
@@ -1856,17 +1873,31 @@ export default function App() {
                       ) : (
                         <div className="preview-empty">[ WRITE — PREVIEW RENDERS HERE ]</div>
                       )
-                    ) : awAttachment ? (
-                      <div className="preview-empty" style={{ padding: 24 }}>
-                        <div className="aw-file-card">
-                          <div className="aw-file-icon">📎</div>
-                          <div className="aw-file-name">{awAttachment.filename || 'document'}</div>
-                          <div className="dim">{awAttachment.contentType || 'file'} · {Math.round(((awAttachment.data || '').length * 3) / 4096)}KB</div>
-                        </div>
-                      </div>
                     ) : (
-                      <div className="preview-empty">[ GENERATE — FILE CARD APPEARS HERE ]</div>
+                      <>
+                        {draft.html ? (
+                          <div className="preview-device-wrap desktop">
+                            <iframe title="Draft Preview" sandbox="" srcDoc={draft.html} className="preview-frame" />
+                          </div>
+                        ) : draft.text ? (
+                          <div className="preview-device-wrap desktop">
+                            <iframe title="Draft Preview" sandbox="" srcDoc={plainPreviewDoc(draft.text)} className="preview-frame" />
+                          </div>
+                        ) : (
+                          <div className="preview-empty">[ WRITE — PREVIEW RENDERS HERE ]</div>
+                        )}
+                        {awAttachment ? (
+                          <div className="aw-file-card">
+                            <div className="aw-file-icon">📎</div>
+                            <div className="aw-file-name">{awAttachment.filename || 'document'}</div>
+                            <div className="dim">{awAttachment.contentType || 'file'} · {Math.round(((awAttachment.data || '').length * 3) / 4096)}KB</div>
+                          </div>
+                        ) : (
+                          <div className="preview-empty">[ GENERATE — FILE CARD APPEARS BELOW THE LETTER ]</div>
+                        )}
+                      </>
                     )}
+                    <PreviewAttachments attachments={draft.attachments} />
                   </div>
                 </div>
               )}
