@@ -39,7 +39,7 @@ function eventLine(ev) {
   }
 }
 
-function LiveConsole({ events }) {
+function LiveConsole({ events, empty }) {
   const ref = useRef(null);
   const list = (events || []).slice(-100);
   useEffect(() => {
@@ -48,7 +48,7 @@ function LiveConsole({ events }) {
   }, [list.length]);
   return (
     <div className="console" ref={ref}>
-      {list.length === 0 && <div className="console-empty">[ AWAITING EVENTS — SENDS, OPENS, CLICKS, BOUNCES STREAM HERE ]</div>}
+      {list.length === 0 && <div className="console-empty">{empty || '[ AWAITING EVENTS — SENDS, OPENS, CLICKS, BOUNCES STREAM HERE ]'}</div>}
       {list.map((ev, i) => {
         const st = EVENT_STYLE[ev.kind] || EVENT_STYLE.info;
         return (

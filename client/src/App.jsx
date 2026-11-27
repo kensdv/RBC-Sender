@@ -13,6 +13,23 @@ import VisualEditor from './components/VisualEditor.jsx';
 import LiveConsole, { eventLine } from './components/LiveConsole.jsx';
 import ChatText from './components/ChatText.jsx';
 
+// Each console streams only its own task. The dashboard is the one console
+// that shows every event; the others stay scoped so they stay readable.
+const CAMPAIGN_EVENT_KINDS = new Set([
+  'campaign_queued', 'campaign_start', 'campaign_done', 'campaign_fail',
+  'send_ok', 'send_fail', 'smtp_check', 'open', 'click', 'bounce', 'unsubscribe',
+]);
+
+function isCampaignEvent(e) {
+  if (CAMPAIGN_EVENT_KINDS.has(e.kind)) return true;
+  return e.kind === 'info' && /^(campaign #|test accepted)/i.test(String(e.message || ''));
+}
+
+function isRecipientEvent(e) {
+  if (e.kind === 'sorter' || e.kind === 'smtp_check') return true;
+  return e.kind === 'info' && /^(smtp import|ms mailbox import|verify )/i.test(String(e.message || ''));
+}
+
 function PreviewAttachments({ attachments }) {
   const list = attachments || [];
   if (!list.length) return null;
@@ -2123,7 +2140,7 @@ export default function App() {
                         {(() => {
                           const feed = [
                             ...opsLog.map((l, i) => ({ t: l.at.getTime(), txt: `${l.type === 'err' ? '✗' : '✓'} ${l.msg}`, err: l.type === 'err', k: `n${i}` })),
-                            ...(state.events || []).map((e, i) => ({ t: e.ts || 0, txt: eventLine(e), err: false, k: `e${i}` })),
+                            ...(state.events || []).filter(isRecipientEvent).map((e, i) => ({ t: e.ts || 0, txt: eventLine(e), err: false, k: `e${i}` })),
                           ].sort((a, b) => a.t - b.t).slice(-40);
                           if (!feed.length) return <div className="ops-line dim">No actions yet — VERIFY DNS, SORT, PULL or IMPORT logs here live.</div>;
                           return feed.map((l) => (
@@ -2230,7 +2247,7 @@ export default function App() {
                     {(sorterBusy || (state?.events || []).some((e) => e.kind === 'sorter')) && (
                       <div className="pane" style={{ marginTop: 14, padding: '10px 12px' }}>
                         <div className="pane-head"><span>SORT CONSOLE — LIVE</span><span className="dim">{sorterBusy ? 'streaming' : 'last run'}</span></div>
-                        <LiveConsole events={(state?.events || []).filter((e) => e.kind === 'sorter')} />
+                        <LiveConsole events={(state?.events || []).filter((e) => e.kind === 'sorter')} empty="[ AWAITING SORT EVENTS — SORT, VERIFY, MX PASS ]" />
                       </div>
                     )}
                   </div>
@@ -3684,7 +3701,7 @@ sudo tail -f /var/log/maillog`}</pre>
                     </div>
 
                     <div className="pane">
-                      <div className="pane-head"><span>LIVE CONSOLE</span><span className="dim">streaming sends · opens · clicks · bounces</span></div>
+                      <div className="pane-head"><span>ACTIVITY CONSOLE <span className="dim">— all events</span></span><span className="dim">every task · sends · opens · clicks · bounces</span></div>
                       <LiveConsole events={state.events} />
                     </div>
                     </div>
@@ -3886,8 +3903,8 @@ sudo tail -f /var/log/maillog`}</pre>
                   </div>
 
                   <div className="pane">
-                    <div className="pane-head"><span>LIVE CONSOLE</span><span className="dim">streaming sends · opens · clicks · bounces</span></div>
-                    <LiveConsole events={state.events} />
+                    <div className="pane-head"><span>CAMPAIGN CONSOLE</span><span className="dim">this campaign — queue · sends · opens · clicks · bounces</span></div>
+                    <LiveConsole events={(state.events || []).filter(isCampaignEvent)} empty="[ AWAITING CAMPAIGN EVENTS — QUEUE, SENDS, OPENS, CLICKS, BOUNCES ]" />
                   </div>
 
                   <div className="pane">
