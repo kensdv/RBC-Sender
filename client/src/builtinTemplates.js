@@ -466,6 +466,43 @@ const LETTER_TEMPLATES = [
 </div>`,
     text: `Hi [Firstname],\n\nThis month: faster exports, bulk edits, and the sync fix you flagged.\nChangelog: ++rbc_url++`,
   },
+  {
+    label: 'Voyage Letter',
+    subject: 'Your voyage is booked, [Firstname] — ref ++rbc_number6++',
+    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#1f2937">
+  <div style="background:linear-gradient(135deg,#06283d,#0b4f6c 55%,#01baef);padding:34px 30px;border-radius:14px 14px 0 0">
+    <div style="color:#bfe9ff;font-size:11px;letter-spacing:.28em;text-transform:uppercase">Voyage confirmation</div>
+    <div style="color:#ffffff;font-size:26px;font-weight:800;margin-top:8px">Bon voyage, [Firstname]</div>
+    <div style="color:#d7f3ff;font-size:13px;margin-top:6px">[Company] · ref ++rbc_number6++ · issued ++rbc_date++</div>
+  </div>
+  <div style="border:1px solid #dbeafe;border-top:none;padding:28px;border-radius:0 0 14px 14px;background:#ffffff">
+    <p style="font-size:15px;line-height:1.7;margin:0 0 16px">Hi [Firstname],</p>
+    <p style="font-size:15px;line-height:1.7;margin:0 0 22px">Your voyage is confirmed. Everything below is ready — all that's left is to pack.</p>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e0f2fe;border-radius:10px;font-size:14px;margin-bottom:22px">
+      <tr style="background:#f0f9ff"><td style="padding:11px 14px;font-weight:700;color:#0b4f6c">Voyage</td><td style="padding:11px 14px;text-align:right;font-weight:700">++rbc_number6++</td></tr>
+      <tr><td style="padding:10px 14px;color:#64748b">Departure</td><td style="padding:10px 14px;text-align:right">++rbc_date++</td></tr>
+      <tr><td style="padding:10px 14px;color:#64748b">Route</td><td style="padding:10px 14px;text-align:right">[Origin] → [Destination]</td></tr>
+      <tr><td style="padding:10px 14px;color:#64748b">Guests</td><td style="padding:10px 14px;text-align:right">[Firstname] [Lastname]</td></tr>
+      <tr><td style="padding:10px 14px;color:#64748b">Cabin / class</td><td style="padding:10px 14px;text-align:right">[Cabin or class]</td></tr>
+      <tr style="border-top:1px solid #e0f2fe"><td style="padding:11px 14px;font-weight:700">Boarding</td><td style="padding:11px 14px;text-align:right;font-weight:700;color:#0b4f6c">[Time] · [Port]</td></tr>
+    </table>
+
+    <div style="font-size:12px;font-weight:800;letter-spacing:.16em;color:#0b4f6c;margin-bottom:8px">ITINERARY</div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;margin-bottom:24px">
+      <tr><td style="padding:8px 0;color:#64748b;width:92px">Day 1</td><td style="padding:8px 0">[Port of call] — embarkation and welcome reception</td></tr>
+      <tr><td style="padding:8px 0;color:#64748b">Day 2</td><td style="padding:8px 0">[Port of call] — shore excursion</td></tr>
+      <tr><td style="padding:8px 0;color:#64748b">Day 3</td><td style="padding:8px 0">[Port of call] — at leisure</td></tr>
+    </table>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px"><tr><td style="background:#0b4f6c;border-radius:8px"><a href="++rbc_url++" style="display:inline-block;padding:13px 30px;color:#ffffff;text-decoration:none;font-weight:bold;font-size:14px">View full itinerary</a></td></tr></table>
+    <p style="font-size:13px;color:#64748b;line-height:1.7;margin:0 0 6px">If the button doesn't work, copy this link: ++rbc_url++</p>
+    <hr style="border:none;border-top:1px solid #e0f2fe;margin:22px 0">
+    <p style="font-size:12px;color:#94a3b8;margin:0">Questions before you sail? Reply to this email or reach us at [~EMail~].<br>[Company] · <a href="[AbmeldeLink]" style="color:#94a3b8">Unsubscribe</a></p>
+  </div>
+</div>`,
+    text: `Hi [Firstname],\n\nYour voyage is confirmed — ref ++rbc_number6++.\nDeparture: ++rbc_date++\nRoute: [Origin] -> [Destination]\nGuests: [Firstname] [Lastname]\nCabin/class: [Cabin or class]\nBoarding: [Time] · [Port]\n\nItinerary:\nDay 1 — [Port of call], embarkation\nDay 2 — [Port of call], shore excursion\nDay 3 — [Port of call], at leisure\n\nFull itinerary: ++rbc_url++\n\nQuestions? Reply to this email or reach us at [~EMail~].\n[Company]`,
+  },
 
 
 ];
