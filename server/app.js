@@ -23,6 +23,51 @@ function fail(message, statusCode = 400) {
   throw Object.assign(new Error(message), { statusCode });
 }
 
+// Activity feed: persisted events plus real history from deliveries, tracking
+// and bounces, so the dashboard console is never empty after a restart.
+function recentActivity(db, live = []) {
+  const out = [];
+  const add = (e) => { if (e && e.ts) out.push(e); };
+  try {
+    for (const row of db.prepare('SELECT ts, kind, data_json FROM activity_log ORDER BY id DESC LIMIT 250').all()) {
+      try { add({ ts: Number(row.ts), kind: row.kind, ...JSON.parse(row.data_json || '{}') }); } catch {}
+    }
+  } catch {}
+  try {
+    for (const d of db.prepare(`SELECT d.status, d.error, d.sent_at, d.next_attempt_at, r.email
+      FROM deliveries d LEFT JOIN recipients r ON r.id = d.recipient_id
+      WHERE d.status IN ('sent', 'failed') ORDER BY d.id DESC LIMIT 80`).all()) {
+      add({
+        ts: Date.parse(d.sent_at || d.next_attempt_at || '') || 0,
+        kind: d.status === 'sent' ? 'send_ok' : 'send_fail',
+        email: d.email || '', error: d.error || '',
+      });
+    }
+  } catch {}
+  try {
+    for (const t of db.prepare('SELECT kind, email, target, created_at FROM tracking_events ORDER BY id DESC LIMIT 80').all()) {
+      add({ ts: Date.parse(t.created_at || '') || 0, kind: t.kind, email: t.email || '', target: t.target || '' });
+    }
+  } catch {}
+  try {
+    for (const b of db.prepare('SELECT email, kind, reason, classification, created_at FROM bounces ORDER BY id DESC LIMIT 40').all()) {
+      add({ ts: Date.parse(b.created_at || '') || 0, kind: b.kind === 'complaint' ? 'bounce' : (b.kind || 'bounce'), email: b.email || '', reason: b.reason || '', classification: b.classification || '' });
+    }
+  } catch {}
+  for (const e of live) add(e);
+  const seen = new Set();
+  return out
+    .filter((e) => e.ts > 0)
+    .sort((a, b) => a.ts - b.ts)
+    .filter((e) => {
+      const k = `${e.ts}|${e.kind}|${e.email || ''}|${e.message || ''}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
+    .slice(-120);
+}
+
 const UPLOADS_DIR = fileURLToPath(new URL('../data/uploads/', import.meta.url));
 const APP_ROOT    = fileURLToPath(new URL('../', import.meta.url));
 mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -310,7 +355,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const reputationAlerts = db.prepare('SELECT target, source, listed_at AS listedAt FROM reputation_alerts WHERE resolved_at IS NULL ORDER BY listed_at DESC').all();
     seedPoolFromLegacy();
     const smtpAccounts = db.prepare('SELECT * FROM smtp_accounts ORDER BY id').all().map(accountView);
-    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db, config), recipientTotal, providerCounts, lists, campaigns, bounces, confirmed, rates, aiTasks: db.prepare('SELECT id, text, run_at, repeat, status, last_result FROM ai_tasks ORDER BY run_at').all(), publicBaseUrl: config.publicBaseUrl, events: listEvents(120), telegram: telegramStatus(db, config), reputationAlerts };
+    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db, config), recipientTotal, providerCounts, lists, campaigns, bounces, confirmed, rates, aiTasks: db.prepare('SELECT id, text, run_at, repeat, status, last_result FROM ai_tasks ORDER BY run_at').all(), publicBaseUrl: config.publicBaseUrl, events: recentActivity(db, listEvents(120)), telegram: telegramStatus(db, config), reputationAlerts };
   });
 
   app.put('/api/smtp', async (request) => {
@@ -344,8 +389,33 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     try { return await mailer.verify(); } catch (error) { fail(`SMTP verification failed: ${error.message}`, 400); }
   });
 
-  app.post('/api/smtp/verify-all', async () => {
-    try { return await mailer.verifyAll(); } catch (error) { fail(`SMTP verification failed: ${error.message}`, 400); }
+  app.post('/api/smtp/verify-all', async (request) => {
+    try {
+      const ids = Array.isArray(request.body?.ids) ? request.body.ids.map(Number).filter(Number.isFinite) : [];
+      const result = await mailer.verifyAll({ ids });
+      if (!ids.length) {
+        const bad = (result.results || []).filter((x) => !x.ok);
+        emit('smtp_check', {
+          label: 'verify all',
+          ok: bad.length === 0,
+          error: bad.length ? `${bad.length}/${result.total} failed` : '',
+        });
+      }
+      return result;
+    } catch (error) { fail(`SMTP verification failed: ${error.message}`, 400); }
+  });
+
+  app.post('/api/smtp/accounts/:id/verify', async (request) => {
+    const id = Number(request.params.id);
+    const row = db.prepare('SELECT id FROM smtp_accounts WHERE id = ?').get(id);
+    if (!row) fail('Account not found', 404);
+    try {
+      const r = await mailer.verifyAll({ ids: [id] });
+      const result = (r.results || [])[0];
+      if (!result) fail('Account not found', 404);
+      emit('smtp_check', { label: result.label, host: result.host, ok: result.ok, error: result.error });
+      return result;
+    } catch (error) { fail(`Account test failed: ${error.message}`, 400); }
   });
 
   app.post('/api/relay/verify', async () => {
@@ -376,6 +446,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
         forceMode: ['smtp', 'relay', 'direct', 'graph', 'gmail', 'api', 'socks5'].includes(body.forceMode) ? body.forceMode : '',
       });
     } catch (err) {
+      emit('send_fail', { email: to, error: String(err.message || err).slice(0, 200) });
       fail(`Send failed: ${err.message || err}`, err.statusCode && err.statusCode < 500 ? err.statusCode : 400);
     }
     if (!info || info.skipped) {
@@ -384,6 +455,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const activeMode = body.forceMode
       || db.prepare('SELECT send_mode FROM send_settings WHERE id = 1').get()?.send_mode
       || 'smtp';
+    emit('info', { message: `test accepted via ${activeMode.toUpperCase()} → ${to}` });
     return {
       ok: true,
       mode: activeMode,
@@ -1608,7 +1680,9 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
         results.push({ ok: false, error: String(err.message || err).slice(0, 160), line: username });
       }
     }
-    return { imported, updated, failed: results.filter((r) => !r.ok).length, results };
+    const failed = results.filter((r) => !r.ok).length;
+    emit('info', { message: `SMTP import — ${imported} added, ${updated} updated, ${failed} failed` });
+    return { imported, updated, failed, results };
   });
 
   app.put('/api/smtp/accounts/:id', async (request) => {
@@ -1956,7 +2030,10 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
         results.push({ ok: false, error: String(err.message || err).slice(0, 200), line: parsed.clientId });
       }
     }
-    return { imported: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results };
+    const msImported = results.filter((r) => r.ok).length;
+    const msFailed = results.filter((r) => !r.ok).length;
+    emit('info', { message: `MS mailbox import — ${msImported} added/updated, ${msFailed} failed` });
+    return { imported: msImported, failed: msFailed, results };
   });
 
   // Send settings (delivery config)

@@ -92,6 +92,13 @@ export function openDatabase(path) {
       updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS ai_tasks_run_at_idx ON ai_tasks(status, run_at);
+    CREATE TABLE IF NOT EXISTS activity_log (
+      id INTEGER PRIMARY KEY,
+      ts INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      data_json TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS activity_log_ts_idx ON activity_log(ts);
     CREATE TABLE IF NOT EXISTS send_settings (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       send_mode TEXT NOT NULL DEFAULT 'smtp',

@@ -2418,24 +2418,43 @@ sudo tail -f /var/log/maillog`}</pre>
                       <p className="dim-txt" style={{ fontSize: 10, marginTop: 4 }}>Picks who can send — hit SAVE SETTINGS to persist. Campaigns can narrow it further per-send.</p>
                     </div>
                   )}
-                  <div className="tbl-wrap" style={{maxHeight:240}}>
-                    <table className="w-table">
-                      <thead><tr><th>LABEL</th><th>TYPE</th><th>HOST</th><th>USER</th><th>FROM</th><th>W</th><th>QUOTA</th><th>STATE</th><th></th></tr></thead>
+                  {!!(state.smtpAccounts || []).length && (
+                    <div className="pool-summary">
+                      <span><strong>{(state.smtpAccounts || []).length}</strong> accounts</span>
+                      <span className="sent-val"><strong>{(state.smtpAccounts || []).filter((a) => a.enabled && !needsMsReauth(a) && !(a.cooldownUntil > new Date().toISOString())).length}</strong> ready</span>
+                      <span className="mode-val"><strong>{(state.smtpAccounts || []).filter((a) => a.cooldownUntil > new Date().toISOString()).length}</strong> cooling</span>
+                      <span className="fail-val"><strong>{(state.smtpAccounts || []).filter((a) => needsMsReauth(a)).length}</strong> reauth</span>
+                      <span className="dim"><strong>{(state.smtpAccounts || []).filter((a) => a.authType?.startsWith('ms_')).length}</strong> MS · <strong>{(state.smtpAccounts || []).filter((a) => !a.authType?.startsWith('ms_')).length}</strong> SMTP</span>
+                    </div>
+                  )}
+                  <div className="tbl-wrap" style={{maxHeight:360}}>
+                    <table className="w-table pool-table">
+                      <thead><tr><th>ACCOUNT</th><th>USERNAME</th><th>FROM</th><th>QUOTA</th><th>STATE</th><th>ACTIONS</th></tr></thead>
                       <tbody>
                         {pagedAccounts.map((a) => (
                           <tr key={a.id}>
-                            <td>{a.label || '—'}</td>
-                            <td><span className={`badge ${a.authType?.startsWith('ms_') ? 'badge-ok' : 'badge-def'}`}>{a.authType === 'ms_rt' ? 'MS RT' : a.authType === 'ms_cc' ? 'MS CC' : 'SMTP'}</span></td>
-                            <td className="dim">{a.host}:{a.port}</td>
-                            <td className="dim">{a.username}</td>
-                            <td className="dim">{a.fromEmail}</td>
-                            <td>{a.weight}</td>
+                            <td>
+                              <div className="pool-account">
+                                <strong>{a.label || a.username || `#${a.id}`}</strong>
+                                <span className={`badge ${a.authType?.startsWith('ms_') ? 'badge-ok' : 'badge-def'}`}>{a.authType === 'ms_rt' ? 'MS RT' : a.authType === 'ms_cc' ? 'MS CC' : 'SMTP'}</span>
+                              </div>
+                              <div className="dim-txt pool-host">{a.host}:{a.port}{a.secure ? ' · TLS' : ''}</div>
+                            </td>
+                            <td className="dim">{a.username || '—'}</td>
+                            <td className="dim">{a.fromEmail || a.username || '—'}</td>
                             <td className="dim" style={{whiteSpace:'nowrap'}}>{a.dailyQuota ? `${a.sentToday}/${a.dailyQuota}` : '∞'}{a.sentToday > 0 ? <button className="btn-xs" style={{marginLeft:6}} title="Reset daily counter" aria-label="Reset daily quota counter" onClick={() => run(async () => { await api(token, `/api/smtp/accounts/${a.id}/reset-quota`, { method: 'POST' }); await refresh(); })}>↺</button> : null}</td>
-                            <td><span className={`badge ${needsMsReauth(a) ? 'badge-fail' : a.enabled ? 'badge-ok' : 'badge-def'}`} title={needsMsReauth(a) ? 'Refresh token revoked — re-import a fresh token for this mailbox' : undefined}>{needsMsReauth(a) ? 'REAUTH' : a.cooldownUntil && a.cooldownUntil > new Date().toISOString() ? 'COOLDOWN' : a.enabled ? 'ACTIVE' : 'OFF'}</span>{a.fails ? <span className="dim"> ({a.fails}f)</span> : null}
-                              {a.lastError ? <div className="red-txt" style={{fontSize:11}} title={a.lastError}>{a.lastError.slice(0, 60)}</div>
-                                : a.lastCheck ? <div className="dim-txt" style={{fontSize:11}}>ok {new Date(a.lastCheck).toLocaleTimeString()}</div> : null}</td>
+                            <td>
+                              <span className={`badge ${needsMsReauth(a) ? 'badge-fail' : a.enabled ? 'badge-ok' : 'badge-def'}`} title={needsMsReauth(a) ? 'Refresh token revoked — re-import a fresh token for this mailbox' : undefined}>{needsMsReauth(a) ? 'REAUTH' : a.cooldownUntil && a.cooldownUntil > new Date().toISOString() ? 'COOLDOWN' : a.enabled ? 'ACTIVE' : 'OFF'}</span>{a.fails ? <span className="dim"> ({a.fails}f)</span> : null}
+                              {a.lastError ? <div className="red-txt" style={{fontSize:11}} title={a.lastError}>{a.lastError.slice(0, 70)}</div>
+                                : a.lastCheck ? <div className="dim-txt" style={{fontSize:11}}>ok {new Date(a.lastCheck).toLocaleTimeString()}</div> : null}
+                            </td>
                             <td>
                               <div className="act-row">
+                                <button className="btn-xs btn-test" title="Test this account now" onClick={() => run(async () => {
+                                  const r = await api(token, `/api/smtp/accounts/${a.id}/verify`, { method: 'POST' });
+                                  showNotice(r.ok ? `#${a.id} ${a.label || a.username} live${r.host ? ` @ ${r.host}` : ''}.` : `#${a.id} ${a.label || a.username} failed — ${r.error || 'unknown error'}`, r.ok ? 'ok' : 'err');
+                                  await refresh();
+                                })}>TEST</button>
                                 <button className="btn-xs" onClick={() => {
                                   setEditingAcct(a.id);
                                   setAcctForm({ label: a.label, host: a.host, port: a.port, secure: a.secure, username: a.username, password: '', refreshToken: '', fromName: a.fromName, fromEmail: a.fromEmail, replyTo: a.replyTo, weight: a.weight, dailyQuota: a.dailyQuota });
@@ -2454,7 +2473,7 @@ sudo tail -f /var/log/maillog`}</pre>
                             </td>
                           </tr>
                         ))}
-                        {!(state.smtpAccounts || []).length && <tr><td colSpan={9} className="dim" style={{textAlign:'center'}}>No pool accounts — legacy SMTP config is used.</td></tr>}
+                        {!(state.smtpAccounts || []).length && <tr><td colSpan={6} className="dim" style={{textAlign:'center'}}>No pool accounts — import SMTP above or use the legacy config.</td></tr>}
                       </tbody>
                     </table>
                   </div>

@@ -89,6 +89,11 @@ export function formatEvent(kind, d = {}) {
 export function createEmitter({ db, config }) {
   return function emit(kind, data = {}) {
     pushEvent(kind, data);
+    try {
+      db.prepare('INSERT INTO activity_log (ts, kind, data_json) VALUES (?, ?, ?)')
+        .run(Date.now(), kind, JSON.stringify(data ?? {}));
+      db.prepare('DELETE FROM activity_log WHERE id NOT IN (SELECT id FROM activity_log ORDER BY id DESC LIMIT 2000)').run();
+    } catch { /* activity logging must never break a send */ }
     if (!TG_KEYS.has(kind)) return;
     const text = formatEvent(kind, data);
     sendTelegram(db, config, text).then((res) => {

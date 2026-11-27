@@ -252,7 +252,7 @@ function transportFor(smtp, dkim = null, proxy = '') {
     connectionTimeout: 10000,
     greetingTimeout: 10000,
     socketTimeout: 30000,
-    tls: { minVersion: 'TLSv1.2' },
+    tls: { rejectUnauthorized: false, minVersion: 'TLSv1.2' },
     debug: process.env.SMTP_DEBUG === '1',
     ...(proxy ? { proxy } : {}),
     ...(dkim ? { dkim } : {}),
@@ -1584,10 +1584,13 @@ export function createMailer({ db, config }) {
   return {
     // Test every enabled SMTP account. Dead ones get cooled down for 6h so the
     // send pool drops them automatically; a later successful check revives them.
-    async verifyAll() {
+    async verifyAll({ ids = [] } = {}) {
       const now = new Date().toISOString();
       const deadUntil = new Date(Date.now() + 6 * 3600000).toISOString();
-      let rows = db.prepare('SELECT * FROM smtp_accounts WHERE enabled = 1').all();
+      const wanted = Array.isArray(ids) ? ids.filter((n) => Number.isFinite(n) && n > 0) : [];
+      let rows = wanted.length
+        ? db.prepare(`SELECT * FROM smtp_accounts WHERE id IN (${wanted.map(() => '?').join(',')})`).all(...wanted)
+        : db.prepare('SELECT * FROM smtp_accounts WHERE enabled = 1').all();
       if (!rows.length && smtpRow(db)) {
         const legacy = smtpRow(db);
         rows = [{ id: 0, label: 'Legacy SMTP', host: legacy.host, port: legacy.port, secure: legacy.secure, username: legacy.username, password_encrypted: legacy.password_encrypted, from_name: legacy.from_name, from_email: legacy.from_email, reply_to: legacy.reply_to || '' }];
@@ -1630,7 +1633,7 @@ export function createMailer({ db, config }) {
       }
       // relay mode: verify the configured relay host too
       const ss = loadSendSettings(db, config);
-      if (ss.sendMode === 'relay' && ss.relayHost) {
+      if (!wanted.length && ss.sendMode === 'relay' && ss.relayHost) {
         let transporter = null;
         try {
           transporter = relayTransportFor(ss);
