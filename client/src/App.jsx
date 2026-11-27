@@ -713,7 +713,14 @@ export default function App() {
       const id = await saveDraft();
       const body = schedule ? { scheduledFor: new Date(scheduledFor).toISOString() } : {};
       const r = await api(token, `/api/campaigns/${id}/queue`, { method: 'POST', body });
-      showNotice(`${r.queued} recipients queued.`);
+      const pf = r.preflight;
+      if (pf?.campaignFailed) {
+        showNotice(`Queued ${r.queued}, but no live SMTP senders${pf.dropped?.length ? ` — dropped ${pf.dropped.length} dead` : ''}. Campaign failed.`, 'err');
+      } else if (pf && !pf.skipped) {
+        showNotice(`${r.queued} recipients queued — ${pf.live}/${pf.total} sender(s) live${pf.dropped?.length ? `, ${pf.dropped.length} dead dropped` : ''}.`);
+      } else {
+        showNotice(`${r.queued} recipients queued.`);
+      }
       setSelectedId(null); setDraft(emptyDraft); setPreview(null);
       await refresh(); setTab('send');
     });

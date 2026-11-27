@@ -196,6 +196,73 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
     }
   }
 
+  function linkedAccountIds(row) {
+    try {
+      return JSON.parse(row?.accounts_json || '[]').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    } catch { return []; }
+  }
+
+  // Verify the SMTP senders a campaign will actually use. Dead ones are cooled
+  // down by verifyAll and removed from the campaign's linked list, so the run
+  // only continues with live senders. Graph/API engines are left untouched.
+  async function preflightCampaign(campaignId, { force = false } = {}) {
+    const cid = Number(campaignId);
+    if (!Number.isFinite(cid) || (!force && preflighted.has(cid))) return { skipped: true };
+    preflighted.add(cid);
+    const camp = db.prepare('SELECT id, name, subject, accounts_json FROM campaigns WHERE id = ?').get(cid);
+    if (!camp) return { skipped: true };
+    const linked = linkedAccountIds(camp);
+    let linkedRows = [];
+    if (linked.length) {
+      linkedRows = db.prepare(`SELECT id, label, username, host, enabled FROM smtp_accounts WHERE id IN (${linked.map(() => '?').join(',')})`).all(...linked);
+    }
+    const wantedIds = linkedRows.filter((r) => r.enabled).map((r) => r.id);
+    let res;
+    try {
+      // No explicit campaign list -> verify the whole enabled pool. An explicit
+      // list where everything is disabled -> nothing live, skip the probe.
+      res = (linked.length && !wantedIds.length)
+        ? { results: [], live: 0, total: 0 }
+        : await mailer.verifyAll({ ids: wantedIds });
+    } catch (err) {
+      const message = String(err.message || err).slice(0, 300);
+      emit('smtp_check', { campaignId: cid, name: camp.name, label: 'smtp pool', ok: false, error: message });
+      return { live: 0, total: 0, results: [], dropped: [], campaignFailed: true, error: message };
+    }
+    const results = res.results || [];
+    for (const a of results) {
+      emit('smtp_check', { campaignId: cid, name: camp.name, label: a.label, host: a.host, ok: a.ok, error: a.error });
+    }
+    const testedIds = new Set(results.map((a) => Number(a.id)));
+    const disabled = linkedRows.filter((r) => !r.enabled && !testedIds.has(Number(r.id)));
+    for (const r of disabled) {
+      emit('smtp_check', { campaignId: cid, name: camp.name, label: r.label || r.username || `account ${r.id}`, host: r.host, ok: false, error: 'disabled' });
+    }
+    const dead = [...results.filter((a) => !a.ok), ...disabled.map((r) => ({ id: r.id, label: r.label || r.username, host: r.host, ok: false, error: 'disabled' }))];
+    const liveIds = results.filter((a) => a.ok && Number(a.id) > 0).map((a) => Number(a.id));
+    // Only an explicit campaign sender list can be pruned; a blank list means
+    // "every enabled sender" and dead ones are already cooling down.
+    if (linked.length && dead.length) {
+      db.prepare('UPDATE campaigns SET accounts_json = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(liveIds), new Date().toISOString(), cid);
+    }
+    const dropped = dead.map((a) => a.label || a.host || `account ${a.id}`);
+    emit('info', {
+      message: `campaign #${cid} preflight — ${res.live}/${results.length} sender(s) live${dropped.length ? `; dropped ${dropped.join(', ')}` : ''}`,
+    });
+    let campaignFailed = false;
+    if (!res.live) {
+      campaignFailed = true;
+      db.prepare("UPDATE campaigns SET status = 'failed', updated_at = ? WHERE id = ? AND status IN ('queued', 'scheduled', 'sending')")
+        .run(new Date().toISOString(), cid);
+      emit('campaign_fail', {
+        campaignId: cid, name: camp.name, subject: camp.subject,
+        error: 'No live SMTP senders after preflight — dead accounts were dropped',
+      });
+    }
+    return { live: res.live, total: results.length, results, dropped, campaignFailed };
+  }
+
   async function processDue() {
     const ctx = getSettings();
     db.prepare("UPDATE deliveries SET status = 'suppressed' WHERE status = 'queued' AND recipient_id IN (SELECT id FROM recipients WHERE consent_confirmed = 0 OR suppressed = 1)").run();
@@ -224,30 +291,15 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
     const now = new Date().toISOString();
     let rows = db.prepare(`${ROW_SELECT} LIMIT ?`).all(now, now, slots);
 
-    // Preflight: before a campaign's first send, verify every SMTP account.
-    // Dead accounts are cooled down by verifyAll; if none are live the campaign
-    // fails fast instead of burning deliveries.
+    // Preflight: before a campaign's first send, verify the senders it will use.
+    // Dead SMTP accounts are cooled down and dropped; if none are live the
+    // campaign fails fast instead of burning deliveries.
     if (rows.length && (ctx.sendMode === 'smtp' || ctx.sendMode === 'relay') && typeof mailer.verifyAll === 'function') {
       const pending = [...new Set(rows.map((r) => r.campaign_id))].filter((id) => !preflighted.has(id));
       const deadCampaigns = new Set();
       for (const cid of pending) {
-        preflighted.add(cid);
-        const camp = rows.find((r) => r.campaign_id === cid);
-        let live = 0;
-        try {
-          const res = await mailer.verifyAll();
-          live = res.live;
-          for (const a of res.results) {
-            emit('smtp_check', { campaignId: cid, name: camp?.name, label: a.label, host: a.host, ok: a.ok, error: a.error });
-          }
-        } catch (err) {
-          emit('smtp_check', { campaignId: cid, name: camp?.name, label: 'smtp pool', ok: false, error: String(err.message || err).slice(0, 200) });
-        }
-        if (!live) {
-          deadCampaigns.add(cid);
-          db.prepare("UPDATE campaigns SET status = 'failed', updated_at = ? WHERE id = ? AND status IN ('queued', 'scheduled', 'sending')").run(new Date().toISOString(), cid);
-          emit('campaign_fail', { campaignId: cid, name: camp?.name, subject: camp?.subject, error: 'No live SMTP accounts — test them in the EMAIL tab' });
-        }
+        const result = await preflightCampaign(cid);
+        if (result.campaignFailed) deadCampaigns.add(cid);
       }
       if (deadCampaigns.size) {
         rows = rows.filter((r) => !deadCampaigns.has(r.campaign_id));
@@ -311,6 +363,7 @@ export function createWorker({ db, mailer, logger = console, emit = () => {} }) 
     },
     kick: tick,
     diagnose,
+    preflight: preflightCampaign,
     recheck(campaignId) { preflighted.delete(Number(campaignId)); },
     async stop() {
       stopped = true;

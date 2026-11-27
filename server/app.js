@@ -2681,9 +2681,16 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       });
       if (scheduledFor) db.prepare("UPDATE campaigns SET status = 'scheduled' WHERE id = ?").run(id);
     });
-    worker.kick();
     emit('campaign_queued', { campaignId: id, name: campaign.name, subject: campaign.subject, total: recipients.length, scheduledFor });
-    return { id, queued: recipients.length, scheduledFor };
+    // SMTP runs are preflighted at launch: log each sender's health, drop dead
+    // ones from the campaign, then start only if something is still live.
+    // Graph and the other engines keep their existing behaviour.
+    let preflight = null;
+    if (!scheduledFor && settings.sendMode === 'smtp' && typeof worker.preflight === 'function') {
+      preflight = await worker.preflight(id, { force: true });
+    }
+    worker.kick();
+    return { id, queued: recipients.length, scheduledFor, preflight };
   });
 
   app.post('/api/campaigns/:id/pause', async (request) => {
