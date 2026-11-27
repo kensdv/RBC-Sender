@@ -144,6 +144,7 @@ export default function App() {
   const [sorterInput, setSorterInput] = useState('');
   const [sorterResult, setSorterResult] = useState(null);
   const [sorterBusy, setSorterBusy] = useState(false);
+  const [dashMore, setDashMore] = useState(false);
   const [abTestOpen, setAbTestOpen] = useState(false);
   const [abTestCampaignId, setAbTestCampaignId] = useState(null);
   const [subjectVariants, setSubjectVariants] = useState([]);
@@ -2639,6 +2640,16 @@ export default function App() {
                   </p>
                 </div>
 
+                <div className="pane">
+                  <div className="pane-head"><span>PROXY ROUTING <span className="dim">— optional</span></span></div>
+                  <p className="dim-txt">Routes SMTP connections through a proxy. Leave blank to connect directly.</p>
+                  <label className="field-label">PROXY URL</label>
+                  <input className="w-input" value={settings.socks5Proxy} onChange={(e) => updateSettings('socks5Proxy', e.target.value)} placeholder="http://user:pass@host:8080  ·  socks5://user:pass@host:1080  ·  socks4://..." />
+                  <div className="btn-row">
+                    <button className="btn-sm" disabled={busy} onClick={() => run(async () => { await api(token, '/api/settings', { method: 'PUT', body: settings }); showNotice('SMTP proxy saved.'); await refresh(); })}>[ SAVE PROXY ]</button>
+                  </div>
+                </div>
+
                                 {/* ══ SECTION: SENDING RULES ══ */}
                 <div className="email-section" id="smtp-rules">03 · SENDING RULES — when and how fast</div>
 
@@ -2991,16 +3002,6 @@ sudo tail -f /var/log/maillog`}</pre>
                           <div className="dim-txt" style={{fontSize:11,marginTop:6}}>{relayTest.ok ? 'all stages passed' : 'stopped at first failure'}{testTo.includes('@') ? ' · envelope tested to ' + testTo : ' · add a test address above to also check MAIL/RCPT'}</div>
                         </div>
                       )}
-                    </div>
-                  )}
-
-                  {/* Proxy for SMTP mode */}
-                  {sendMode === 'smtp' && (
-                    <div className="cfg-block">
-                      <div className="cfg-block-title">[ PROXY ROUTING ] <span className="dim">optional</span></div>
-                      <label className="field-label">PROXY URL</label>
-                      <input className="w-input" value={settings.socks5Proxy} onChange={(e) => updateSettings('socks5Proxy', e.target.value)} placeholder="http://user:pass@host:8080  ·  socks5://user:pass@host:1080  ·  socks4://..." />
-                      <p className="dim-txt">Routes the SMTP connection through the proxy — http, https, socks4, socks5.</p>
                     </div>
                   )}
 
@@ -3631,7 +3632,11 @@ sudo tail -f /var/log/maillog`}</pre>
                         <span className="dash-clock-time">{clockNow.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
                         <span className="dash-clock-tz">{Intl.DateTimeFormat().resolvedOptions().timeZone || 'local'} · GMT{(() => { const o = -clockNow.getTimezoneOffset() / 60; return `${o >= 0 ? '+' : ''}${o}`; })()}</span>
                       </div>
-                      <span className="dash-mode-pill">{sendMode.toUpperCase()}</span>
+                      <div className="dash-head-actions">
+                        <span className="dash-mode-pill">{sendMode.toUpperCase()}</span>
+                        <button type="button" className="btn-xs dash-more-btn" aria-pressed={dashMore}
+                          onClick={() => setDashMore((v) => !v)}>{dashMore ? 'SIMPLE VIEW' : 'SHOW DETAILS'}</button>
+                      </div>
                     </div>
                   </div>
 
@@ -3672,15 +3677,20 @@ sudo tail -f /var/log/maillog`}</pre>
                       { label: 'FAILED', value: totals.failed.toLocaleString(), color: totals.failed ? 'var(--red)' : 'var(--txt-dim)', tab: 'send', hint: 'Open campaign setup' },
                       { label: 'IN QUEUE', value: totals.queued.toLocaleString(), color: totals.queued ? 'var(--yellow)' : 'var(--txt-dim)', tab: 'send', hint: 'Open campaign setup' },
                       { label: 'RECIPIENTS', value: state.confirmed.toLocaleString(), color: 'var(--cyan)', tab: 'recipients', hint: 'Open contacts' },
-                      { label: 'BOUNCES 30D', value: (state.rates?.bounces30 ?? 0).toLocaleString(), color: (state.rates?.bounces30 || 0) ? 'var(--orange, #fb923c)' : 'var(--txt-dim)', tab: 'bounces', hint: 'Open suppression log' },
-                      { label: 'BOUNCE %', value: `${state.rates?.bounceRate ?? 0}%`, color: (state.rates?.bounceRate || 0) > 5 ? 'var(--red)' : 'var(--green)', tab: 'bounces', hint: 'Bounces ÷ delivered, last 30 days' },
-                      { label: 'COMPLAINT %', value: `${state.rates?.complaintRate ?? 0}%`, color: (state.rates?.complaintRate || 0) > 0.1 ? 'var(--red)' : 'var(--green)', tab: 'bounces', hint: 'Complaints ÷ delivered, last 30 days' },
                     ].map((item) => (
                       <button key={item.label} type="button" className="kpi-card kpi-card-btn" title={item.hint} onClick={() => setTab(item.tab)}>
                         <div className="kpi-val" style={{ color: item.color }}>{item.value}</div>
                         <div className="kpi-lbl">{item.label}</div>
                       </button>
                     ))}
+                  </div>
+
+                  <div className="dash-health" aria-label="List health, last 30 days">
+                    <span className="dash-health-title">LIST HEALTH</span>
+                    <button type="button" onClick={() => setTab('bounces')}>BOUNCES <strong>{(state.rates?.bounces30 ?? 0).toLocaleString()}</strong></button>
+                    <button type="button" onClick={() => setTab('bounces')}>BOUNCE % <strong className={(state.rates?.bounceRate || 0) > 5 ? 'fail-val' : 'sent-val'}>{state.rates?.bounceRate ?? 0}%</strong></button>
+                    <button type="button" onClick={() => setTab('bounces')}>COMPLAINT % <strong className={(state.rates?.complaintRate || 0) > 0.1 ? 'fail-val' : 'sent-val'}>{state.rates?.complaintRate ?? 0}%</strong></button>
+                    <span className="dim">last 30 days</span>
                   </div>
 
                   <div className="dash-grid">
@@ -3694,7 +3704,7 @@ sudo tail -f /var/log/maillog`}</pre>
                         <table className="w-table">
                           <thead><tr><th>#</th><th>NAME</th><th>STATUS</th><th>PROGRESS</th><th>SENT</th><th>FAIL</th><th>QUEUE</th></tr></thead>
                           <tbody>
-                            {dashCampaigns.map((c) => {
+                            {dashCampaigns.slice(0, dashMore ? 6 : 3).map((c) => {
                               const pct = c.total > 0 ? Math.round(((c.sent + c.failed) / c.total) * 100) : 0;
                               return (
                                 <tr key={c.id} className="dash-camp-row" title="Open in campaign library" onClick={() => setTab('send')}>
@@ -3717,10 +3727,12 @@ sudo tail -f /var/log/maillog`}</pre>
                       </div>
                     </div>
 
-                    <div className="pane">
-                      <div className="pane-head"><span>ACTIVITY CONSOLE <span className="dim">— all events</span></span><span className="dim">every task · sends · opens · clicks · bounces</span></div>
-                      <LiveConsole events={state.events} />
-                    </div>
+                    {dashMore && (
+                      <div className="pane">
+                        <div className="pane-head"><span>ACTIVITY CONSOLE <span className="dim">— all events</span></span><span className="dim">every task · sends · opens · clicks · bounces</span></div>
+                        <LiveConsole events={state.events} />
+                      </div>
+                    )}
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -3741,6 +3753,7 @@ sudo tail -f /var/log/maillog`}</pre>
                         {!engineReady && <div className="engine-warning">! {engineHint} — <button className="dash-inline-link" onClick={() => setTab('delivery')}>open settings</button></div>}
                       </div>
 
+                      {dashMore && (
                       <div className="pane">
                         <div className="pane-head">
                           <span>DELIVERABILITY</span>
@@ -3786,6 +3799,7 @@ sudo tail -f /var/log/maillog`}</pre>
                           </>
                         )}
                       </div>
+                      )}
 
                       <div className="pane">
                         <div className="pane-head"><span>QUICK ACTIONS</span></div>
@@ -3805,20 +3819,22 @@ sudo tail -f /var/log/maillog`}</pre>
                         </div>
                       </div>
 
-                      <div className="pane">
-                        <div className="pane-head">
-                          <span>RECENT SUPPRESSIONS</span>
-                          <button className="btn-xs" onClick={() => setTab('bounces')}>VIEW ALL →</button>
-                        </div>
-                        {(state.bounces || []).slice(0, 5).map((b) => (
-                          <div key={b.id} className="dash-bounce" title={b.reason || ''}>
-                            <span className={`badge ${b.kind === 'bounce' ? 'badge-fail' : b.kind === 'complaint' ? 'badge-def' : 'badge-ok'}`}>{b.kind === 'unsubscribe' ? 'UNSUB' : (b.classification || b.kind || '').toUpperCase()}</span>
-                            <span className="dash-bounce-email">{b.email}</span>
-                            <span className="dash-bounce-time">{new Date(b.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+                      {dashMore && (
+                        <div className="pane">
+                          <div className="pane-head">
+                            <span>RECENT SUPPRESSIONS</span>
+                            <button className="btn-xs" onClick={() => setTab('bounces')}>VIEW ALL →</button>
                           </div>
-                        ))}
-                        {!(state.bounces || []).length && <p className="dim-txt">No bounces or complaints recorded.</p>}
-                      </div>
+                          {(state.bounces || []).slice(0, 5).map((b) => (
+                            <div key={b.id} className="dash-bounce" title={b.reason || ''}>
+                              <span className={`badge ${b.kind === 'bounce' ? 'badge-fail' : b.kind === 'complaint' ? 'badge-def' : 'badge-ok'}`}>{b.kind === 'unsubscribe' ? 'UNSUB' : (b.classification || b.kind || '').toUpperCase()}</span>
+                              <span className="dash-bounce-email">{b.email}</span>
+                              <span className="dash-bounce-time">{new Date(b.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+                            </div>
+                          ))}
+                          {!(state.bounces || []).length && <p className="dim-txt">No bounces or complaints recorded.</p>}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

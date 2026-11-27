@@ -168,7 +168,7 @@ body {
 .narrow-pane { max-width: 900px; }
 /* Settings uses the full page: a two-column board of setting cards. */
 .settings-pane { max-width: none; }
-@media (min-width: 900px) {
+@media (min-width: 1000px) {
   .settings-pane {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1752,3 +1752,97 @@ details.help-sec[open] summary::before { content: 'v '; }
 .dkim-warn { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; background: rgba(255,180,60,0.08); border: 1px solid rgba(255,180,60,0.4); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; color: #ffd28a; font-size: 12px; }
 .dkim-warn .btn-sm { border-color: rgba(255,180,60,0.6); color: #ffd28a; }
 .dkim-warn .btn-sm:hover { background: rgba(255,180,60,0.15); }
+
+/* ── RESPONSIVE HARDENING ──
+   The app must fit whatever screen the client uses. These rules stop fixed
+   rows and grid children from forcing the page wider than the viewport. */
+html, body { max-width: 100%; overflow-x: hidden; }
+.layout { height: 100dvh; }
+.main-wrap, .content, .pane, .cfg-block, .dash-grid > *, .two-col > *, .compose-layout > * { min-width: 0; }
+.pane-head { flex-wrap: wrap; gap: 8px; }
+.topbar { flex-wrap: wrap; }
+.notice-bar { min-width: 0; flex: 1 1 240px; }
+.engine-row strong { overflow-wrap: anywhere; text-align: right; }
+.guide-section { overflow-x: auto; }
+.act-row { flex-wrap: wrap; white-space: normal; }
+.w-input, .w-select, .w-textarea { min-width: 0; }
+.form-grid > *, .mode-grid > *, .setup-deck > *, .qa-grid > * { min-width: 0; }
+
+/* Dashboard: simple view + compact health strip */
+.dash-head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.dash-more-btn { border-color: rgba(0,255,255,0.35) !important; color: var(--cyan) !important; }
+.dash-more-btn:hover { background: rgba(0,255,255,0.08); }
+.dash-health {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 12px; border: 1px solid rgba(47,224,107,0.12);
+  background: rgba(47,224,107,0.03); font-size: 11px; letter-spacing: .04em;
+}
+.dash-health-title { color: var(--txt-dim); font-weight: 900; letter-spacing: .14em; }
+.dash-health button {
+  background: transparent; border: 0; padding: 0; cursor: pointer;
+  color: var(--txt-dim); font: inherit; letter-spacing: .08em;
+}
+.dash-health button:hover { color: var(--green); }
+.dash-health strong { font-family: var(--mono); margin-left: 3px; }
+
+@media (max-width: 1000px) {
+  .settings-pane { display: flex; flex-direction: column; gap: 12px; }
+  .settings-pane > .pane-head { width: 100%; }
+}
+
+@media (max-width: 900px) {
+  .preview-pane, .aw-preview { position: static; min-height: 0; }
+  .preview-device-wrap, .preview-frame { min-height: 340px; }
+  .mode-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dash-head-right { align-items: flex-start; }
+  .dash-head-actions { justify-content: flex-start; }
+}
+
+@media (max-width: 760px) {
+  .chat-panel { width: 100%; }
+  .layout.chat-open { margin-right: 0; }
+}
+
+@media (max-width: 620px) {
+  .topbar { padding: 8px 10px; gap: 8px; }
+  .topbar-title { font-size: 11px; }
+  .topbar-ai { margin-left: auto; }
+  .content { padding: 10px; }
+  .pane { padding: 14px; }
+  .pane-head span { font-size: 11px; }
+  .dash-grid { gap: 10px; }
+  .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .kpi-row .kpi-card:last-child { grid-column: 1 / -1; }
+  .kpi-card { padding: 10px; }
+  .kpi-val { font-size: 20px; }
+  .dash-title { font-size: 17px; }
+  .dash-head { gap: 8px; }
+  .dash-clock-time { font-size: 17px; }
+  .mode-grid { grid-template-columns: 1fr; }
+  .w-table { min-width: 560px; }
+  .pool-table { min-width: 720px; }
+  .guide-table { min-width: 520px; }
+  .act-row { flex-wrap: wrap; }
+  .smtp-jump { gap: 4px; }
+  .smtp-jump-btn { font-size: 9px; padding: 4px 7px; }
+  .w-input, .w-select, .w-textarea { font-size: 16px; }
+  .setup-steps, .setup-deck { grid-template-columns: 1fr; }
+  .dash-health { gap: 6px 10px; font-size: 10px; }
+  .ab-test-input-row, .filter-row, .deck-row, .ai-response-head { flex-wrap: wrap; }
+  .deck-btn { width: 100%; }
+  .filter-row .w-select, .filter-row .w-input { width: 100%; }
+  .ai-response-head { align-items: flex-start; }
+  .engine-row { gap: 8px; }
+  .engine-row strong { max-width: 55%; }
+  .dash-clock { font-size: 13px; }
+  .smtp-jump { overflow-x: auto; flex-wrap: nowrap; }
+  .subject-helper { align-items: stretch; }
+  .subject-helper .w-input { width: 100%; }
+}
+
+@media (max-width: 420px) {
+  .pane { padding: 12px; }
+  .content { padding: 8px; }
+  .dash-title { font-size: 15px; }
+  .dash-mode-pill { font-size: 10px; }
+}
