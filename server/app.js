@@ -97,6 +97,43 @@ function cleanAiOutput(raw, target) {
   return out;
 }
 
+// Models sometimes narrate their reasoning even when told not to. Keep the
+// visible reply to the answer itself.
+function stripReasoning(raw) {
+  let out = String(raw || '');
+  out = out.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
+  out = out.replace(/```(?:thinking|reasoning|analysis|thoughts?)\s*\n[\s\S]*?```/gi, '');
+  out = out.replace(/^(thinking|reasoning|analysis|thought process|chain of thought)\s*:\s*[\s\S]*?\n\s*\n/i, '');
+  return out.trim();
+}
+
+// Turn a model's subject-line answer into clean, deduped, applyable lines.
+function parseSubjectLines(raw, limit = 8) {
+  let out = String(raw || '');
+  out = out.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
+  out = out.replace(/```[a-z]*\s*\n([\s\S]*?)\n?\s*```/i, '$1');
+  const label = /^(thinking|reasoning|analysis|here are|here'?s|sure|certainly|of course|below are|these are|subject lines?|options?)\b/i;
+  const explain = /^(this (works|one|line|subject)|it (works|uses|plays|creates)|why (it|this)|reason|rationale|note|analysis|thinking)\b|\b(works because|because it (creates|adds|builds|feels|makes)|to (boost|increase) (the )?open rate)\b/i;
+  const seen = new Set();
+  const lines = out.split(/\r?\n/)
+    .map((l) => l.replace(/^\s*(?:[-*•–—]|\d+[.)])\s*/, '').trim())
+    .map((l) => l.replace(/^(?:subject(?:\s*line)?|option)\s*\d*\s*[:.)-]\s*/i, '').trim())
+    .map((l) => l.replace(/^["'`“”‘’]+|["'`“”‘’]+$/g, '').trim())
+    .filter(Boolean)
+    .filter((l) => l.length >= 6 && l.length <= 120)
+    .filter((l) => !label.test(l) && !explain.test(l))
+    .filter((l) => !/[:：]\s*$/.test(l));
+  const subjects = [];
+  for (const line of lines) {
+    const key = line.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    subjects.push(line.slice(0, 120));
+    if (subjects.length >= limit) break;
+  }
+  return subjects;
+}
+
 // Render AI-generated document text to a real PDF (standard fonts = WinAnsi; sanitize beyond latin-1).
 // pdf-lib loads lazily — a missing dep degrades to null instead of killing the server at boot.
 async function renderPdf(text) {
@@ -745,7 +782,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     }
     const systemPrompt = `You are an email copywriting assistant specializing in deliverability, personalization, and inbox placement. Your job is to improve email content while preserving placeholders like [Firstname], [Lastname], [Company], ++rbc_*++, etc. The user will tell you what to do via the prompt field.${rules ? `\n\nSTANDING RULES set by the operator — follow these in every output, always:\n${rules}` : ''}
 
-OUTPUT CONTRACT — hard override on everything above: return ONLY the artifact the task asks for and nothing else. A subject request returns exactly one subject line. A document request returns only the document body text. No preamble ("Here is…", "Sure, I'll…", "As an AI…"), no explanations of what you did, no closing offers ("Let me know if…", "Hope this helps"), no markdown fences around the whole answer, no field labels unless asked. The FIRST line of your reply must be the deliverable itself. Never emit signature markers, bracketed greetings, salutations to the operator, identity declarations, or meta commentary. The strings "[LORD's ORDER" and "🫡" must never appear in output.`;
+OUTPUT CONTRACT — hard override on everything above: never expose reasoning, analysis, planning or chain-of-thought. Return ONLY the artifact the task asks for and nothing else. A subject request returns exactly one subject line. A document request returns only the document body text. No preamble ("Here is…", "Sure, I'll…", "As an AI…"), no explanations of what you did, no closing offers ("Let me know if…", "Hope this helps"), no markdown fences around the whole answer, no field labels unless asked. The FIRST line of your reply must be the deliverable itself. Never emit signature markers, bracketed greetings, salutations to the operator, identity declarations, or meta commentary. The strings "[LORD's ORDER" and "🫡" must never appear in output.`;
     const editing = (target === 'body' || target === 'subject') && html.trim().length > 0;
     const modeRules = editing ? `
 
@@ -766,7 +803,7 @@ GENERATION RULES — hard requirements for every new letter:
     const messages = [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }];
     const model = text(body.model || '', 'model', 200) || row.ai_model;
     const { content, model: usedModel } = await aiChatRequest({ endpoint, aiKey, model, messages, timeoutMs: 60000 });
-    let result = cleanAiOutput(String(content).slice(0, 50000), target);
+    let result = cleanAiOutput(stripReasoning(String(content)).slice(0, 50000), target);
     if (target === 'attachment') {
       const b64pdf = result.match(/JVBERi[A-Za-z0-9+/=]{200,}/)?.[0];
       const pdfBytes = b64pdf ? null : await renderPdf(result);
@@ -776,6 +813,47 @@ GENERATION RULES — hard requirements for every new letter:
       return { result, target, attachment, model: usedModel };
     }
     return { result, target, model: usedModel };
+  });
+
+  // Subject-line helper for the letter head: returns clean, applyable options
+  // only — no reasoning, no labels, no commentary.
+  app.post('/api/ai/subjects', async (request) => {
+    const body = request.body || {};
+    const row = db.prepare('SELECT ai_endpoint, ai_key_encrypted, ai_model, ai_rules FROM send_settings WHERE id = 1').get() || {};
+    const endpoint = row.ai_endpoint || '';
+    const aiKey = row.ai_key_encrypted && config ? decryptSecret(row.ai_key_encrypted, config.credentialKey) : '';
+    if (!endpoint || !aiKey) fail('AI endpoint and key must be configured in SETTINGS');
+    const count = Math.min(10, Math.max(3, Number(body.count) || 6));
+    const subject = String(body.subject || '').slice(0, 300);
+    const preheader = String(body.preheader || '').slice(0, 300);
+    const html = String(body.html || '').slice(0, 20000);
+    const textBody = String(body.text || '').slice(0, 8000);
+    const direction = String(body.prompt || '').slice(0, 1000);
+    const tone = String(body.tone || '').slice(0, 60);
+    const audience = String(body.audience || '').slice(0, 300);
+    const rules = row.ai_rules || DEFAULT_AI_RULES;
+    const model = text(body.model || '', 'model', 200) || row.ai_model;
+    const systemPrompt = `You are a world-class email subject-line writer. Produce ${count} DISTINCT subject lines for the email below.
+
+HARD OUTPUT RULES:
+- Exactly one subject per line, nothing else. No numbering, bullets, quotes, labels or "Subject:" prefixes.
+- No preamble, no explanation, no reasoning, no analysis, no closing offer. Never say why a line works.
+- Each line must be a finished subject, ideally 35–68 characters, never over 90.
+- Preserve placeholders such as [Firstname], [Company], ++rbc_*++ exactly.
+- No emojis unless the brief asks for them. Avoid ALL CAPS, "free", "act now", "urgent", "guarantee" and other spam triggers.
+- Make the lines meaningfully different: benefit-led, curiosity, specificity, question, urgency (only if true).
+${tone ? `- Tone: ${tone}.` : ''}${audience ? `\n- Audience: ${audience}.` : ''}${direction ? `\n- Operator direction: ${direction}` : ''}${rules ? `\n\nSTANDING RULES from the operator:\n${rules}` : ''}`;
+    const userPrompt = `Current subject: ${subject || '(none)'}
+Preheader: ${preheader || '(none)'}
+Email body (HTML or text):
+${html || textBody || '(empty)'}`;
+    const { content, model: usedModel } = await aiChatRequest({
+      endpoint, aiKey, model, timeoutMs: 60000,
+      messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+    });
+    const subjects = parseSubjectLines(stripReasoning(content), count);
+    if (!subjects.length) fail('AI returned no usable subject lines — try again or pick a different model');
+    return { subjects, model: usedModel };
   });
 
   // AI letter picker — scores the vault (saved templates + library) against the
@@ -893,7 +971,7 @@ VAULT: ${JSON.stringify(meta)}`;
       ctx.text ? `draft text:\n${String(ctx.text).slice(0, 3000)}` : '',
     ].filter(Boolean).join('\n');
 
-    const systemPrompt = `You are RBC Helper, the built-in assistant of the Rubicon Email Suite panel. You have full read access to this sender's live state (below) — answer from it, quote real numbers. Be concise and technical. When asked to write or rewrite email content, output the content itself and preserve placeholders like [Firstname], [Company], ++rbc_*++ exactly. When pointing the operator somewhere, name the exact tab and section from the LAYOUT MAP — never say "Settings" for things on the EMAIL tab.
+    const systemPrompt = `You are RBC Helper, the built-in assistant of the Rubicon Email Suite panel. You have full read access to this sender's live state (below) — answer from it, quote real numbers. Be concise and technical. Never expose reasoning, analysis, chain-of-thought, planning, self-talk or "thinking out loud" — reply only with the answer or the requested artifact. When asked to write or rewrite email content, output the content itself and preserve placeholders like [Firstname], [Company], ++rbc_*++ exactly. When pointing the operator somewhere, name the exact tab and section from the LAYOUT MAP — never say "Settings" for things on the EMAIL tab.
 
 LAYOUT MAP (sidebar tabs):
 - DASHBOARD: overview, stats
@@ -918,7 +996,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       endpoint, aiKey, model, timeoutMs: 60000,
       messages: [{ role: 'system', content: systemPrompt }, ...history],
     });
-    const reply = cleanAiOutput(String(content)).slice(0, 50000);
+    const reply = cleanAiOutput(stripReasoning(String(content))).slice(0, 50000);
     // Intent → apply-target hint so the client can offer the right apply buttons.
     const lastUser = history[history.length - 1].content;
     const genAsk = /\b(write|re.?write|generate|improve|fix|draft|create|make|compose|polish|shorten|lengthen|translate|give me|come up with|suggest)\b/i.test(lastUser);

@@ -78,6 +78,8 @@ export default function App() {
   const [aiTarget, setAiTarget] = useState('body');
   const [aiAttachment, setAiAttachment] = useState(null);
   const [aiStreaming, setAiStreaming] = useState(false);
+  const [subjectIdeas, setSubjectIdeas] = useState([]);
+  const [subjectBusy, setSubjectBusy] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMsgs, setChatMsgs] = useState([]);
   const [chatInput, setChatInput] = useState('');
@@ -477,6 +479,28 @@ export default function App() {
       showNotice(`Update failed: ${err.message}`, 'err');
       setUpdateInfo(pending);
       setUpdateResult({ ok: false, log: err.message });
+    }
+  }
+
+  async function suggestSubjects(direction = '') {
+    if (subjectBusy) return;
+    setSubjectBusy(true);
+    try {
+      const r = await api(token, '/api/ai/subjects', {
+        method: 'POST',
+        body: {
+          subject: draft.subject, preheader: draft.preheader, html: draft.html, text: draft.text,
+          prompt: direction, count: 6,
+        },
+      });
+      const ideas = (r.subjects || []).filter(Boolean).slice(0, 10);
+      if (!ideas.length) throw new Error('No subject ideas returned.');
+      setSubjectIdeas(ideas);
+      showNotice(`${ideas.length} subject ideas ready — click one to use it.`);
+    } catch (err) {
+      showNotice(`AI subjects: ${err.message}`, 'err');
+    } finally {
+      setSubjectBusy(false);
     }
   }
 
@@ -987,6 +1011,30 @@ export default function App() {
 
                     <label className="field-label">SUBJECT</label>
                     <input className="w-input" value={draft.subject} onChange={(e) => updateDraft('subject', e.target.value)} placeholder="Subject line — placeholders work here" />
+                    <div className="subject-helper">
+                      <button
+                        type="button"
+                        className="btn-xs subject-ai-btn"
+                        disabled={subjectBusy || !(settings.aiEndpoint && settings.aiKey)}
+                        title="AI writes clean subject options from this letter — click one to apply"
+                        onClick={() => suggestSubjects()}
+                      >{subjectBusy ? 'THINKING…' : '✦ SUGGEST SUBJECTS'}</button>
+                      {!!subjectIdeas.length && <span className="dim-txt">click a line to apply it</span>}
+                      {!!subjectIdeas.length && <button type="button" className="btn-xs" onClick={() => setSubjectIdeas([])}>CLEAR</button>}
+                    </div>
+                    {!!subjectIdeas.length && (
+                      <div className="subject-ideas">
+                        {subjectIdeas.map((idea, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            className={`subject-idea${draft.subject === idea ? ' on' : ''}`}
+                            title="Use this subject line"
+                            onClick={() => { updateDraft('subject', idea); showNotice('Subject applied.'); }}
+                          >{idea}</button>
+                        ))}
+                      </div>
+                    )}
 
                     <div className="template-row">
                       <select className="w-select" onChange={async (e) => {
@@ -1026,7 +1074,7 @@ export default function App() {
                           <button className="btn-sm" aria-label="Close AI assist panel" onClick={() => setAiAssistantOpen(false)}>[ × ]</button>
                         </div>
                         <div className="ai-presets">
-                          <button className="btn-sm" onClick={() => setAiPrompt('Rewrite the subject line for higher open rate.')}>[ REWRITE SUBJECT ]</button>
+                          <button className="btn-sm" onClick={() => suggestSubjects('Rewrite the subject line for a higher open rate.')}>[ REWRITE SUBJECT ]</button>
                           <button className="btn-sm" onClick={() => setAiPrompt('Personalize the body content using [Firstname], [Lastname], [Company] placeholders.')}>[ PERSONALIZE BODY ]</button>
                           <button className="btn-sm" onClick={() => setAiPrompt('Optimize this email for inbox placement and avoid spam triggers.')}>[ OPTIMIZE FOR INBOX ]</button>
                           <button className="btn-sm" onClick={() => setAiPrompt('Fix any spam triggers in the content.')}>[ FIX SPAM TRIGGERS ]</button>
@@ -1622,13 +1670,16 @@ export default function App() {
                       <button className="btn-sm" disabled={awBusy} onClick={async () => {
                         setAwBusy(true); setAwResult(null);
                         try {
-                          const res = await api(token, '/api/ai/assist', {
+                          const res = await api(token, '/api/ai/subjects', {
                             method: 'POST',
-                            body: { prompt: `Generate 6 alternative subject lines for this email${awTone ? ` in a ${awTone} tone` : ''}. Output ONLY the 6 lines, one per line, no numbering, no commentary.${awAudience.trim() ? ` Audience: ${awAudience.trim()}.` : ''}`, subject: draft.subject, html: draft.html, text: draft.text },
+                            body: {
+                              subject: draft.subject, preheader: draft.preheader, html: draft.html, text: draft.text,
+                              tone: awTone, audience: awAudience.trim(), count: 6,
+                            },
                           });
-                          const resultText = String(res.result || '').trim();
-                          if (!resultText) throw new Error('AI provider returned no subject lines.');
-                          setAwResult({ text: resultText, target: 'subject', subject: draft.subject });
+                          const lines = (res.subjects || []).filter(Boolean);
+                          if (!lines.length) throw new Error('AI provider returned no subject lines.');
+                          setAwResult({ text: lines.join('\n'), target: 'subject', subject: draft.subject });
                         } catch (err) { setAwResult({ text: `Error: ${err.message}`, target: 'none' }); showNotice(`AI: ${err.message}`, 'err'); }
                         finally { setAwBusy(false); }
                       }}>[ ✦ 6 SUBJECT LINES ]</button>

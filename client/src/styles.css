@@ -713,6 +713,17 @@ code {
   flex-wrap: wrap;
   gap: 6px;
 }
+.subject-helper { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 2px; }
+.subject-ai-btn { border-color: rgba(0,255,255,0.45) !important; color: var(--cyan) !important; }
+.subject-ai-btn:hover:not(:disabled) { background: rgba(0,255,255,0.08); }
+.subject-ideas { display: flex; flex-direction: column; gap: 5px; margin: 6px 0 10px; padding: 8px; border: 1px solid rgba(47,224,107,0.18); background: rgba(47,224,107,0.03); }
+.subject-idea {
+  text-align: left; background: rgba(0,0,0,0.35); border: 1px solid rgba(47,224,107,0.15);
+  color: var(--txt); font: inherit; font-size: 12px; padding: 7px 9px; cursor: pointer; border-radius: 3px;
+}
+.subject-idea:hover { border-color: var(--green); background: rgba(47,224,107,0.07); }
+.subject-idea.on { border-color: var(--green); color: var(--green); font-weight: 800; }
+.subject-idea.on::after { content: ' ✓'; }
 .ai-prompt-input {
   background: rgba(0, 0, 0, 0.4);
   border: 1px solid rgba(47, 224, 107, 0.2);
