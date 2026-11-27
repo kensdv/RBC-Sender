@@ -896,10 +896,14 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
   app.post('/api/spam-check', async (request) => {
     const body = request.body || {};
     const { subject, html, text } = body;
-    const row = db.prepare('SELECT dkim_enabled, dkim_key_encrypted, send_mode FROM send_settings WHERE id = 1').get() || {};
+    const row = db.prepare('SELECT dkim_enabled, dkim_key_encrypted, send_mode, relay_host FROM send_settings WHERE id = 1').get() || {};
     const dkimEnabled = Boolean(row.dkim_enabled);
     const dkimConfigured = Boolean(row.dkim_key_encrypted);
     const sendMode = row.send_mode || 'smtp';
+    // Providers that DKIM-sign outbound mail themselves — local signing is optional.
+    const poolHosts = db.prepare('SELECT host FROM smtp_accounts WHERE enabled = 1').all().map((a) => a.host || '').join(' ');
+    const providerSigned = ['graph', 'gmail', 'api'].includes(sendMode)
+      || /(sendgrid|mailgun|amazonaws|ses|postmark|brevo|sparkpost|mandrill|gmail|google|outlook|office365|zoho|mailjet)/i.test(`${row.relay_host || ''} ${poolHosts}`);
 
     const content = `${subject || ''} ${html || ''} ${text || ''}`.toLowerCase();
     const issues = [];
@@ -954,10 +958,16 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       score -= 5;
     }
 
-    // Missing DKIM
-    if (!dkimEnabled || !dkimConfigured) {
-      issues.push({ type: 'missing_dkim', severity: 'high' });
-      score -= 15;
+    // Missing local DKIM — only matters when the engine has to sign itself.
+    if ((!dkimEnabled || !dkimConfigured) && !providerSigned) {
+      issues.push({
+        type: 'missing_dkim',
+        severity: sendMode === 'direct' ? 'high' : 'medium',
+        desc: sendMode === 'direct'
+          ? 'DIRECT MX sends unsigned mail — generate a DKIM key or switch to a signing provider.'
+          : 'Enable DKIM signing so receivers can authenticate the domain.',
+      });
+      score -= sendMode === 'direct' ? 15 : 8;
     }
 
     // Direct MX without SPF/DKIM

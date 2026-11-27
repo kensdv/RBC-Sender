@@ -857,6 +857,13 @@ code {
   color: var(--green); font-size: 12px; text-transform: uppercase;
   text-shadow: 0 0 10px rgba(47,224,107,0.4); margin-bottom: 10px;
 }
+.dlg-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dlg-head .dlg-title { flex: 1; }
+.dlg-close {
+  background: transparent; border: 0; color: var(--txt-dim, #6f8f78);
+  font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; margin: -4px -4px 0 0;
+}
+.dlg-close:hover, .dlg-close:focus-visible { color: var(--red); outline: none; }
 .dlg-msg { font-size: 12px; line-height: 1.7; color: var(--txt); margin-bottom: 16px; }
 .dlg-input { width: 100%; margin-bottom: 16px; }
 .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; }

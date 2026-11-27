@@ -119,9 +119,16 @@ export function createDeliverability({
       dmarc = status(policy === 'none' ? 'warn' : 'pass', `p=${policy.toUpperCase()}`, dmarcRecords[0]);
     }
 
+    // Engines that sign outbound mail with the provider's own DKIM key: local
+    // signing is optional there, so an off switch is not a warning.
+    const providerSigned = ['graph', 'gmail', 'api'].includes(mode)
+      || /(sendgrid|mailgun|amazonaws|ses|postmark|brevo|sparkpost|mandrill|gmail|google|outlook|office365|zoho|mailjet)/i.test(`${smtp.host || ''} ${settings.relayHost || ''}`);
+
     let dkim;
     if (!settings.dkimEnabled) {
-      dkim = status('warn', 'OFF', 'Enable DKIM signing in SETTINGS so receivers can authenticate the domain.');
+      dkim = providerSigned
+        ? status('off', 'PROVIDER', 'DKIM signing is off here — the provider signs outbound mail with the domain\'s own DKIM record.')
+        : status('warn', 'OFF', 'Enable DKIM signing in SETTINGS so receivers can authenticate the domain.');
     } else if (!selector || !dkimDomain) {
       dkim = status('warn', 'INCOMPLETE', 'DKIM is on but the selector or domain is empty.');
     } else if (dkimDomain !== domain) {

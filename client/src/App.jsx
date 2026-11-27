@@ -2849,7 +2849,7 @@ sudo tail -f /var/log/maillog`}</pre>
                   {/* DKIM SIGNING */}
                   <div className="cfg-block">
                     <div className="cfg-block-title">[ DKIM SIGNING ]</div>
-                    <p className="dim-txt">Sign outgoing mail with a DKIM key so receivers see a valid signature. Key is stored encrypted.</p>
+                    <p className="dim-txt">Sign outgoing mail with a DKIM key so receivers see a valid signature. Key is stored encrypted. Optional on GRAPH API, GMAIL API and HTTP API — those providers sign with your domain's DKIM. Required for DIRECT MX and plain RELAY.</p>
                     <div className="toggle-row" onClick={() => {
                       if (settings.dkimEnabled) { updateSettings('dkimEnabled', false); return; }
                       updateSettings('dkimEnabled', true);
@@ -3371,7 +3371,7 @@ sudo tail -f /var/log/maillog`}</pre>
                           <div className="engine-row"><span className="dim">POOL ACCOUNTS</span><strong>{liveSenders} active</strong></div>
                           <div className="engine-row"><span className="dim">HOURS</span><strong>{settings.sendDays?.length ? `${settings.sendDays.length}d/wk` : 'every day'} {String(Math.floor((settings.sendFromMin ?? 480) / 60)).padStart(2, '0')}:{String((settings.sendFromMin ?? 480) % 60).padStart(2, '0')}–{String(Math.floor((settings.sendToMin ?? 1200) / 60)).padStart(2, '0')}:{String((settings.sendToMin ?? 1200) % 60).padStart(2, '0')}</strong></div>
                           <div className="engine-row"><span className="dim">CAPS</span><strong>{settings.maxPerHour}/h · {settings.maxPerDay}/d{settings.warmupEnabled ? ' · warmup' : ''}</strong></div>
-                          <div className="engine-row"><span className="dim">DKIM</span><strong>{settings.dkimEnabled ? (settings.dkimConfigured ? 'ON' : 'KEY MISSING') : 'OFF'}</strong></div>
+                          <div className="engine-row"><span className="dim">DKIM</span><strong>{settings.dkimEnabled ? (settings.dkimConfigured ? 'ON' : 'KEY MISSING') : (['graph', 'gmail', 'api'].includes(sendMode) ? 'PROVIDER' : 'OFF')}</strong></div>
                           <div className="engine-row"><span className="dim">TRACKING</span><strong>{settings.trackOpens ? 'opens' : ''}{settings.trackOpens && settings.trackClicks ? ' + ' : ''}{settings.trackClicks ? 'clicks' : ''}{!settings.trackOpens && !settings.trackClicks ? 'OFF' : ''}</strong></div>
                         </div>
                         {!engineReady && <div className="engine-warning">! {engineHint} — <button className="dash-inline-link" onClick={() => setTab('delivery')}>open settings</button></div>}
@@ -3853,7 +3853,10 @@ client_id:secret:tenant            app creds (no RT)
       {extractJob && (
         <div className="dlg-overlay">
           <div className="dlg-card" role="dialog" aria-label="Extract contacts progress">
-            <div className="dlg-title">EXTRACT CONTACTS — {extractJob.owner}</div>
+            <div className="dlg-head">
+              <div className="dlg-title">EXTRACT CONTACTS — {extractJob.owner}</div>
+              <button className="dlg-close" aria-label="Close extract dialog" onClick={() => setExtractJob(null)}>✕</button>
+            </div>
             {extractJob.status === 'pulling' && (
               <>
                 <div className="x-prog-bar" role="progressbar" aria-valuenow={extractJob.total ? Math.round(extractJob.fetched / extractJob.total * 100) : 0} aria-valuemin={0} aria-valuemax={100}>
@@ -3895,7 +3898,10 @@ client_id:secret:tenant            app creds (no RT)
       {dialog && (
         <div className="dlg-overlay" onClick={() => settleDialog(false)}>
           <div className="dlg-card" onClick={(e) => e.stopPropagation()}>
-            <div className="dlg-title">{dialog.title}</div>
+            <div className="dlg-head">
+              <div className="dlg-title">{dialog.title}</div>
+              <button className="dlg-close" aria-label="Close dialog" onClick={() => settleDialog(false)}>✕</button>
+            </div>
             <div className="dlg-msg">{dialog.message}</div>
             {dialog.kind === 'prompt' && (
               <input
@@ -3922,7 +3928,10 @@ client_id:secret:tenant            app creds (no RT)
       {abTestOpen && (
         <div className="dlg-overlay">
           <div className="dlg-card dlg-large" onClick={(e) => e.stopPropagation()}>
-            <div className="dlg-title">SUBJECT A/B TEST</div>
+            <div className="dlg-head">
+              <div className="dlg-title">SUBJECT A/B TEST</div>
+              <button className="dlg-close" aria-label="Close A/B test" onClick={() => { setAbTestOpen(false); setAbTestCampaignId(null); setSubjectVariants([]); setNewVariantSubject(''); }}>✕</button>
+            </div>
             <div className="dlg-msg">
               <p className="dim-txt">Campaign #{abTestCampaignId} — spin multiple subject variants, split-test across recipients, track open/click rates.</p>
               <div className="ab-test-input-row" style={{ marginBottom: 8 }}>
@@ -4110,8 +4119,11 @@ client_id:secret:tenant            app creds (no RT)
       {updateResult && (
         <div className="dlg-overlay" onClick={() => setUpdateResult(null)}>
           <div className="dlg-card update-card" onClick={(e) => e.stopPropagation()}>
-            <div className="dlg-title" style={{ color: updateResult.ok ? 'var(--green)' : 'var(--red)' }}>
-              {updateResult.ok ? 'UPDATE COMPLETE' : 'UPDATE FAILED'}
+            <div className="dlg-head">
+              <div className="dlg-title" style={{ color: updateResult.ok ? 'var(--green)' : 'var(--red)' }}>
+                {updateResult.ok ? 'UPDATE COMPLETE' : 'UPDATE FAILED'}
+              </div>
+              <button className="dlg-close" aria-label="Close update log" onClick={() => setUpdateResult(null)}>✕</button>
             </div>
             <pre className="update-log">{updateResult.log || 'No updater output was returned.'}</pre>
             <div className="dlg-actions">
