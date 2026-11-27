@@ -28,6 +28,8 @@ export default function App() {
   const [msRtImportOpen, setMsRtImportOpen] = useState(false);
   const [msRtData, setMsRtData] = useState('');
   const [msRtQuota, setMsRtQuota] = useState(10000);
+  const [msRtTenant, setMsRtTenant] = useState('');
+  const [msRtClientId, setMsRtClientId] = useState('');
   const [msRtResults, setMsRtResults] = useState(null);
   const [editingAcct, setEditingAcct] = useState(null);
   const [settings, setSettings] = useState(emptySettings);
@@ -539,7 +541,7 @@ export default function App() {
       } else if (a.id === 'send_test') {
         showNotice(`Sending test to ${a.to}…`);
         const r = await api(token, '/api/test-send', { method: 'POST', body: { to: a.to, subject: draft.subject, html: draft.html, text: draft.text } });
-        setChatMsgs((m) => [...m, { role: 'assistant', content: `Test email sent to ${a.to} (${r.messageId || 'queued'}). Check the inbox — placement there is the real verdict.` }]);
+        setChatMsgs((m) => [...m, { role: 'assistant', content: `Test accepted by the engine for ${a.to} (${r.messageId || r.response || 'ok'}). Check the inbox - placement there is the real verdict.` }]);
       } else if (a.id === 'spam_check') {
         const r = await api(token, '/api/spam-check', { method: 'POST', body: { subject: draft.subject, html: draft.html, text: draft.text } });
         const issues = (r.issues || []).slice(0, 8).map((i) => `• ${i.type}${i.word ? ` "${i.word}"` : ''}${i.severity ? ` [${i.severity}]` : ''}`).join('\n');
@@ -2125,7 +2127,7 @@ export default function App() {
                     <button className="btn-primary" disabled={busy} onClick={() => run(async () => { await api(token, '/api/smtp', { method: 'PUT', body: smtp }); showNotice('SMTP saved.'); await refresh(); })}>[ SAVE SMTP ]</button>
                     <button className="btn-sm" disabled={busy || !smtp.configured} onClick={() => run(async () => { await api(token, '/api/smtp/verify', { method: 'POST' }); showNotice('Connection verified.'); })}>[ TEST ]</button>
                     <input className="w-input" style={{ maxWidth: 220 }} type="email" placeholder="test send to…" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
-                    <button className="btn-sm" disabled={busy || !testTo.includes('@')} onClick={() => run(async () => { const r = await api(token, '/api/test-send', { method: 'POST', body: { to: testTo, subject: draft.subject, html: draft.html, text: draft.text, forceMode: 'smtp' } }); showNotice(`SMTP test sent (${r.messageId || 'ok'}).`); setTestTo(''); })}>[ SEND TEST ]</button>
+                    <button className="btn-sm" disabled={busy || !testTo.includes('@')} onClick={() => run(async () => { const r = await api(token, '/api/test-send', { method: 'POST', body: { to: testTo, subject: draft.subject, html: draft.html, text: draft.text, forceMode: 'smtp' } }); showNotice(`SMTP test accepted (${r.messageId || r.response || 'ok'}).`); setTestTo(''); })}>[ SEND TEST ]</button>
                   </div>
                 </div>
 
@@ -2297,8 +2299,12 @@ sudo tail -f /var/log/maillog`}</pre>
                   {msRtImportOpen && (
                     <div className="cfg-block" style={{marginBottom:12}}>
                       <div className="cfg-block-title">[ IMPORT MS REFRESH-TOKEN MAILBOXES ]</div>
-                      <p className="dim-txt">One per line — <code>client_id:refresh_token</code>, <code>email:client_id:rt</code>, app creds <code>client_id:client_secret:tenant_id</code> (optionally +mailbox email), bare <code>1.xxx</code> refresh tokens, JSON dumps <code>{'{"access_token":"eyJ…","refresh_token":"…"}'}</code> (client + tenant harvested from the JWT — multiple objects in one paste OK), or a <code>rubicon_backup</code> file. App creds without a mailbox import <b>every mailbox in the tenant</b> (needs User.Read.All). All send via Graph sendMail inside the normal rotation.</p>
+                      <p className="dim-txt">One per line — <code>client_id:refresh_token</code>, <code>email:client_id:rt</code>, <code>email:client_id:tenant_id:rt</code>, app creds <code>client_id:client_secret:tenant_id</code> (optionally +mailbox email), bare <code>1.xxx</code> refresh tokens (prefix the mailbox: <code>email:1.xxx</code> so the tenant can be looked up), JSON dumps <code>{'{"access_token":"eyJ…","refresh_token":"…"}'}</code> (client + tenant harvested from the JWT — multiple objects in one paste OK), or a <code>rubicon_backup</code> file. App creds without a mailbox import <b>every mailbox in the tenant</b> (needs User.Read.All). All send via Graph sendMail inside the normal rotation.</p>
                       <textarea className="w-textarea code-ta" rows={5} value={msRtData} onChange={(e) => setMsRtData(e.target.value)} placeholder="9e5f94bc-e8b4-4d4e-8c0a-… : M.C540_BAY…" />
+                      <div className="form-grid" style={{marginTop:8}}>
+                        <div><label className="field-label">TENANT ID <span className="dim">(optional — for a bare RT)</span></label><input className="w-input" value={msRtTenant} onChange={(e) => setMsRtTenant(e.target.value)} placeholder="contoso.onmicrosoft.com or GUID" /></div>
+                        <div><label className="field-label">CLIENT ID <span className="dim">(optional — for a bare RT)</span></label><input className="w-input" value={msRtClientId} onChange={(e) => setMsRtClientId(e.target.value)} placeholder="the app the token was issued to" /></div>
+                      </div>
                       <div style={{display:'flex',alignItems:'center',gap:10,marginTop:8,flexWrap:'wrap'}}>
                         <label className="btn-sm" style={{margin:0,cursor:'pointer'}}>[ SELECT FILE ]
                           <input type="file" accept=".txt,.json,.csv,.log,.bak" style={{display:'none'}} onChange={async (e) => {
@@ -2310,10 +2316,10 @@ sudo tail -f /var/log/maillog`}</pre>
                         <label className="field-label" style={{margin:0}}>DAILY QUOTA / MAILBOX</label>
                         <input className="w-input" type="number" min="0" max="100000" style={{width:110}} value={msRtQuota} onChange={(e) => setMsRtQuota(Number(e.target.value))} />
                         <button className="btn-sm" disabled={busy || !msRtData.trim()} onClick={() => run(async () => {
-                          const r = await api(token, '/api/smtp/accounts/import-ms', { method: 'POST', body: { data: msRtData, quota: msRtQuota } });
+                          const r = await api(token, '/api/smtp/accounts/import-ms', { method: 'POST', body: { data: msRtData, quota: msRtQuota, tenant: msRtTenant.trim(), clientId: msRtClientId.trim() } });
                           setMsRtResults(r.results || []);
-                          showNotice(`Imported ${r.imported} mailbox(es) — ${r.failed} failed.`);
-                          if (r.imported) setMsRtData('');
+                          showNotice(r.imported ? `Imported ${r.imported} mailbox(es) — ${r.failed} failed.` : `Import failed — ${r.failed} line(s). See details below.`, r.imported ? 'ok' : 'err');
+                          if (r.imported) { setMsRtData(''); setMsRtTenant(''); setMsRtClientId(''); }
                           await refresh();
                         })}>[ IMPORT ]</button>
                       </div>
@@ -3531,7 +3537,7 @@ sudo tail -f /var/log/maillog`}</pre>
                           <input className="w-input" type="email" placeholder="you@yourdomain.com" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
                           <button className="btn-sm deck-btn" disabled={busy || !testTo.includes('@')} onClick={() => run(async () => {
                             const r = await api(token, '/api/test-send', { method: 'POST', body: { to: testTo, subject: draft.subject, html: draft.html, text: draft.text, attachments: draft.attachments } });
-                            showNotice(`Test sent (${r.messageId || 'ok'}) — check ${testTo}.`); setTestTo('');
+                            showNotice(`Test accepted (${r.messageId || r.response || 'ok'}) - check ${testTo}.`); setTestTo('');
                           })}>SEND TEST</button>
                         </div>
                       </div>
