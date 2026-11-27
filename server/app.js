@@ -237,8 +237,8 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
       sock.on('error', (e) => finish({ open: false, reason: e.code || 'error' }));
     });
   }
-  async function getNetInfo() {
-    if (netInfoCache.data && Date.now() - netInfoCache.at < 5 * 60 * 1000) return netInfoCache.data;
+  async function getNetInfo(force = false) {
+    if (!force && netInfoCache.data && Date.now() - netInfoCache.at < 5 * 60 * 1000) return netInfoCache.data;
     if (netInfoPending) return netInfoPending;
     netInfoPending = (async () => {
       const [publicIp, port25] = await Promise.all([lookupPublicIp(), probePort25()]);
@@ -247,7 +247,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     })().finally(() => { netInfoPending = null; });
     return netInfoPending;
   }
-  app.get('/api/netinfo', async () => getNetInfo());
+  app.get('/api/netinfo', async (request) => getNetInfo(request.query?.refresh === '1'));
 
   const deliverability = createDeliverability({ getNetInfo });
   app.get('/api/deliverability', async (request) => {

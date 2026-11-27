@@ -108,7 +108,10 @@ body {
   padding: 10px 14px 12px; border-top: var(--glass-border);
   display: flex; flex-direction: column; gap: 6px; flex: none;
 }
-.sb-net-title { font-size: 11px; font-weight: 900; letter-spacing: .18em; color: var(--txt-dim); }
+.sb-net-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; font-weight: 900; letter-spacing: .18em; color: var(--txt-dim); }
+.sb-recheck { background: transparent; border: 0; padding: 0; cursor: pointer; color: var(--txt-dim); font: inherit; font-size: 10px; letter-spacing: .12em; }
+.sb-recheck:hover:not(:disabled) { color: var(--green); }
+.sb-recheck:disabled { opacity: .5; cursor: default; }
 .sb-net-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
 .sb-net-row .stat-val { font-size: 11px; text-align: right; }
 .sb-ip {

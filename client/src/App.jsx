@@ -18,6 +18,7 @@ export default function App() {
   const [loginToken, setLoginToken] = useState('');
   const [state, setState] = useState(null);
   const [netInfo, setNetInfo] = useState(null);
+  const [netInfoLoading, setNetInfoLoading] = useState(false);
   const [tgToken, setTgToken] = useState('');
   const [tgChat, setTgChat] = useState('');
   const [tab, setTab] = useState('dashboard');
@@ -898,7 +899,13 @@ export default function App() {
         <button className="nav-item logout-btn" onClick={logout}>✕ LOGOUT</button>
 
         <div className="sb-net">
-          <div className="sb-net-title">SERVER</div>
+          <div className="sb-net-title">
+            <span>SERVER</span>
+            <button className="sb-recheck" disabled={netInfoLoading} title="Re-check the public IP and port 25 now"
+              onClick={() => { setNetInfoLoading(true); api(token, '/api/netinfo?refresh=1').then(setNetInfo).catch(() => showNotice('Server check failed.', 'err')).finally(() => setNetInfoLoading(false)); }}>
+              {netInfoLoading ? '…' : 'RECHECK'}
+            </button>
+          </div>
           <div className="sb-net-row">
             <span className="stat-lbl">IP</span>
             <button className="sb-ip" title="Click to copy — use for SMTP relay / IP whitelists" aria-label="Copy server public IP"
@@ -908,14 +915,17 @@ export default function App() {
           </div>
           <div className="sb-net-row">
             <span className="stat-lbl">PORT 25</span>
-            <span className={`stat-val ${!['direct', 'socks5'].includes(sendMode) ? 'mode-val' : netInfo?.port25?.open ? 'sent-val' : 'fail-val'}`}
-              title={!['direct', 'socks5'].includes(sendMode)
-                ? `Outbound port 25 is not used in ${sendMode.toUpperCase()} mode`
-                : netInfo && !netInfo.port25.open ? `Port 25 ${netInfo.port25.reason || 'filtered'} - direct MX unavailable` : 'Outbound port 25'}>
-              {netInfo ? (['direct', 'socks5'].includes(sendMode) ? (netInfo.port25.open ? 'OPEN' : 'BLOCKED') : 'N/A') : '…'}
+            <span className={`stat-val ${netInfo?.port25?.open ? 'sent-val' : ['direct', 'socks5'].includes(sendMode) ? 'fail-val' : 'mode-val'}`}
+              title={netInfo && !netInfo.port25?.open
+                ? `Port 25 ${netInfo.port25?.reason || 'filtered'}${['direct', 'socks5'].includes(sendMode) ? ' - direct MX unavailable' : ` (not used in ${sendMode.toUpperCase()} mode)`}`
+                : 'Outbound port 25'}>
+              {netInfo ? (netInfo.port25?.open ? 'OPEN' : 'BLOCKED') : '…'}
             </span>
           </div>
-          <div className="sb-net-hint">click IP to copy · for relay whitelists</div>
+          {!['direct', 'socks5'].includes(sendMode) && (
+            <div className="sb-net-hint">port 25 not used in {sendMode.toUpperCase()} mode</div>
+          )}
+          <div className="sb-net-hint">click IP to copy · whitelist this egress IP for relay</div>
         </div>
       </aside>
 
