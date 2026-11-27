@@ -579,8 +579,9 @@ async function msRtAccessToken(clientId, refreshToken, tenant = 'common') {
 }
 
 // App-credentials (client_id + client_secret + tenant) — app-level token, .default scope.
-async function msCcAccessToken(clientId, clientSecret, tenant) {
+async function msCcAccessToken(clientId, clientSecret, tenant, force = false) {
   const key = `mscc:${clientId}:${createHash('sha256').update(clientSecret).digest('hex').slice(0, 16)}`;
+  if (force) delete tokenCache[key];
   if (tokenCache[key]?.exp > Date.now()) return tokenCache[key].token;
   const res = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0/token`, {
     method: 'POST',
@@ -598,7 +599,8 @@ async function msCcAccessToken(clientId, clientSecret, tenant) {
 
 // App creds have no /me — verify by looking the mailbox up via /users (needs User.Read.All).
 export async function msCcVerifyMailbox(clientId, clientSecret, tenant, mailbox) {
-  const token = await msCcAccessToken(clientId, clientSecret, tenant);
+  // Force a fresh app token so permissions added in Azure take effect immediately.
+  const token = await msCcAccessToken(clientId, clientSecret, tenant, true);
   const res = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}?$select=mail,userPrincipalName,displayName`, {
     headers: { authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(15000),
@@ -614,7 +616,7 @@ export async function msCcVerifyMailbox(clientId, clientSecret, tenant, mailbox)
 
 // Enumerate tenant mailboxes (app creds with User.Read.All) for bulk import.
 export async function msCcListMailboxes(clientId, clientSecret, tenant) {
-  const token = await msCcAccessToken(clientId, clientSecret, tenant);
+  const token = await msCcAccessToken(clientId, clientSecret, tenant, true);
   const users = [];
   // Members only — guests (external gmail/live addresses) appear in /users but can't send
   let url = "https://graph.microsoft.com/v1.0/users?$select=mail,userPrincipalName,displayName,userType&$filter=userType eq 'Member'&$top=100";
@@ -709,7 +711,8 @@ export async function msRtListContacts(clientId, refreshToken, tenant = 'common'
 }
 
 export async function msCcListContacts(clientId, clientSecret, tenant, mailbox, onProgress = null) {
-  const token = await msCcAccessToken(clientId, clientSecret, tenant);
+  // Force a fresh app token: Contacts.Read may have just been granted in Azure.
+  const token = await msCcAccessToken(clientId, clientSecret, tenant, true);
   const base = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/contacts`;
   const total = await msGraphContactCount(base, token);
   try {
