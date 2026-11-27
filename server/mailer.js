@@ -730,7 +730,7 @@ export async function msRtSendMail({ token, sender, message, recipient, fromName
   const toName = [recipient.firstName, recipient.lastName].filter(Boolean).join(' ');
   const addr = { emailAddress: { name: toName, address: recipient.email } };
   const fromAddr = { emailAddress: { name: fromName, address: sender } };
-  const payload = { message: { subject: message.subject } };
+  const payload = { message: { subject: message.subject, from: fromAddr } };
   if (message.html) payload.message.body = { contentType: 'HTML', content: message.html };
   else payload.message.body = { contentType: 'Text', content: message.text || '' };
   const sendType = settings.sendType || 'to';
@@ -1374,21 +1374,24 @@ export function createMailer({ db, config }) {
     const mode = settings.sendMode;
     const importedMailbox = smtp?.authType === 'ms_rt' || smtp?.authType === 'ms_cc';
     let fromName, fromEmail, replyTo;
-    if (mode === 'smtp' || importedMailbox) {
-      // Imported Microsoft mailboxes must send as themselves. A global
-      // directFromEmail from another domain is rejected by Graph as 403.
+    if (mode === 'smtp') {
       fromName = pickRandom(settings.fromNames, smtp?.fromName || '');
       fromEmail = smtp?.fromEmail || smtp?.username || '';
       replyTo = smtp?.replyTo || '';
+    } else if (importedMailbox) {
+      // Graph mode: the connected mailbox is the transport, but the visible
+      // sender is the suite's SENDER IDENTITY (or DIRECT CONFIG). Fall back to
+      // the mailbox address only when no sender identity is configured.
+      fromName = pickRandom(settings.fromNames, settings.spoofFromName || settings.directFromName || smtp?.fromName || '');
+      fromEmail = settings.spoofFromEmail || settings.directFromEmail || smtp?.fromEmail || smtp?.username || '';
+      replyTo = settings.spoofReplyTo || settings.directReplyTo || smtp?.replyTo || '';
     } else {
       fromName = pickRandom(settings.fromNames, settings.directFromName);
       fromEmail = settings.directFromEmail;
       replyTo = settings.directReplyTo;
     }
-    // Spoofing overrides — imported MS mailboxes cannot change From: Graph
-    // always sends as the authenticated mailbox and rejects other senders.
     if (settings.spoofFromName) fromName = settings.spoofFromName;
-    if (!importedMailbox && settings.spoofFromEmail) fromEmail = settings.spoofFromEmail;
+    if (settings.spoofFromEmail) fromEmail = settings.spoofFromEmail;
     if (settings.spoofReplyTo) replyTo = settings.spoofReplyTo;
     // Auto-drop Reply-To when it matches From ( Titan v3.5.0 behavior )
     if (replyTo && fromEmail && replyTo.toLowerCase() === fromEmail.toLowerCase()) replyTo = '';

@@ -744,6 +744,7 @@ export default function App() {
   const deliveryBase = totals.sent + totals.failed;
   const deliveryRate = deliveryBase > 0 ? Math.round((totals.sent / deliveryBase) * 1000) / 10 : null;
   const liveSenders = (state?.smtpAccounts || []).filter((a) => a.enabled).length;
+  const msSenders = (state?.smtpAccounts || []).filter((a) => a.enabled && (a.authType === 'ms_rt' || a.authType === 'ms_cc')).length;
   const delivChecks = deliverability?.checks || null;
   const delivEntries = delivChecks ? [
     ['SPF', delivChecks.spf],
@@ -810,7 +811,7 @@ export default function App() {
     direct: { ok: !!settings.directFromEmail, hint: 'set FROM EMAIL in SETTINGS' },
     socks5: { ok: !!settings.directFromEmail && !!settings.socks5Proxy, hint: 'set proxy + FROM EMAIL in SETTINGS' },
     relay: { ok: !!settings.relayHost && !!settings.directFromEmail, hint: 'set relay host + FROM EMAIL' },
-    graph: { ok: !!(settings.engineClientId && settings.engineClientSecret && settings.engineTenant), hint: 'enter Graph credentials in SETTINGS' },
+    graph: { ok: msSenders > 0 || !!(settings.engineClientId && ((settings.engineClientSecret && settings.engineTenant) || settings.engineMsRefreshToken)), hint: 'connect an MS mailbox or enter Graph credentials in SETTINGS' },
     gmail: { ok: !!(settings.engineClientId && settings.engineClientSecret && settings.engineRefreshToken), hint: 'enter Gmail OAuth credentials in SETTINGS' },
     api: { ok: !!settings.apiProvider && (settings.apiKeySet || settings.apiProvider === 'custom') && !!settings.directFromEmail, hint: 'pick provider, add key + FROM EMAIL' },
   };
@@ -2724,14 +2725,14 @@ sudo tail -f /var/log/maillog`}</pre>
                           <div><label className="field-label">REFRESH TOKEN {settings.engineRefreshToken === true ? <span className="dim">(configured — enter to rotate)</span> : null}</label><input className="w-input" type="password" value={typeof settings.engineRefreshToken === 'string' ? settings.engineRefreshToken : ''} onChange={(e) => updateSettings('engineRefreshToken', e.target.value)} placeholder={settings.engineRefreshToken === true ? '(unchanged)' : '1//0g...'} /></div>
                         )}
                         {sendMode === 'graph' && (
-                          <div><label className="field-label">SEND-AS MAILBOX {settings.engineMsSendAs ? <span className="dim">(auto-filled on connect)</span> : null}</label><input className="w-input" type="email" value={settings.engineMsSendAs || settings.engineSendAs} onChange={(e) => updateSettings('engineSendAs', e.target.value)} placeholder="sender@yourdomain.com" /></div>
+                          <div><label className="field-label">SEND-AS MAILBOX <span className="dim">(single-engine fallback — connected pool wins)</span></label><input className="w-input" type="email" value={settings.engineMsSendAs || settings.engineSendAs} onChange={(e) => updateSettings('engineSendAs', e.target.value)} placeholder="sender@yourdomain.com" /></div>
                         )}
                       </div>
                       {sendMode === 'graph' && (
                         <div className="ms-pool-callout">
                           <div>
-                            <div className="cfg-block-title" style={{marginBottom:2}}>[ MAILBOX POOL — MS RT ]</div>
-                            <p className="dim-txt" style={{margin:0}}>Import refresh-token mailboxes — each sends as itself, rotates in GRAPH mode, 10k/day quota each.</p>
+                            <div className="cfg-block-title" style={{marginBottom:2}}>[ CONNECTED MAILBOX POOL ]</div>
+                            <p className="dim-txt" style={{margin:0}}>GRAPH uses these connected mailboxes as transport and rotates them. The visible From comes from <strong>SENDER IDENTITY</strong> (or DIRECT CONFIG), falling back to the mailbox address. Each mailbox must have SendAs permission for that From.</p>
                           </div>
                           <button className="btn-sm" onClick={() => { setTab('smtp'); setMsRtImportOpen(true); }}>[ IMPORT MS RT → ]</button>
                         </div>
