@@ -2665,11 +2665,11 @@ body {
 .contact-count { margin-left: auto; white-space: nowrap; }
 
 .contact-table { table-layout: fixed; }
-.contact-table th:nth-child(1) { width: 30%; }
-.contact-table th:nth-child(2) { width: 20%; }
-.contact-table th:nth-child(3) { width: 18%; }
-.contact-table th:nth-child(4) { width: 12%; }
-.contact-table th:nth-child(5) { width: 20%; }
+.contact-table th:nth-child(1) { width: 26%; }
+.contact-table th:nth-child(2) { width: 18%; }
+.contact-table th:nth-child(3) { width: 16%; }
+.contact-table th:nth-child(4) { width: 14%; }
+.contact-table th:nth-child(5) { width: 26%; }
 .contact-table td { vertical-align: middle; }
 .contact-table .cell-edit { min-width: 0; }
 .contact-table .contact-email { word-break: break-all; }
