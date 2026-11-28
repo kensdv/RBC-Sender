@@ -48,7 +48,7 @@ function LiveConsole({ events, empty }) {
   }, [list.length]);
   return (
     <div className="console" ref={ref}>
-      {list.length === 0 && <div className="console-empty">{empty || '[ AWAITING EVENTS — SENDS, OPENS, CLICKS, BOUNCES STREAM HERE ]'}</div>}
+      {list.length === 0 && <div className="console-empty">{empty || 'Nothing yet — sends, opens and clicks will appear here.'}</div>}
       {list.map((ev, i) => {
         const st = EVENT_STYLE[ev.kind] || EVENT_STYLE.info;
         return (

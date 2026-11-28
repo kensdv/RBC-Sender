@@ -8,3 +8,4 @@ s.json
 comp.mbm
 W3LL Sender/
 *.png
+!client/public/og-cover.png

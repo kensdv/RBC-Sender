@@ -225,18 +225,18 @@ const PLACEHOLDER_GROUPS = [
 
 
 const NAV_ITEMS = [
-  { id: 'dashboard',  label: 'DASHBOARD',   icon: 'dashboard' },
-  { id: 'send',       label: 'CAMPAIGN',    icon: 'send' },
-  { id: 'compose',    label: 'LETTER',      icon: 'compose' },
-  { id: 'aiwriter',   label: 'AI WRITER',   icon: 'aiwriter' },
-  { id: 'recipients', label: 'CONTACTS',    icon: 'recipients' },
-  { id: 'sorter',     label: 'SORTER',      icon: 'sorter' },
-  { id: 'smtp',       label: 'SMTP',        icon: 'smtp' },
-  { id: 'delivery',   label: 'SETTINGS',    icon: 'delivery' },
-  { id: 'schedule',   label: 'SCHEDULE',    icon: 'schedule' },
-  { id: 'bounces',    label: 'BOUNCES',     icon: 'bounces' },
-  { id: 'analytics',  label: 'ANALYTICS',   icon: 'analytics' },
-  { id: 'help',       label: 'HELP',        icon: 'help' },
+  { id: 'dashboard',  label: 'Dashboard',   icon: 'dashboard' },
+  { id: 'send',       label: 'Campaigns',   icon: 'send' },
+  { id: 'compose',    label: 'Letters',     icon: 'compose' },
+  { id: 'aiwriter',   label: 'AI Writer',   icon: 'aiwriter' },
+  { id: 'recipients', label: 'Contacts',    icon: 'recipients' },
+  { id: 'sorter',     label: 'Sorter',      icon: 'sorter' },
+  { id: 'smtp',       label: 'Senders',     icon: 'smtp' },
+  { id: 'delivery',   label: 'Settings',    icon: 'delivery' },
+  { id: 'schedule',   label: 'Schedule',    icon: 'schedule' },
+  { id: 'bounces',    label: 'Suppressions', icon: 'bounces' },
+  { id: 'analytics',  label: 'Analytics',   icon: 'analytics' },
+  { id: 'help',       label: 'Help',        icon: 'help' },
 ];
 
 

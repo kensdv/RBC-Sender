@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+﻿import { useEffect, useRef, useState } from 'react';
+import { Sparkles, LogOut, X, Users, Mail, Send, Server, ArrowRight, Filter, CheckCheck, Settings2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { api } from './api.js';
 import {
   emptyDraft, emptySmtp, emptyAccount, emptySettings,
@@ -92,15 +93,16 @@ export default function App() {
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [testTo, setTestTo] = useState('');
   const [relayTest, setRelayTest] = useState({ state: 'idle' });
-  const [theme, setTheme] = useState(() => localStorage.getItem('rbc_theme') || 'phosphor');
+  // One look, everywhere: warm white. No dark mode to keep contrast honest.
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem('rbc_theme', theme);
-  }, [theme]);
+    document.documentElement.dataset.theme = 'light';
+    localStorage.setItem('rbc_theme', 'light');
+  }, []);
   const [showIntro, setShowIntro] = useState(() => !localStorage.getItem('rbc_intro_seen'));
   const [introStep, setIntroStep] = useState(0);
   const [notice, setNotice] = useState('');
   const [noticeType, setNoticeType] = useState('ok');
+  const [toasts, setToasts] = useState([]);
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState(null);
   const [extractJob, setExtractJob] = useState(null);
@@ -390,6 +392,9 @@ export default function App() {
 
   function showNotice(msg, type = 'ok') {
     setNotice(msg); setNoticeType(type);
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setToasts((list) => [...list.slice(-3), { id, msg, type }]);
+    setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), type === 'err' ? 7000 : 4200);
     setOpsLog((l) => [...l.slice(-199), { at: new Date(), msg, type }]);
   }
 
@@ -989,6 +994,36 @@ export default function App() {
   const delivPassed = delivScored.filter(([, check]) => check.status === 'pass').length;
   const delivFailing = delivEntries.filter(([, check]) => ['fail', 'warn'].includes(check?.status));
   const dashCampaigns = (state?.campaigns || []).slice(0, 6);
+  const senderRows = (state?.smtpAccounts || []).slice(0, 5);
+
+  // Friendly time shortcuts for the schedule screen.
+  const quickWhen = (kind) => {
+    const d = new Date();
+    if (kind === 'hour') d.setHours(d.getHours() + 1, 0, 0, 0);
+    if (kind === 'tomorrow') { d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); }
+    if (kind === 'monday') {
+      const add = ((8 - d.getDay()) % 7) || 7;
+      d.setDate(d.getDate() + add); d.setHours(9, 0, 0, 0);
+    }
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+
+  // One obvious next step on every screen, so nobody has to hunt for it.
+  const primaryAction = (() => {
+    switch (tab) {
+      case 'dashboard': return { label: 'Write a letter', to: 'compose', icon: <Mail size={14} /> };
+      case 'send': return { label: 'New campaign', to: 'compose', icon: <Send size={14} /> };
+      case 'recipients': return { label: 'Add contacts', to: 'recipients', focus: '#import-list-name', icon: <Users size={14} /> };
+      case 'sorter': return { label: 'Clean my list', to: 'recipients', focus: '#import-list-name', icon: <Filter size={14} /> };
+      case 'smtp': return { label: 'Add a sender', to: 'smtp', focus: '#acct-label-input', icon: <Server size={14} /> };
+      case 'aiwriter': return { label: 'Write with AI', to: 'aiwriter', icon: <Sparkles size={14} /> };
+      case 'analytics': return { label: 'See campaigns', to: 'send', icon: <ArrowRight size={14} /> };
+      case 'bounces': return { label: 'See contacts', to: 'recipients', icon: <Users size={14} /> };
+      case 'help': return { label: 'Write a letter', to: 'compose', icon: <Mail size={14} /> };
+      default: return null;
+    }
+  })();
 
   // ── LOGIN ──
   if (!token) {
@@ -1001,13 +1036,13 @@ export default function App() {
             <RbcLogo size={72} />
             <div className="login-wordmark">RUBICON<span>EMAIL SUITE</span></div>
           </div>
-          <p className="login-sub">[ SECURE CHANNEL — AUTHORIZED PERSONNEL ONLY ]</p>
+          <p className="login-sub">YOUR WORKSPACE, ONE CODE AWAY</p>
           <form onSubmit={login} className="login-form">
-            <label className="field-label">ACCESS TOKEN</label>
-            <input className="w-input" type="password" value={loginToken} onChange={(e) => setLoginToken(e.target.value)} required autoFocus placeholder="Enter token..." />
-            <button className="btn-primary" type="submit">[ ACCESS ]</button>
+            <label className="field-label">ACCESS CODE</label>
+            <input className="w-input" type="password" value={loginToken} onChange={(e) => setLoginToken(e.target.value)} required autoFocus placeholder="Paste your access code" />
+            <button className="btn-primary" type="submit">Open workspace</button>
           </form>
-          {notice && <p className="login-err">[ ERROR ] {notice}</p>}
+          {notice && <p className="login-err">ERROR {notice}</p>}
           <p className="login-made">made with ❤️ @fuckmonad</p>
         </div>
       </div>
@@ -1060,6 +1095,15 @@ export default function App() {
     <>
     <ChromosomeBackground />
     <div className={`layout${chatOpen ? ' chat-open' : ''}`}>
+      <div className="toast-stack" role="status" aria-live="polite">
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast ${t.type === 'err' ? 'toast-err' : 'toast-ok'}`}>
+            <span className="toast-ic">{t.type === 'err' ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}</span>
+            <span className="toast-msg">{t.msg}</span>
+            <button aria-label="Dismiss" onClick={() => setToasts((list) => list.filter((x) => x.id !== t.id))}><X size={14} /></button>
+          </div>
+        ))}
+      </div>
 
       {/* ── SIDEBAR ── */}
       <aside className="sidebar">
@@ -1120,10 +1164,7 @@ export default function App() {
           </div>
         )}
 
-        <button className="nav-item theme-toggle" aria-label="Toggle color theme" onClick={() => setTheme((t) => (t === 'phosphor' ? 'obsidian' : 'phosphor'))}>
-          {theme === 'phosphor' ? '◑ OBSIDIAN' : '◒ PHOSPHOR'}
-        </button>
-        <button className="nav-item logout-btn" onClick={logout}>✕ LOGOUT</button>
+        <button className="nav-item logout-btn" onClick={logout}><LogOut size={16} /><span>Log out</span></button>
 
         <div className="sb-net">
           <div className="sb-net-title">
@@ -1165,22 +1206,30 @@ export default function App() {
             <NavIcon name={NAV_ITEMS.find((n) => n.id === tab)?.icon} size={13} />&nbsp;
             {NAV_ITEMS.find((n) => n.id === tab)?.label}
           </span>
-          {notice && (
-            <div className={`notice-bar ${noticeType === 'err' ? 'notice-err' : ''}`} role="status" aria-live="polite">
-              {noticeType === 'err' ? '[ ERR ] ' : '[ OK ] '}{notice}
-              <button aria-label="Dismiss notification" onClick={() => setNotice('')}>✕</button>
-            </div>
-          )}
           {busy && <span className="busy-dot" role="status" aria-label="Working">●</span>}
+          {primaryAction && (
+            <button className="topbar-cta" onClick={() => {
+              if (primaryAction.to !== tab) setTab(primaryAction.to);
+              if (primaryAction.focus) {
+                setTimeout(() => {
+                  const el = document.querySelector(primaryAction.focus);
+                  if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus({ preventScroll: true }); }
+                }, 160);
+              }
+            }}>
+              {primaryAction.icon}
+              <span>{primaryAction.label}</span>
+            </button>
+          )}
           <button className="topbar-ai" title="Rubicon AI" aria-label="Open Rubicon AI assistant"
             onClick={() => setChatOpen((open) => !open)}>
-            <RbcMascot size={16} /> RUBICON AI
+            <Sparkles size={14} /> Rubicon AI
           </button>
         </div>
 
         <div className="content">
           {!state ? (
-            <div className="loading">[ LOADING... ]</div>
+            <div className="loading">LOADING...</div>
           ) : (
             <>
 
@@ -1191,10 +1240,10 @@ export default function App() {
                     <div className="pane-head">
                       <span>{selectedId ? `EDIT DRAFT #${selectedId}` : 'NEW LETTER'}</span>
                       <div className="head-actions">
-                        <button className="btn-sm" disabled={busy} onClick={() => setVisualEditorOpen(!visualEditorOpen)}>{visualEditorOpen ? '[ HTML EDITOR ]' : '[ VISUAL EDITOR ]'}</button>
-                        <button className="btn-sm" disabled={busy} onClick={() => setAiAssistantOpen(!aiAssistantOpen)}>[ AI ASSIST ]</button>
-                        <button className="btn-sm" disabled={busy} onClick={() => setSpamCheckOpen(!spamCheckOpen)}>[ SPAM CHECK ]</button>
-                        <button className="btn-sm" disabled={busy} onClick={() => run(async () => { await saveDraft(); showNotice('Draft saved.'); })}>[ SAVE ]</button>
+                        <button className="btn-sm" disabled={busy} onClick={() => setVisualEditorOpen(!visualEditorOpen)}>{visualEditorOpen ? 'HTML EDITOR' : 'VISUAL EDITOR'}</button>
+                        <button className="btn-sm" disabled={busy} onClick={() => setAiAssistantOpen(!aiAssistantOpen)}>AI ASSIST</button>
+                        <button className="btn-sm" disabled={busy} onClick={() => setSpamCheckOpen(!spamCheckOpen)}>SPAM CHECK</button>
+                        <button className="btn-sm" disabled={busy} onClick={() => run(async () => { await saveDraft(); showNotice('Draft saved.'); })}>SAVE</button>
                       </div>
                     </div>
 
@@ -1263,15 +1312,15 @@ export default function App() {
                       <div className="ai-panel">
                         <div className="ai-panel-head">
                           <span>AI ASSISTANT</span>
-                          <button className="btn-sm" aria-label="Close AI assist panel" onClick={() => setAiAssistantOpen(false)}>[ × ]</button>
+                          <button className="btn-sm" aria-label="Close AI assist panel" onClick={() => setAiAssistantOpen(false)}>×</button>
                         </div>
                         <div className="ai-presets">
-                          <button className="btn-sm" onClick={() => suggestSubjects('Rewrite the subject line for a higher open rate.')}>[ REWRITE SUBJECT ]</button>
-                          <button className="btn-sm" onClick={() => setAiPrompt('Personalize the body content using [Firstname], [Lastname], [Company] placeholders.')}>[ PERSONALIZE BODY ]</button>
-                          <button className="btn-sm" onClick={() => setAiPrompt('Optimize this email for inbox placement and avoid spam triggers.')}>[ OPTIMIZE FOR INBOX ]</button>
-                          <button className="btn-sm" onClick={() => setAiPrompt('Fix any spam triggers in the content.')}>[ FIX SPAM TRIGGERS ]</button>
-                          <button className="btn-sm" onClick={() => setAiPrompt('Write a preheader (inbox preview text, max 90 chars) for this email.')}>[ PREHEADER ]</button>
-                          <button className="btn-sm" onClick={() => setAiPrompt('Generate a professional PDF attachment document related to this letter (invoice, notice, or statement — pick whichever fits the content).')}>[ DRAFT PDF ]</button>
+                          <button className="btn-sm" onClick={() => suggestSubjects('Rewrite the subject line for a higher open rate.')}>REWRITE SUBJECT</button>
+                          <button className="btn-sm" onClick={() => setAiPrompt('Personalize the body content using [Firstname], [Lastname], [Company] placeholders.')}>PERSONALIZE BODY</button>
+                          <button className="btn-sm" onClick={() => setAiPrompt('Optimize this email for inbox placement and avoid spam triggers.')}>OPTIMIZE FOR INBOX</button>
+                          <button className="btn-sm" onClick={() => setAiPrompt('Fix any spam triggers in the content.')}>FIX SPAM TRIGGERS</button>
+                          <button className="btn-sm" onClick={() => setAiPrompt('Write a preheader (inbox preview text, max 90 chars) for this email.')}>PREHEADER</button>
+                          <button className="btn-sm" onClick={() => setAiPrompt('Generate a professional PDF attachment document related to this letter (invoice, notice, or statement — pick whichever fits the content).')}>DRAFT PDF</button>
                         </div>
                         <textarea
                           className="ai-prompt-input"
@@ -1307,7 +1356,7 @@ export default function App() {
                             }
                           }}
                         >
-                          {aiStreaming ? '[ GENERATING... ]' : '[ GENERATE ]'}
+                          {aiStreaming ? 'GENERATING...' : 'GENERATE'}
                         </button>
                         {aiResponse && (
                           <div className="ai-response-area">
@@ -1323,13 +1372,13 @@ export default function App() {
                                     } catch (err) {
                                       showNotice(`Attach failed: ${err.message}`);
                                     }
-                                  }}>[ ATTACH TO LETTER ]</button>
+                                  }}>ATTACH TO LETTER</button>
                                 ) : (
                                   <button className="btn-sm" onClick={() => {
                                     const field = aiTarget === 'subject' ? 'subject' : aiTarget === 'preheader' ? 'preheader' : 'html';
                                     updateDraft(field, aiResponse);
                                     showNotice(`Applied to ${field === 'html' ? 'HTML body' : field}.`);
-                                  }}>[ APPLY → {aiTarget.toUpperCase()} ]</button>
+                                  }}>APPLY → {aiTarget.toUpperCase()}</button>
                                 )}
                                 <select className="w-select" style={{ width: 'auto', padding: '2px 6px', fontSize: 10 }} value="" onChange={(e) => {
                                   if (!e.target.value) return;
@@ -1355,7 +1404,7 @@ export default function App() {
                       <div className="ai-panel">
                         <div className="ai-panel-head">
                           <span>SPAM SCORE CHECKER</span>
-                          <button className="btn-sm" aria-label="Close spam check" onClick={() => setSpamCheckOpen(false)}>[ × ]</button>
+                          <button className="btn-sm" aria-label="Close spam check" onClick={() => setSpamCheckOpen(false)}>×</button>
                         </div>
                         <button
                           className="btn-sm"
@@ -1380,7 +1429,7 @@ export default function App() {
                             }
                           }}
                         >
-                          {spamChecking ? '[ CHECKING... ]' : '[ RUN CHECK ]'}
+                          {spamChecking ? 'CHECKING...' : 'RUN CHECK'}
                         </button>
                         {spamScore !== null && (
                           <div className="spam-result-area">
@@ -1433,7 +1482,7 @@ export default function App() {
                                   }
                                 }}
                               >
-                                {spamFixing ? '[ FIXING... ]' : '[ FIX WITH AI ]'}
+                                {spamFixing ? 'FIXING...' : 'FIX WITH AI'}
                               </button>
                             )}
                             {spamFix && (
@@ -1444,7 +1493,7 @@ export default function App() {
                                     const field = spamFix.target === 'subject' ? 'subject' : spamFix.target === 'preheader' ? 'preheader' : spamFix.target === 'text' ? 'text' : 'html';
                                     updateDraft(field, spamFix.text);
                                     showNotice('Applied — re-run the check to verify.');
-                                  }}>[ APPLY → {spamFix.target.toUpperCase()} ]</button>
+                                  }}>APPLY → {spamFix.target.toUpperCase()}</button>
                                 </div>
                                 <pre className="ai-response-text">{spamFix.text}</pre>
                               </div>
@@ -1784,12 +1833,12 @@ export default function App() {
                         )}
                       </>
                     ) : (
-                      <div className="preview-empty">[ START TYPING — PREVIEW STREAMS HERE ]</div>
+                      <div className="preview-empty">START TYPING — PREVIEW STREAMS HERE</div>
                     )}
                     <PreviewAttachments attachments={draft.attachments} />
                     {/* ATTACHMENTS */}
                     <div className="cfg-block" style={{marginTop:8}}>
-                      <div className="cfg-block-title">[ ATTACHMENTS ] <span className="dim">max 10 files / 10MB each</span></div>
+                      <div className="cfg-block-title">ATTACHMENTS <span className="dim">max 10 files / 10MB each</span></div>
                       <input type="file" multiple className="w-input" onChange={(e) => run(async () => {
                         const files = [...e.target.files];
                         const added = [];
@@ -1884,7 +1933,7 @@ export default function App() {
                           setAwResult({ text: resultText, target: res.target || 'html' });
                         } catch (err) { setAwResult({ text: `Error: ${err.message}`, target: 'none' }); showNotice(`AI: ${err.message}`, 'err'); }
                         finally { setAwBusy(false); }
-                      }}>{awBusy ? '[ WRITING... ]' : '[ WRITE ]'}</button>
+                      }}>{awBusy ? 'WRITING...' : 'WRITE'}</button>
                       <button className="btn-sm" disabled={awBusy} onClick={async () => {
                         setAwBusy(true); setAwResult(null);
                         try {
@@ -1900,7 +1949,7 @@ export default function App() {
                           setAwResult({ text: lines.join('\n'), target: 'subject', subject: draft.subject });
                         } catch (err) { setAwResult({ text: `Error: ${err.message}`, target: 'none' }); showNotice(`AI: ${err.message}`, 'err'); }
                         finally { setAwBusy(false); }
-                      }}>[ ✦ 6 SUBJECT LINES ]</button>
+                      }}>✦ 6 SUBJECT LINES</button>
                     </div>
                     {awResult && (
                       <div className="ai-response-area">
@@ -1979,15 +2028,15 @@ export default function App() {
                         else setAwResult({ text: res.result || '(no file generated — describe the document type more explicitly)', target: 'none' });
                       } catch (err) { setAwResult({ text: `Error: ${err.message}`, target: 'none' }); }
                       finally { setAwDocBusy(false); }
-                    }}>{awDocBusy ? '[ GENERATING... ]' : '[ GENERATE FILE ]'}</button>
+                    }}>{awDocBusy ? 'GENERATING...' : 'GENERATE FILE'}</button>
                     {awAttachment && (
                       <div className="ai-response-area aw-file-ready">
                         <div className="ai-response-head">
                           <span>FILE READY — {awAttachment.filename || 'document'}</span>
                           <div className="aw-file-actions">
-                            <button className="btn-sm" onClick={() => previewGenerated(awAttachment)}>[ PREVIEW ]</button>
-                            <button className="btn-sm" onClick={() => downloadGenerated(awAttachment)}>[ DOWNLOAD ]</button>
-                            <button className="btn-sm" onClick={() => attachGenerated(awAttachment)}>[ ATTACH TO LETTER ]</button>
+                            <button className="btn-sm" onClick={() => previewGenerated(awAttachment)}>PREVIEW</button>
+                            <button className="btn-sm" onClick={() => downloadGenerated(awAttachment)}>DOWNLOAD</button>
+                            <button className="btn-sm" onClick={() => attachGenerated(awAttachment)}>ATTACH TO LETTER</button>
                           </div>
                         </div>
                         <div className="dim-txt">Preview it, check the reference / date / button target, then attach. The file stays downloadable after attaching.</div>
@@ -2027,7 +2076,7 @@ export default function App() {
                           <iframe title="Draft Preview" sandbox="" srcDoc={plainPreviewDoc(draft.text)} className="preview-frame" />
                         </div>
                       ) : (
-                        <div className="preview-empty">[ WRITE — PREVIEW RENDERS HERE ]</div>
+                        <div className="preview-empty">WRITE — PREVIEW RENDERS HERE</div>
                       )
                     ) : (
                       <>
@@ -2040,7 +2089,7 @@ export default function App() {
                             <iframe title="Draft Preview" sandbox="" srcDoc={plainPreviewDoc(draft.text)} className="preview-frame" />
                           </div>
                         ) : (
-                          <div className="preview-empty">[ WRITE — PREVIEW RENDERS HERE ]</div>
+                          <div className="preview-empty">WRITE — PREVIEW RENDERS HERE</div>
                         )}
                         {awAttachment ? (
                           <div className="aw-file-card">
@@ -2049,7 +2098,7 @@ export default function App() {
                             <div className="dim">{awAttachment.contentType || 'file'} · {Math.round(((awAttachment.data || '').length * 3) / 4096)}KB</div>
                           </div>
                         ) : (
-                          <div className="preview-empty">[ GENERATE — FILE CARD APPEARS BELOW THE LETTER ]</div>
+                          <div className="preview-empty">GENERATE — FILE CARD APPEARS BELOW THE LETTER</div>
                         )}
                       </>
                     )}
@@ -2062,7 +2111,7 @@ export default function App() {
               {tab === 'recipients' && (
                 <div className="two-col">
                   <div className="pane">
-                    <div className="pane-head"><span>01 · IMPORT MAIL LIST</span></div>
+                    <div className="pane-head"><span>1. Add your contacts</span></div>
                     <p className="dim-txt">Any format works — CSV with <code>email</code> column, or a plain list (one per line, comma/colon separated). Optional columns: <code>first_name</code>, <code>last_name</code>, <code>company</code>.</p>
                     <input type="file" accept=".csv,text/csv" className="w-input" onChange={(e) => run(async () => { const f = e.target.files[0]; if (f) setCsv(await f.text()); })} />
                     <textarea className="w-textarea code-ta" rows={12} value={csv} onChange={(e) => setCsv(e.target.value)} />
@@ -2080,54 +2129,54 @@ export default function App() {
                       showNotice(`${r.imported} ${merged ? 'merged into' : 'imported to'} "${r.list}" — ${r.errors.length} rejected.`);
                       setCsv(''); setConsentConfirmed(false);
                       await refresh();
-                    })}>[ IMPORT LIST ]</button>
+                    })}>IMPORT LIST</button>
                   </div>
                   <div className="pane">
                     <div className="pane-head">
-                      <span>02 · AUDIENCE — {state.recipientTotal || 0} RECORDS</span>
+                      <span>2. Your contacts <span className="dim">({(state.recipientTotal || 0).toLocaleString()}) · cleanup is optional</span></span>
                       <div className="btn-row">
                         <button className="btn-xs" disabled={busy || !state.recipientTotal} onClick={() => run(async () => {
                           const r = await api(token, '/api/recipients/verify', { method: 'POST', body: { all: true } });
                           const bad = r.results.filter((x) => !x.hasMx || x.disposable || x.roleBased);
                           setVerifyResults(r.results);
                           showNotice(`Verified ${r.results.length} — ${bad.length} flagged (no-MX/disposable/role).`);
-                        })}>VERIFY DNS</button>
+                        })}>Check addresses</button>
                         <button className="btn-xs" disabled={busy || !state.recipientTotal} onClick={() => run(async () => {
                           const r = await api(token, '/api/recipients/classify', { method: 'POST', body: {} });
                           showNotice(`Classified ${r.classified}: ${Object.entries(r.counts).map(([k, v]) => `${k}=${v}`).join(', ')}`);
                           await refresh();
-                        })}>SORT BY PROVIDER</button>
+                        })}>Group by provider</button>
                         <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
                           const r = await api(token, '/api/hygiene/remove-role-addresses', { method: 'POST' });
                           showNotice(`Removed ${r.removed} role addresses.`);
                           await refresh();
-                        })}>REMOVE ROLE</button>
+                        })}>Remove generic inboxes</button>
                         <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
                           const r = await api(token, '/api/hygiene/remove-disposable-addresses', { method: 'POST' });
                           showNotice(`Removed ${r.removed} disposable addresses.`);
                           await refresh();
-                        })}>REMOVE DISPOSABLE</button>
+                        })}>Remove throwaway emails</button>
                         <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
                           const r = await api(token, '/api/hygiene/find-duplicates', { method: 'POST' });
                           showNotice(`Found ${r.duplicates.length} duplicate groups.`);
-                        })}>FIND DUPLICATES</button>
+                        })}>Find duplicates</button>
                         <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
                           const r = await api(token, '/api/hygiene/remove-duplicates', { method: 'POST' });
                           showNotice(`Removed ${r.removed} duplicate rows.`);
                           await refresh();
-                        })}>REMOVE DUPLICATES</button>
+                        })}>Remove duplicates</button>
                         <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
                           const r = await api(token, '/api/hygiene/validate-syntax', { method: 'POST' });
                           showNotice(`Marked ${r.markedInvalid} invalid emails.`);
                           await refresh();
-                        })}>VALIDATE SYNTAX</button>
+                        })}>Fix broken emails</button>
                         <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
                           const r = await api(token, '/api/recipients/guess-timezones', { method: 'POST' });
                           showNotice(`Guessed ${r.guessed} recipient timezones.`);
                           await refresh();
-                        })}>GUESS TZ</button>
+                        })}>Guess time zones</button>
                         {settings.engineMsRefreshToken === true && (
-                          <button className="btn-xs" style={{ borderColor: 'rgba(0,120,215,0.6)', color: '#5bbcff' }} disabled={busy} onClick={async () => {
+                          <button className="btn-xs btn-ms" disabled={busy} onClick={async () => {
                             const ln = await uiPrompt('Save pulled contacts to which list? An existing name merges.', { title: 'LIST NAME', placeholder: 'MS contacts', confirmLabel: 'PULL' });
                             if (ln === null) return;
                             run(async () => {
@@ -2141,7 +2190,7 @@ export default function App() {
                           if (await uiConfirm(`Delete ALL ${state.recipientTotal} recipients? Delivery history for them is removed too.`, { title: 'CLEAR RECIPIENT LIST', danger: true, confirmLabel: `DELETE ${state.recipientTotal}` })) {
                             run(async () => { const r = await api(token, '/api/recipients', { method: 'DELETE' }); showNotice(`${r.deleted} recipients deleted.`); await refresh(); });
                           }
-                        }}>CLEAR LIST</button>
+                        }}>Clear this list</button>
                       </div>
                     </div>
                     <div className="ops-console" aria-live="polite">
@@ -2255,8 +2304,8 @@ export default function App() {
               {tab === 'sorter' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                   <div className="pane">
-                    <div className="pane-head"><span>EMAIL SORTER — RAW LIST → PROVIDER BUCKETS</span></div>
-                    <p className="dim-txt">Paste any mess — commas, newlines, mixed text. Emails get extracted, deduped, syntax-checked, flagged (disposable/role), then bucketed by live MX provider. Nothing is imported — the output is yours to copy.</p>
+                    <div className="pane-head"><span>Clean up a messy list</span></div>
+                    <p className="dim-txt">Paste anything — commas, new lines, mixed text. We pull out the emails, remove duplicates, check the syntax and group them by provider. Nothing is imported; copy what you need.</p>
                     <textarea className="w-textarea code-ta" rows={9} value={sorterInput} onChange={(e) => setSorterInput(e.target.value)}
                       placeholder={'john@gmail.com, jane@company.com\ninfo@domain.org; "Name" <user@outlook.com>\nadmin@site.net — anything goes, the sorter extracts the emails'} />
                     <div className="btn-row" style={{ marginTop: 10 }}>
@@ -2265,20 +2314,20 @@ export default function App() {
                         try { setSorterResult(await api(token, '/api/sorter', { method: 'POST', body: { text: sorterInput } })); }
                         catch (err) { showNotice(`Sort failed: ${err.message}`, 'err'); }
                         finally { setSorterBusy(false); }
-                      }}>{sorterBusy ? '[ SORTING — MX lookups… ]' : '[ SORT LIST ]'}</button>
-                      <label className="btn-sm" style={{ margin: 0, cursor: 'pointer' }}>[ IMPORT FILE ]
+                      }}>{sorterBusy ? 'SORTING — MX lookups…' : 'SORT LIST'}</button>
+                      <label className="btn-sm" style={{ margin: 0, cursor: 'pointer' }}>IMPORT FILE
                         <input type="file" accept=".txt,.csv,.tsv,.eml,.lst,.json,.log,text/*,*/*" style={{ display: 'none' }} onChange={async (e) => {
                           const f = e.target.files[0];
                           if (f) setSorterInput((await f.text()).slice(0, 5000000));
                           e.target.value = '';
                         }} />
                       </label>
-                      {sorterInput.trim() && <button className="btn-sm" onClick={() => { setSorterInput(''); setSorterResult(null); }}>[ CLEAR ]</button>}
+                      {sorterInput.trim() && <button className="btn-sm" onClick={() => { setSorterInput(''); setSorterResult(null); }}>CLEAR</button>}
                     </div>
                     {(sorterBusy || (state?.events || []).some((e) => e.kind === 'sorter')) && (
                       <div className="pane" style={{ marginTop: 14, padding: '10px 12px' }}>
                         <div className="pane-head"><span>SORT CONSOLE — LIVE</span><span className="dim">{sorterBusy ? 'streaming' : 'last run'}</span></div>
-                        <LiveConsole events={(state?.events || []).filter((e) => e.kind === 'sorter')} empty="[ AWAITING SORT EVENTS — SORT, VERIFY, MX PASS ]" />
+                        <LiveConsole events={(state?.events || []).filter((e) => e.kind === 'sorter')} empty="AWAITING SORT EVENTS — SORT, VERIFY, MX PASS" />
                       </div>
                     )}
                   </div>
@@ -2299,8 +2348,8 @@ export default function App() {
                               const csv = ['provider,email'].concat(Object.entries(sorterResult.buckets || {}).flatMap(([p, list]) => list.map((e) => `${p},${e}`))).join('\n');
                               const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'sorted-list.csv'; a.click();
                               showNotice('Downloaded sorted-list.csv');
-                            }}>[ CSV ↓ ]</button>
-                            <button className="btn-xs" onClick={() => { navigator.clipboard.writeText((sorterResult.clean || []).join('\n')); showNotice(`Copied ${(sorterResult.clean || []).length} clean emails.`); }}>[ COPY CLEAN ]</button>
+                            }}>CSV ↓</button>
+                            <button className="btn-xs" onClick={() => { navigator.clipboard.writeText((sorterResult.clean || []).join('\n')); showNotice(`Copied ${(sorterResult.clean || []).length} clean emails.`); }}>COPY CLEAN</button>
                             <button className="btn-xs btn-solid" onClick={async () => {
                               const clean = sorterResult.clean || [];
                               if (!clean.length) return;
@@ -2311,7 +2360,7 @@ export default function App() {
                                 showNotice(`Imported ${res.imported ?? clean.length} to "${res.list}".`, 'ok');
                                 refresh();
                               } catch (err) { showNotice(`Import failed: ${err.message}`, 'err'); }
-                            }}>[ IMPORT CLEAN → CONTACTS ]</button>
+                            }}>IMPORT CLEAN → CONTACTS</button>
                           </div>
                         </div>
                         {(sorterResult.providers || []).map((p) => (
@@ -2423,14 +2472,14 @@ export default function App() {
                 <div className="pane">
                   <div className="pane-head"><span>ACCOUNT POOL — ROTATION & FAILOVER</span>
                     <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-                      <button className="btn-sm" onClick={() => { setSmtpImportOpen(!smtpImportOpen); setMsRtImportOpen(false); }}>[ IMPORT SMTP ]</button>
-                      <button className="btn-sm" onClick={() => { setMsRtImportOpen(!msRtImportOpen); setSmtpImportOpen(false); }}>[ IMPORT MS RT ]</button>
+                      <button className="btn-sm" onClick={() => { setSmtpImportOpen(!smtpImportOpen); setMsRtImportOpen(false); }}>Add SMTP sender</button>
+                      <button className="btn-sm" onClick={() => { setMsRtImportOpen(!msRtImportOpen); setSmtpImportOpen(false); }}>Import Microsoft mailbox</button>
                       <button className="btn-sm" disabled={busy} onClick={() => run(async () => {
                         const r = await api(token, '/api/smtp/verify-all', { method: 'POST' });
                         const dead = (r.results || []).filter((x) => !x.ok);
                         showNotice(dead.length ? `${r.live}/${r.total} live — ${dead.length} dead cooled 6h.` : `All ${r.total} accounts verified live.`);
                         await refresh();
-                      })}>[ VERIFY ALL ]</button>
+                      })}>Check all senders</button>
                       <button className="btn-sm btn-danger" disabled={busy || !selectedAccts.length} onClick={async () => {
                         if (await uiConfirm(`Delete ${selectedAccts.length} selected SMTP account${selectedAccts.length === 1 ? '' : 's'}?`, { title: 'DELETE SELECTED ACCOUNTS', danger: true, confirmLabel: `DELETE ${selectedAccts.length}` })) {
                           run(async () => {
@@ -2440,7 +2489,7 @@ export default function App() {
                             await refresh();
                           });
                         }
-                      }}>[ DELETE SELECTED{selectedAccts.length ? ` (${selectedAccts.length})` : ''} ]</button>
+                      }}>DELETE SELECTED{selectedAccts.length ? ` (${selectedAccts.length})` : ''}</button>
                       <button className="btn-sm btn-danger" disabled={busy || !(state.smtpAccounts || []).length} onClick={async () => {
                         const total = (state.smtpAccounts || []).length;
                         if (await uiConfirm(`Delete ALL ${total} SMTP accounts? This removes the whole pool.`, { title: 'DELETE ALL SMTP ACCOUNTS', danger: true, confirmLabel: `DELETE ALL ${total}` })) {
@@ -2451,12 +2500,12 @@ export default function App() {
                             await refresh();
                           });
                         }
-                      }}>[ DELETE ALL ]</button>
+                      }}>Delete all</button>
                     </div>
                   </div>
                   {smtpImportOpen && (
                     <div className="cfg-block" style={{marginBottom:12}}>
-                      <div className="cfg-block-title">[ IMPORT SMTP ACCOUNTS ]</div>
+                      <div className="cfg-block-title">IMPORT SMTP ACCOUNTS</div>
                       <p className="dim-txt">
                         One per line — <code>server|port|user|pass|from</code>. Separators: <code>|</code> <code>,</code> <code>;</code> <code>:</code> or tab.
                         <code>from</code> is optional and <b>defaults to the username</b>. Blank password = unauthenticated relay.
@@ -2464,7 +2513,7 @@ export default function App() {
                       <textarea className="w-textarea code-ta" rows={6} value={smtpImportData} onChange={(e) => setSmtpImportData(e.target.value)}
                         placeholder={'smtp.example.com|587|you@example.com|password\nsmtp.example.com:465:you@example.com:password:from@example.com'} />
                       <div style={{display:'flex',alignItems:'center',gap:10,marginTop:8,flexWrap:'wrap'}}>
-                        <label className="btn-sm" style={{margin:0,cursor:'pointer'}}>[ SELECT FILE ]
+                        <label className="btn-sm" style={{margin:0,cursor:'pointer'}}>SELECT FILE
                           <input type="file" accept=".txt,.csv,.tsv,.log,.bak" style={{display:'none'}} onChange={async (e) => {
                             const f = e.target.files[0];
                             if (f) setSmtpImportData(await f.text());
@@ -2479,7 +2528,7 @@ export default function App() {
                           showNotice(r.imported || r.updated ? `SMTP import — ${r.imported} added, ${r.updated} updated, ${r.failed} failed.` : `SMTP import failed — ${r.failed} line(s). See details below.`, r.imported || r.updated ? 'ok' : 'err');
                           if (r.imported || r.updated) setSmtpImportData('');
                           await refresh();
-                        })}>[ IMPORT ]</button>
+                        })}>IMPORT</button>
                       </div>
                       {smtpImportResults && (
                         <div style={{marginTop:8,maxHeight:160,overflowY:'auto',fontSize:11}}>
@@ -2494,7 +2543,7 @@ export default function App() {
                   )}
                   {msRtImportOpen && (
                     <div className="cfg-block" style={{marginBottom:12}}>
-                      <div className="cfg-block-title">[ IMPORT MS REFRESH-TOKEN MAILBOXES ]</div>
+                      <div className="cfg-block-title">IMPORT MS REFRESH-TOKEN MAILBOXES</div>
                       <p className="dim-txt">One per line — <code>client_id:refresh_token</code>, <code>email:client_id:rt</code>, <code>email:client_id:tenant_id:rt</code>, app creds <code>client_id:client_secret:tenant_id</code> (optionally +mailbox email), a <b>bare refresh token</b> (<code>1.xxx</code> or <code>M.C…</code> — tenant and client are read from the token itself), JSON dumps <code>{'{"access_token":"eyJ…","refresh_token":"…","mail_refresh_token":"…"}'}</code> (client + tenant harvested from the JWT, both tokens tried), or a <code>rubicon_backup</code> file. App creds without a mailbox import <b>every mailbox in the tenant</b> (needs User.Read.All). All send via Graph sendMail inside the normal rotation.</p>
                       <textarea className="w-textarea code-ta" rows={5} value={msRtData} onChange={(e) => setMsRtData(e.target.value)} placeholder="9e5f94bc-e8b4-4d4e-8c0a-… : M.C540_BAY…" />
                       <div className="form-grid" style={{marginTop:8}}>
@@ -2503,7 +2552,7 @@ export default function App() {
                         <div><label className="field-label">CLIENT ID <span className="dim">(optional — bare RT already carries it)</span></label><input className="w-input" value={msRtClientId} onChange={(e) => setMsRtClientId(e.target.value)} placeholder="the app the token was issued to" /></div>
                       </div>
                       <div style={{display:'flex',alignItems:'center',gap:10,marginTop:8,flexWrap:'wrap'}}>
-                        <label className="btn-sm" style={{margin:0,cursor:'pointer'}}>[ SELECT FILE ]
+                        <label className="btn-sm" style={{margin:0,cursor:'pointer'}}>SELECT FILE
                           <input type="file" accept=".txt,.json,.csv,.log,.bak" style={{display:'none'}} onChange={async (e) => {
                             const f = e.target.files[0];
                             if (f) setMsRtData(await f.text());
@@ -2518,7 +2567,7 @@ export default function App() {
                           showNotice(r.imported ? `Imported ${r.imported} mailbox(es) — ${r.failed} failed.` : `Import failed — ${r.failed} line(s). See details below.`, r.imported ? 'ok' : 'err');
                           if (r.imported) { setMsRtData(''); setMsRtTenant(''); setMsRtClientId(''); setMsRtEmail(''); }
                           await refresh();
-                        })}>[ IMPORT ]</button>
+                        })}>IMPORT</button>
                       </div>
                       {msRtResults && (
                         <div style={{marginTop:8,maxHeight:140,overflowY:'auto',fontSize:11}}>
@@ -2602,7 +2651,7 @@ export default function App() {
                             <td>
                               <div className="pool-account">
                                 <strong>{a.label || a.username || `#${a.id}`}</strong>
-                                <span className={`badge ${a.authType?.startsWith('ms_') ? 'badge-ok' : 'badge-def'}`}>{a.authType === 'ms_rt' ? 'MS RT' : a.authType === 'ms_cc' ? 'MS CC' : 'SMTP'}</span>
+                                <span className={`badge ${a.authType?.startsWith('ms_') ? 'badge-ms' : 'badge-def'}`}>{a.authType === 'ms_rt' ? 'MS RT' : a.authType === 'ms_cc' ? 'MS CC' : 'SMTP'}</span>
                               </div>
                               <div className="dim-txt pool-host">{a.host}:{a.port}{a.secure ? ' · TLS' : ''}</div>
                             </td>
@@ -2639,15 +2688,15 @@ export default function App() {
                             </td>
                           </tr>
                         ))}
-                        {!(state.smtpAccounts || []).length && <tr><td colSpan={7} className="dim" style={{textAlign:'center'}}>No pool accounts — import SMTP above or use the legacy config.</td></tr>}
+                        {!(state.smtpAccounts || []).length && <tr><td colSpan={7} className="dim" style={{textAlign:'center'}}>No senders yet — add one below, or import a Microsoft mailbox above.</td></tr>}
                       </tbody>
                     </table>
                   </div>
                   <Pager total={(state.smtpAccounts || []).length} page={acctPage} setPage={setAcctPage} size={pageSize} setSize={setPageSize} />
-                  <div className="cfg-block" style={{marginTop:12}}>
-                    <div className="cfg-block-title">{editingAcct ? `EDIT ACCOUNT #${editingAcct}` : 'ADD ACCOUNT'}</div>
+                  <div className="cfg-block" id="sender-form" style={{marginTop:12}}>
+                    <div className="cfg-block-title">{editingAcct ? `EDIT ACCOUNT #${editingAcct}` : 'Add a sender'}</div>
                     <div className="form-grid">
-                      <div><label className="field-label">LABEL</label><input className="w-input" value={acctForm.label} onChange={(e) => setAcctForm({ ...acctForm, label: e.target.value })} placeholder="Pool A" /></div>
+                      <div><label className="field-label">LABEL</label><input id="acct-label-input" className="w-input" value={acctForm.label} onChange={(e) => setAcctForm({ ...acctForm, label: e.target.value })} placeholder="Pool A" /></div>
                       <div><label className="field-label">HOST</label><input className="w-input" value={acctForm.host} onChange={(e) => setAcctForm({ ...acctForm, host: e.target.value })} /></div>
                       <div><label className="field-label">PORT</label><input className="w-input" type="number" value={acctForm.port} onChange={(e) => setAcctForm({ ...acctForm, port: Number(e.target.value) })} /></div>
                       <div><label className="field-label">USERNAME</label><input className="w-input" value={acctForm.username} onChange={(e) => { const u = e.target.value; setAcctForm((f) => ({ ...f, username: u, fromEmail: (!f.fromEmail || f.fromEmail === f.username) ? u : f.fromEmail })); }} /></div>
@@ -2669,8 +2718,8 @@ export default function App() {
                         else { await api(token, '/api/smtp/accounts', { method: 'POST', body }); }
                         showNotice(editingAcct ? 'Account updated.' : 'Account added.');
                         setAcctForm(emptyAccount); setEditingAcct(null); await refresh();
-                      })}>{editingAcct ? '[ UPDATE ACCOUNT ]' : '[ ADD ACCOUNT ]'}</button>
-                      {editingAcct && <button className="btn-sm" onClick={() => { setAcctForm(emptyAccount); setEditingAcct(null); }}>[ CANCEL ]</button>}
+                      })}>{editingAcct ? 'Save sender' : 'Add a sender'}</button>
+                      {editingAcct && <button className="btn-sm" onClick={() => { setAcctForm(emptyAccount); setEditingAcct(null); }}>CANCEL</button>}
                     </div>
                   </div>
                 </div>
@@ -2679,7 +2728,7 @@ export default function App() {
                 <div className="email-section" id="smtp-connection">02 · OUTGOING CONNECTION — single mailbox fallback</div>
 
 <div className="pane narrow-pane">
-                  <div className="pane-head"><span>LEGACY SMTP FALLBACK</span></div>
+                  <div className="pane-head"><span>Backup SMTP <span className="dim">(optional)</span></span></div>
                   <p className="dim-txt">Only used when Send Mode is <strong>SMTP</strong> and the account pool above is empty. Password is encrypted. Leave blank to keep existing.</p>
                   <div style={{marginBottom:14}}>
                     <label className="field-label">PROVIDER PRESET <span className="dim">(auto-fills host/port — then enter your credentials)</span></label>
@@ -2707,10 +2756,10 @@ export default function App() {
                     <span>Implicit TLS — auto-set by port (465=TLS, 587=STARTTLS)</span>
                   </label>
                   <div className="btn-row" style={{ alignItems: 'center' }}>
-                    <button className="btn-primary" disabled={busy} onClick={() => run(async () => { await api(token, '/api/smtp', { method: 'PUT', body: smtp }); showNotice('SMTP saved.'); await refresh(); })}>[ SAVE SMTP ]</button>
-                    <button className="btn-sm" disabled={busy || !smtp.configured} onClick={() => run(async () => { await api(token, '/api/smtp/verify', { method: 'POST' }); showNotice('Connection verified.'); })}>[ TEST ]</button>
+                    <button className="btn-primary" disabled={busy} onClick={() => run(async () => { await api(token, '/api/smtp', { method: 'PUT', body: smtp }); showNotice('SMTP saved.'); await refresh(); })}>SAVE SMTP</button>
+                    <button className="btn-sm" disabled={busy || !smtp.configured} onClick={() => run(async () => { await api(token, '/api/smtp/verify', { method: 'POST' }); showNotice('Connection verified.'); })}>TEST</button>
                     <input className="w-input" style={{ maxWidth: 220 }} type="email" placeholder="test send to…" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
-                    <button className="btn-sm" disabled={busy || !testTo.includes('@')} onClick={() => run(async () => { const r = await api(token, '/api/test-send', { method: 'POST', body: { to: testTo, subject: draft.subject, html: draft.html, text: draft.text } }); showNotice(`Test accepted via ${String(r.mode || sendMode).toUpperCase()} (${r.messageId || r.response || 'ok'}).`); setTestTo(''); })}>[ SEND TEST — {sendMode.toUpperCase()} ]</button>
+                    <button className="btn-sm" disabled={busy || !testTo.includes('@')} onClick={() => run(async () => { const r = await api(token, '/api/test-send', { method: 'POST', body: { to: testTo, subject: draft.subject, html: draft.html, text: draft.text } }); showNotice(`Test accepted via ${String(r.mode || sendMode).toUpperCase()} (${r.messageId || r.response || 'ok'}).`); setTestTo(''); })}>SEND TEST · {sendMode.toUpperCase()}</button>
                   </div>
                   <p className="dim-txt" style={{ marginTop: 6 }}>
                     SEND TEST uses the active engine (<strong>{sendMode.toUpperCase()}</strong>). TEST only checks the SMTP server above.
@@ -2723,7 +2772,7 @@ export default function App() {
                   <label className="field-label">PROXY URL</label>
                   <input className="w-input" value={settings.socks5Proxy} onChange={(e) => updateSettings('socks5Proxy', e.target.value)} placeholder="http://user:pass@host:8080  ·  socks5://user:pass@host:1080  ·  socks4://..." />
                   <div className="btn-row">
-                    <button className="btn-sm" disabled={busy} onClick={() => run(async () => { await api(token, '/api/settings', { method: 'PUT', body: settings }); showNotice('SMTP proxy saved.'); await refresh(); })}>[ SAVE PROXY ]</button>
+                    <button className="btn-sm" disabled={busy} onClick={() => run(async () => { await api(token, '/api/settings', { method: 'PUT', body: settings }); showNotice('SMTP proxy saved.'); await refresh(); })}>SAVE PROXY</button>
                   </div>
                 </div>
 
@@ -2823,7 +2872,7 @@ export default function App() {
                       <details key={g.title} style={{ border: '1px solid rgba(255,255,255,.12)', borderRadius: 8, padding: '10px 14px', background: 'rgba(255,255,255,.03)' }}>
                         <summary style={{ cursor: 'pointer', fontWeight: 600 }}>{g.title}</summary>
                         <p className="dim-txt" style={{ margin: '8px 0' }}>{g.body}</p>
-                        <button className="btn-sm" onClick={() => setSmtp({ ...smtp, host: g.apply.host || smtp.host, port: g.apply.port, secure: g.apply.secure, username: g.apply.relay ? '' : smtp.username, password: g.apply.relay ? '' : smtp.password })}>[ USE THESE SETTINGS ]</button>
+                        <button className="btn-sm" onClick={() => setSmtp({ ...smtp, host: g.apply.host || smtp.host, port: g.apply.port, secure: g.apply.secure, username: g.apply.relay ? '' : smtp.username, password: g.apply.relay ? '' : smtp.password })}>USE THESE SETTINGS</button>
                       </details>
                     ))}
                   </div>
@@ -2975,7 +3024,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                   {/* Send Mode */}
                   <div className="cfg-block settings-wide">
-                    <div className="cfg-block-title">[ 01 · SEND TYPE ]</div>
+                    <div className="cfg-block-title">01 · SEND TYPE</div>
                     <div className="mode-grid">
                       {[
                         ['smtp',   'SMTP AUTH',    'Authenticated SMTP provider'],
@@ -3003,7 +3052,7 @@ sudo tail -f /var/log/maillog`}</pre>
                   {/* Direct / SOCKS5 / API (from + rate live here) */}
                   {(sendMode === 'direct' || sendMode === 'socks5' || sendMode === 'api') && (
                     <div className="cfg-block">
-                      <div className="cfg-block-title">[ DIRECT CONFIG ]</div>
+                      <div className="cfg-block-title">DIRECT CONFIG</div>
                       {sendMode === 'direct' && !(settings.dkimEnabled && settings.dkimConfigured) && (
                         <div className="dkim-warn">
                           ⚠ DIRECT MX + no DKIM — receivers get unsigned mail, expect spam-folder placement.
@@ -3031,7 +3080,7 @@ sudo tail -f /var/log/maillog`}</pre>
                   {/* Relay */}
                   {sendMode === 'relay' && (
                     <div className="cfg-block">
-                      <div className="cfg-block-title">[ RELAY CONFIG ]</div>
+                      <div className="cfg-block-title">RELAY CONFIG</div>
                       <p className="dim-txt">Full SMTP relay client — works with smtp-relay.gmail.com (Workspace IP allowlist), private postfix, or any SMTP relay. Security AUTO upgrades to STARTTLS when the server offers it.</p>
                       <div className="form-grid">
                         <div><label className="field-label">RELAY HOST</label><input className="w-input" value={settings.relayHost} onChange={(e) => updateSettings('relayHost', e.target.value)} placeholder="smtp-relay.gmail.com" /></div>
@@ -3057,13 +3106,13 @@ sudo tail -f /var/log/maillog`}</pre>
                           api(token, '/api/relay/verify', { method: 'POST' })
                             .then((r) => setRelayTest({ state: 'ok', ms: r.ms, host: r.host }))
                             .catch((e) => setRelayTest({ state: 'fail', error: e.message || 'connection failed' }));
-                        }}>{relayTest.state === 'testing' ? '[ TESTING… ]' : '[ TEST CONNECTION ]'}</button>
+                        }}>{relayTest.state === 'testing' ? 'TESTING…' : 'TEST CONNECTION'}</button>
                         <button className="btn-sm" disabled={busy || relayTest.state === 'testing' || !settings.relayHost} onClick={() => {
                           setRelayTest({ state: 'testing' });
                           api(token, '/api/relay/diag', { method: 'POST', body: { testTo: testTo.includes('@') ? testTo : '' } })
                             .then((r) => setRelayTest({ state: 'diag', stages: r.stages || [], ok: r.ok }))
                             .catch((e) => setRelayTest({ state: 'fail', error: e.message || 'diag failed' }));
-                        }}>[ DIAGNOSE ]</button>
+                        }}>DIAGNOSE</button>
                         <input className="w-input" style={{maxWidth:210}} type="email" placeholder="rcpt to test (optional)…" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
                         {relayTest.state === 'ok' && <span className="green-txt" style={{fontSize:13}}>● CONNECTED {relayTest.host} · {relayTest.ms}ms</span>}
                         {relayTest.state === 'fail' && <span className="red-txt" style={{fontSize:13}}>● {relayTest.error}</span>}
@@ -3101,7 +3150,7 @@ sudo tail -f /var/log/maillog`}</pre>
                               const r = await api(token, '/api/engine/graph/connect', { method: 'POST' });
                               window.open(r.url, '_blank', 'noopener');
                               showNotice('Microsoft sign-in opened — pick the mailbox. Delegated token stored on callback.');
-                            })}>[ CONNECT MICROSOFT ACCOUNT ]</button>
+                            })}>CONNECT MICROSOFT ACCOUNT</button>
                             {settings.engineMsRefreshToken === true && (
                               <span className="badge badge-ok">DELEGATED{settings.engineMsSendAs ? ` · ${settings.engineMsSendAs}` : ''}</span>
                             )}
@@ -3144,7 +3193,7 @@ sudo tail -f /var/log/maillog`}</pre>
                             const r = await api(token, '/api/engine/gmail/connect', { method: 'POST' });
                             window.open(r.url, '_blank', 'noopener');
                             showNotice('Google sign-in opened — pick the mailbox to use as sender.');
-                          })}>[ CONNECT GOOGLE ACCOUNT ]</button>
+                          })}>CONNECT GOOGLE ACCOUNT</button>
                           {settings.engineRefreshToken === true && (
                             <span className="badge badge-ok">CONNECTED{settings.engineSendAs ? ` · ${settings.engineSendAs}` : ''}</span>
                           )}
@@ -3178,10 +3227,10 @@ sudo tail -f /var/log/maillog`}</pre>
                       {sendMode === 'graph' && (
                         <div className="ms-pool-callout">
                           <div>
-                            <div className="cfg-block-title" style={{marginBottom:2}}>[ CONNECTED MAILBOX POOL ]</div>
+                            <div className="cfg-block-title" style={{marginBottom:2}}>CONNECTED MAILBOX POOL</div>
                             <p className="dim-txt" style={{margin:0}}>GRAPH uses these connected mailboxes as transport and rotates them. The visible From comes from <strong>SENDER IDENTITY</strong> (or DIRECT CONFIG), falling back to the mailbox address. Each mailbox must have SendAs permission for that From.</p>
                           </div>
-                          <button className="btn-sm" onClick={() => { setTab('smtp'); setMsRtImportOpen(true); }}>[ IMPORT MS RT → ]</button>
+                          <button className="btn-sm" onClick={() => { setTab('smtp'); setMsRtImportOpen(true); }}>IMPORT MS RT →</button>
                         </div>
                       )}
                     </div>
@@ -3190,7 +3239,7 @@ sudo tail -f /var/log/maillog`}</pre>
                   {/* HTTP API engine */}
                   {sendMode === 'api' && (
                     <div className="cfg-block settings-wide">
-                      <div className="cfg-block-title">[ API ENGINE ]</div>
+                      <div className="cfg-block-title">API ENGINE</div>
                       <p className="dim-txt">Sends over the provider's HTTPS API — no SMTP socket, no port-25 exposure. FROM NAME / FROM EMAIL come from <strong>DIRECT CONFIG</strong> (or SENDER IDENTITY if set).</p>
                       <div className="form-grid">
                         <div>
@@ -3226,7 +3275,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                   {/* SENDER IDENTITY / SPOOFING */}
                   <div className="cfg-block">
-                    <div className="cfg-block-title">[ 02 · SENDER IDENTITY ]</div>
+                    <div className="cfg-block-title">02 · SENDER IDENTITY</div>
                     <p className="dim-txt">Send as <strong>Company Name &lt;notifications@yourdomain.com&gt;</strong>. Overrides the from-address for every mode. Placeholders work in the display name.</p>
                     <div className="form-grid">
                       <div>
@@ -3273,7 +3322,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                   {/* Rotation */}
                   <div className="cfg-block settings-wide">
-                    <div className="cfg-block-title">[ 03 · ROTATION ]</div>
+                    <div className="cfg-block-title">03 · ROTATION</div>
                     <label className="field-label">SUBJECT VARIANTS <span className="dim">(one per line — picked randomly per send)</span></label>
                     <textarea className="w-textarea code-ta" rows={5}
                       value={(settings.subjectsList || []).join('\n')}
@@ -3290,7 +3339,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                   {/* DKIM SIGNING */}
                   <div className="cfg-block settings-wide">
-                    <div className="cfg-block-title">[ 04 · DKIM SIGNING ]</div>
+                    <div className="cfg-block-title">04 · DKIM SIGNING</div>
                     <p className="dim-txt">Sign outgoing mail with a DKIM key so receivers see a valid signature. Key is stored encrypted. Optional on GRAPH API, GMAIL API and HTTP API — those providers sign with your domain's DKIM. Required for DIRECT MX and plain RELAY.</p>
                     <div className="toggle-row" onClick={() => {
                       if (settings.dkimEnabled) { updateSettings('dkimEnabled', false); return; }
@@ -3346,7 +3395,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                   {/* Email options */}
                   <div className="cfg-block">
-                    <div className="cfg-block-title">[ 05 · EMAIL OPTIONS ]</div>
+                    <div className="cfg-block-title">05 · EMAIL OPTIONS</div>
                     <div className="form-grid">
                       <div>
                         <label className="field-label">ENCODING</label>
@@ -3414,7 +3463,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                   {/* AI ASSISTANT */}
                   <div className="cfg-block">
-                    <div className="cfg-block-title">[ 06 · AI ASSISTANT ]</div>
+                    <div className="cfg-block-title">06 · AI ASSISTANT</div>
                     <p className="dim-txt">Connect an AI API to improve letter content directly from the COMPOSE panel. Key is stored encrypted.</p>
                     <div className="form-grid">
                       <div>
@@ -3467,7 +3516,7 @@ sudo tail -f /var/log/maillog`}</pre>
                       placeholder={'e.g. Always write in a professional B2B tone.\nNever use the words free, guarantee, or urgent.\nKeep paragraphs under 3 sentences.\nAlways end with a single clear CTA.'}
                     />
                     <details style={{ border: '1px solid rgba(0,255,65,.15)', borderRadius: 8, padding: '10px 14px', background: 'rgba(0,255,65,.03)', marginTop: 10 }}>
-                      <summary style={{ cursor: 'pointer', fontWeight: 700, letterSpacing: '.08em', color: 'var(--green)' }}>[ FREE PROVIDER SETUP — CLICK A PROVIDER TO AUTOFILL ]</summary>
+                      <summary style={{ cursor: 'pointer', fontWeight: 700, letterSpacing: '.08em', color: 'var(--green)' }}>FREE PROVIDER SETUP — CLICK A PROVIDER TO AUTOFILL</summary>
                       <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {[
                           { name: 'GEMINI (recommended — 1M tokens/min free, no card)', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', where: 'aistudio.google.com → Get API key' },
@@ -3477,7 +3526,7 @@ sudo tail -f /var/log/maillog`}</pre>
                           { name: 'MISTRAL (free tier)', endpoint: 'https://api.mistral.ai/v1/chat/completions', model: 'mistral-small-latest', where: 'console.mistral.ai → API keys' },
                           { name: 'OLLAMA (local — fully free & private, runs on this machine)', endpoint: 'http://localhost:11434/v1/chat/completions', model: 'llama3.1:8b', where: 'install ollama → ollama pull llama3.1:8b → any non-empty key works' },
                         ].map((p) => (
-                          <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', borderBottom: '1px solid rgba(255,255,255,.06)', paddingBottom: 6 }}>
+                          <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', borderBottom: '1px solid var(--border)', paddingBottom: 6 }}>
                             <button className="btn-xs" onClick={() => { setAiModelList(null); setAiModelsMsg(''); setSettings({ ...settings, aiEndpoint: p.endpoint, aiModel: p.model }); }}>USE</button>
                             <div style={{ flex: 1, minWidth: 220 }}>
                               <div style={{ fontWeight: 700 }}>{p.name}</div>
@@ -3493,7 +3542,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                   {/* Anti-fingerprint */}
                   <div className="cfg-block">
-                    <div className="cfg-block-title">[ 07 · ANTI-FINGERPRINT ]</div>
+                    <div className="cfg-block-title">07 · ANTI-FINGERPRINT</div>
                     <div className="toggle-list">
                       <div className="toggle-row" onClick={() => updateSettings('htmlRandomize', !settings.htmlRandomize)}>
                         <div>
@@ -3560,13 +3609,13 @@ sudo tail -f /var/log/maillog`}</pre>
 
                   {/* Disclaimer */}
                   <div className="cfg-block">
-                    <div className="cfg-block-title">[ DISCLAIMER ]</div>
+                    <div className="cfg-block-title">DISCLAIMER</div>
                     <p className="dim-txt">Appended to the bottom of every letter before the unsubscribe footer. Placeholders work.</p>
                     <textarea className="w-textarea" rows={4} value={settings.disclaimerText} onChange={(e) => updateSettings('disclaimerText', e.target.value)} placeholder="This message is confidential..." />
                     <div className="btn-row" style={{ marginTop: 8 }}>
-                      <button type="button" className="btn-xs" onClick={() => updateSettings('disclaimerText', SCAN_DISCLAIMER)}>[ USE SCAN DISCLAIMER ]</button>
+                      <button type="button" className="btn-xs" onClick={() => updateSettings('disclaimerText', SCAN_DISCLAIMER)}>USE SCAN DISCLAIMER</button>
                       {settings.disclaimerText && (
-                        <button type="button" className="btn-xs" onClick={() => updateSettings('disclaimerText', '')}>[ CLEAR ]</button>
+                        <button type="button" className="btn-xs" onClick={() => updateSettings('disclaimerText', '')}>CLEAR</button>
                       )}
                     </div>
                     <label className="check-row" style={{ marginTop: 10 }}>
@@ -3578,7 +3627,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                   {/* Obfuscation */}
                   <div className="cfg-block">
-                    <div className="cfg-block-title">[ LETTER ENCRYPT ]</div>
+                    <div className="cfg-block-title">LETTER ENCRYPT</div>
                     <div>
                       <label className="field-label">ENCODE MODE</label>
                       <select className="w-select" value={settings.encryptMode} onChange={(e) => updateSettings('encryptMode', e.target.value)}>
@@ -3605,7 +3654,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                   {/* Custom headers */}
                   <div className="cfg-block">
-                    <div className="cfg-block-title">[ CUSTOM HEADER ]</div>
+                    <div className="cfg-block-title">CUSTOM HEADER</div>
                     <div className="toggle-row" onClick={() => updateSettings('customHeadersEnabled', !settings.customHeadersEnabled)}>
                       <div className="toggle-lbl">ENABLE CUSTOM HEADER</div>
                       <div className={`tog ${settings.customHeadersEnabled ? 'tog-on' : ''}`}><div className="tog-knob" /></div>
@@ -3623,7 +3672,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                   {/* Test email */}
                   <div className="cfg-block">
-                    <div className="cfg-block-title">[ 08 · TEST EMAIL ]</div>
+                    <div className="cfg-block-title">08 · TEST EMAIL</div>
                     <div className="toggle-row" onClick={() => updateSettings('testEmailEnabled', !settings.testEmailEnabled)}>
                       <div className="toggle-lbl">SEND TEST EVERY N EMAILS</div>
                       <div className={`tog ${settings.testEmailEnabled ? 'tog-on' : ''}`}><div className="tog-knob" /></div>
@@ -3638,7 +3687,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                   {/* Telegram */}
                   <div className="cfg-block">
-                    <div className="cfg-block-title">[ 09 · TELEGRAM REPORTS ]</div>
+                    <div className="cfg-block-title">09 · TELEGRAM REPORTS</div>
                     <p className="dim-txt">Campaign start/finish, opens, clicks, bounces and unsubscribes are pushed here live. Create a bot via @BotFather, get your chat id from @userinfobot.</p>
                     <div className="form-grid">
                       <div><label className="field-label">BOT TOKEN</label><input className="w-input" type="password" value={tgToken} onChange={(e) => setTgToken(e.target.value)} placeholder={state.telegram?.configured ? '•••••••• (saved — leave blank to keep)' : '123456:ABC-DEF...'} /></div>
@@ -3648,24 +3697,29 @@ sudo tail -f /var/log/maillog`}</pre>
                       <button className="btn-sm" disabled={busy} onClick={() => run(async () => {
                         await api(token, '/api/telegram', { method: 'PUT', body: { botToken: tgToken, chatId: tgChat } });
                         setTgToken(''); await refresh(); showNotice('Telegram saved.');
-                      })}>[ SAVE ]</button>
-                      <button className="btn-sm" disabled={busy || !state.telegram?.configured} onClick={() => run(async () => { await api(token, '/api/telegram/test', { method: 'POST' }); showNotice('Test sent — check telegram.'); })}>[ TEST ]</button>
+                      })}>SAVE</button>
+                      <button className="btn-sm" disabled={busy || !state.telegram?.configured} onClick={() => run(async () => { await api(token, '/api/telegram/test', { method: 'POST' }); showNotice('Test sent — check telegram.'); })}>TEST</button>
                       <span className={`stat-val ${state.telegram?.configured ? 'sent-val' : 'fail-val'}`} style={{fontSize:11}}>{state.telegram?.configured ? `● LINKED · ${state.telegram.chatId}` : '○ NOT CONFIGURED'}</span>
                     </div>
                   </div>
 
-                  <button className="btn-primary" disabled={busy} onClick={saveSettings}>[ SAVE SETTINGS ]</button>
+                  <button className="btn-primary" disabled={busy} onClick={saveSettings}>SAVE SETTINGS</button>
                 </div>
               )}
 
               {/* ══ SCHEDULE ══ */}
               {tab === 'schedule' && (
                 <div className="pane narrow-pane">
-                  <div className="pane-head"><span>SCHEDULE SEND</span></div>
-                  <p className="dim-txt">{selectedId ? `Draft #${selectedId} selected.` : 'Current compose content will be saved as a draft.'}</p>
-                  <label className="field-label">DELIVERY DATE / TIME</label>
+                  <div className="pane-head"><span>Schedule a send</span></div>
+                  <p className="dim-txt">{selectedId ? `Draft #${selectedId} is selected.` : 'Your current letter will be saved as a draft, then sent at the time you pick.'}</p>
+                  <label className="field-label">SEND ON</label>
+                  <div className="quick-row">
+                    <button type="button" className="btn-xs" onClick={() => setScheduledFor(quickWhen('hour'))}>In 1 hour</button>
+                    <button type="button" className="btn-xs" onClick={() => setScheduledFor(quickWhen('tomorrow'))}>Tomorrow 9:00</button>
+                    <button type="button" className="btn-xs" onClick={() => setScheduledFor(quickWhen('monday'))}>Monday 9:00</button>
+                  </div>
                   <input className="w-input" type="datetime-local" value={scheduledFor} onChange={(e) => setScheduledFor(e.target.value)} />
-                  <button className="btn-primary" style={{marginTop:14}} disabled={busy || !scheduledFor || !canQueue} onClick={() => { try { new Date(scheduledFor).toISOString(); queue(true); } catch { showNotice('Invalid date.', 'err'); } }}>[ QUEUE SCHEDULED ]</button>
+                  <button className="btn-primary" style={{marginTop:14}} disabled={busy || !scheduledFor || !canQueue} onClick={() => { try { new Date(scheduledFor).toISOString(); queue(true); } catch { showNotice('Invalid date.', 'err'); } }}>Schedule this letter</button>
                 </div>
               )}
 
@@ -3695,6 +3749,7 @@ sudo tail -f /var/log/maillog`}</pre>
                             })()}</td>
                           </tr>
                         ))}
+                        {!pagedBounces.length && <tr><td colSpan={6} className="dim" style={{ textAlign: 'center' }}>No bounced or unsubscribed addresses yet. This list keeps your future sends clean.</td></tr>}
                       </tbody>
                     </table>
                   </div>
@@ -3707,7 +3762,7 @@ sudo tail -f /var/log/maillog`}</pre>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                   <div className="dash-head">
                     <div className="dash-head-left">
-                      <div className="dash-title">OPERATIONS</div>
+                      <div className="dash-title">Overview</div>
                       <div className="dim-txt">
                         {clockNow.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
                         {' · '}{plural(state.confirmed, 'confirmed recipient', 'confirmed recipients')}
@@ -3785,7 +3840,7 @@ sudo tail -f /var/log/maillog`}</pre>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                     <div className="pane">
                       <div className="pane-head">
-                        <span>RECENT CAMPAIGNS <span className="dim">({(state.campaigns || []).length})</span></span>
+                        <span>Recent sends <span className="dim">({(state.campaigns || []).length})</span></span>
                         <button className="btn-xs" onClick={() => setTab('send')}>VIEW ALL →</button>
                       </div>
                       <div className="tbl-wrap" style={{ maxHeight: 380 }}>
@@ -3809,10 +3864,37 @@ sudo tail -f /var/log/maillog`}</pre>
                                 </tr>
                               );
                             })}
-                            {!dashCampaigns.length && <tr><td colSpan={7} className="dim" style={{ textAlign: 'center', padding: 18 }}>No campaigns yet — <button className="dash-inline-link" onClick={(e) => { e.stopPropagation(); setTab('compose'); }}>compose a letter</button> and send.</td></tr>}
                           </tbody>
                         </table>
                       </div>
+                      {!dashCampaigns.length && (
+                        <div className="dash-start">
+                          <div className="dash-start-head">
+                            <span>Start here</span>
+                            <span className="dim">Three steps to your first send</span>
+                          </div>
+                          <div className="dash-start-grid">
+                            <button type="button" className="dash-start-card" onClick={() => setTab('smtp')}>
+                              <span className="dash-start-icon"><Server size={18} /></span>
+                              <span className="dash-start-title">1. Add a sender</span>
+                              <span className="dash-start-copy">Connect SMTP or import a Microsoft mailbox.</span>
+                              <span className="dash-start-link">Open senders <ArrowRight size={13} /></span>
+                            </button>
+                            <button type="button" className="dash-start-card" onClick={() => setTab('recipients')}>
+                              <span className="dash-start-icon"><Users size={18} /></span>
+                              <span className="dash-start-title">2. Bring contacts</span>
+                              <span className="dash-start-copy">Paste a list, clean it, and confirm consent.</span>
+                              <span className="dash-start-link">Open contacts <ArrowRight size={13} /></span>
+                            </button>
+                            <button type="button" className="dash-start-card" onClick={() => setTab('compose')}>
+                              <span className="dash-start-icon"><Mail size={18} /></span>
+                              <span className="dash-start-title">3. Write the letter</span>
+                              <span className="dash-start-copy">Compose, preview, then launch the campaign.</span>
+                              <span className="dash-start-link">Open letters <ArrowRight size={13} /></span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {dashMore && (
@@ -3825,7 +3907,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                       <div className="pane">
-                        <div className="pane-head"><span>ENGINE STATUS</span></div>
+                        <div className="pane-head"><span>Delivery status</span></div>
                         <div className="engine-grid">
                           <div className="engine-row"><span className="dim">STATUS</span><strong className={engineReady ? 'sent-val' : 'fail-val'}>{engineReady ? 'READY' : 'NOT READY'}</strong></div>
                           <div className="engine-row"><span className="dim">MODE</span><strong>{sendMode.toUpperCase()}</strong></div>
@@ -3890,20 +3972,47 @@ sudo tail -f /var/log/maillog`}</pre>
                       )}
 
                       <div className="pane">
+                        <div className="pane-head">
+                          <span>SENDER HEALTH</span>
+                          <button className="btn-xs" onClick={() => setTab('smtp')}>MANAGE</button>
+                        </div>
+                        {senderRows.length ? (
+                          <div className="sender-health">
+                            {senderRows.map((a) => {
+                              const cooling = a.cooldownUntil && new Date(a.cooldownUntil) > new Date();
+                              const status = !a.enabled ? 'Paused' : needsMsReauth(a) ? 'Reauth' : cooling ? 'Cooling' : 'Ready';
+                              const tone = status === 'Ready' ? 'ok' : status === 'Cooling' ? 'warn' : 'bad';
+                              const pct = a.dailyQuota > 0 ? Math.min(100, Math.round(((a.sentToday || 0) / a.dailyQuota) * 100)) : 0;
+                              return (
+                                <div className="sender-health-row" key={a.id} title={a.lastError || ''}>
+                                  <span className={`sender-dot ${tone}`} aria-hidden="true" />
+                                  <span className="sender-name">{a.label || a.username}</span>
+                                  <span className="sender-status">{status}</span>
+                                  <span className="sender-quota"><span style={{ width: `${pct}%` }} /></span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="dim-txt">No senders yet. Add SMTP or import a Microsoft mailbox to start.</p>
+                        )}
+                      </div>
+
+                      <div className="pane">
                         <div className="pane-head"><span>QUICK ACTIONS</span></div>
                         <div className="qa-grid">
-                          <button className="qa-btn" onClick={() => setTab('compose')}><span className="qa-ic">✉</span>NEW LETTER</button>
-                          <button className="qa-btn" onClick={() => setTab('send')}><span className="qa-ic">▶</span>LAUNCH</button>
-                          <button className="qa-btn" onClick={() => setTab('recipients')}><span className="qa-ic">@</span>IMPORT LIST</button>
-                          <button className="qa-btn" onClick={() => setTab('sorter')}><span className="qa-ic">⇅</span>SORT LIST</button>
-                          <button className="qa-btn" onClick={() => setTab('smtp')}><span className="qa-ic">⚙</span>POOL</button>
+                          <button className="qa-btn" onClick={() => setTab('compose')}><span className="qa-ic"><Mail size={15} /></span>New letter</button>
+                          <button className="qa-btn" onClick={() => setTab('send')}><span className="qa-ic"><Send size={15} /></span>Launch</button>
+                          <button className="qa-btn" onClick={() => setTab('recipients')}><span className="qa-ic"><Users size={15} /></span>Import list</button>
+                          <button className="qa-btn" onClick={() => setTab('sorter')}><span className="qa-ic"><Filter size={15} /></span>Sort list</button>
+                          <button className="qa-btn" onClick={() => setTab('smtp')}><span className="qa-ic"><Server size={15} /></span>Pool</button>
                           <button className="qa-btn" disabled={busy} onClick={() => run(async () => {
                             const r = await api(token, '/api/smtp/verify-all', { method: 'POST' });
                             const okCount = (r.results || []).filter((x) => x.ok).length;
                             showNotice(`Verify done — ${okCount}/${(r.results || []).length} live.`);
-                          })}><span className="qa-ic">✓</span>VERIFY ALL</button>
-                          <button className="qa-btn" onClick={() => setTab('delivery')}><span className="qa-ic">⚡</span>SETTINGS</button>
-                          <button className="qa-btn" onClick={() => setChatOpen(true)}><span className="qa-ic">✦</span>ASK AI</button>
+                          })}><span className="qa-ic"><CheckCheck size={15} /></span>Verify all</button>
+                          <button className="qa-btn" onClick={() => setTab('delivery')}><span className="qa-ic"><Settings2 size={15} /></span>Settings</button>
+                          <button className="qa-btn" onClick={() => setChatOpen(true)}><span className="qa-ic"><Sparkles size={15} /></span>Ask AI</button>
                         </div>
                       </div>
 
@@ -4024,13 +4133,13 @@ sudo tail -f /var/log/maillog`}</pre>
                   </div>
 
                   <div className="pane">
-                    <div className="pane-head"><span>02 · LIVE CONSOLE</span><span className="dim">this campaign — queue · sends · opens · clicks · bounces</span></div>
-                    <LiveConsole events={(state.events || []).filter(isCampaignEvent)} empty="[ AWAITING CAMPAIGN EVENTS — QUEUE, SENDS, OPENS, CLICKS, BOUNCES ]" />
+                    <div className="pane-head"><span>Live activity</span><span className="dim">queue · sends · opens · clicks · bounces</span></div>
+                    <LiveConsole events={(state.events || []).filter(isCampaignEvent)} empty="Nothing yet — sends, opens and clicks will appear here." />
                   </div>
 
                   <div className="pane">
                     <div className="pane-head">
-                      <span>03 · CAMPAIGN LIBRARY <span className="dim">({filteredCampaigns.length})</span></span>
+                      <span>Campaign history <span className="dim">({filteredCampaigns.length})</span></span>
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                         {[['all', 'ALL'], ['active', 'ACTIVE'], ['draft', 'DRAFTS'], ['done', 'FINISHED']].map(([v, l]) => (
                           <button key={v} className={`btn-xs ${campFilter === v ? 'btn-solid' : ''}`} onClick={() => { setCampFilter(v); setHistPage(1); }}>{l}</button>
@@ -4086,6 +4195,13 @@ sudo tail -f /var/log/maillog`}</pre>
                         </tbody>
                       </table>
                     </div>
+                    {!filteredCampaigns.length && (
+                      <div className="empty-cta">
+                        <strong>No campaigns yet</strong>
+                        <span>Write a letter, choose your contacts, then press send. We will keep the history here.</span>
+                        <button className="btn-primary" onClick={() => setTab('compose')}>Write a letter</button>
+                      </div>
+                    )}
                     <Pager total={filteredCampaigns.length} page={histPage} setPage={setHistPage} size={pageSize} setSize={setPageSize} />
                   </div>
 
@@ -4104,7 +4220,7 @@ sudo tail -f /var/log/maillog`}</pre>
                         setAiTaskText(''); setAiTaskAt(''); setAiTaskRepeat('');
                         showNotice('AI task armed.');
                         await refresh();
-                      })}>[ ARM TASK ]</button>
+                      })}>ARM TASK</button>
                     </div>
                     {!!(state.aiTasks || []).length && (
                       <div className="tbl-wrap" style={{ maxHeight: 180, marginTop: 10 }}>
@@ -4159,7 +4275,7 @@ sudo tail -f /var/log/maillog`}</pre>
                       } finally {
                         setAnalyticsLoading(false);
                       }
-                    }}>{analyticsLoading ? '[ LOADING... ]' : '[ REFRESH ANALYTICS ]'}</button>
+                    }}>{analyticsLoading ? 'LOADING...' : 'REFRESH ANALYTICS'}</button>
                   </div>
                   <div className="pane">
                     <div className="pane-head"><span>ENGAGEMENT HEATMAP</span><span className="dim">opens/clicks by hour (UTC)</span></div>
@@ -4229,7 +4345,7 @@ sudo tail -f /var/log/maillog`}</pre>
 
                     <details className="help-sec">
                       <summary>MAILBOX POOL / MS RT IMPORT</summary>
-                      <p className="help-p">SMTP tab → ACCOUNT POOL → <code>[ IMPORT MS RT ]</code> — one account per line, up to 200 at once. Accepted formats:</p>
+                      <p className="help-p">SMTP tab → ACCOUNT POOL → <code>IMPORT MS RT</code> — one account per line, up to 200 at once. Accepted formats:</p>
                       <pre className="help-pre">{`email@x.com:client_id:M.C5...rt      email:cid:rt
 client_id:M.C5...rt                cid:rt
 email|cid|rt · email,cid,rt · email;cid;rt
@@ -4286,7 +4402,7 @@ client_id:secret:tenant            app creds (no RT)
                     <details className="help-sec">
                       <summary>FAQ — WHERE PEOPLE GET STUCK</summary>
                       <table className="w-table help-table"><thead><tr><th>QUESTION</th><th>ANSWER</th></tr></thead><tbody>
-                        <tr><td>MS RT import says "unparseable line"</td><td>Every line must carry a refresh token AND a client id — or a JSON dump that contains an <code>access_token</code> (client + tenant get harvested from it). Bare <code>1.xxx</code> tokens auto-bind the Teams public client. Whole vault exports and <code>rubicon_backup</code> gzip blobs are supported — paste the entire blob, or use <code>[ SELECT FILE ]</code>. A line that is only a fragment (half a token, a JSON shard) can't import — re-export the file instead of copy-pasting through a clipped window.</td></tr>
+                        <tr><td>MS RT import says "unparseable line"</td><td>Every line must carry a refresh token AND a client id — or a JSON dump that contains an <code>access_token</code> (client + tenant get harvested from it). Bare <code>1.xxx</code> tokens auto-bind the Teams public client. Whole vault exports and <code>rubicon_backup</code> gzip blobs are supported — paste the entire blob, or use <code>SELECT FILE</code>. A line that is only a fragment (half a token, a JSON shard) can't import — re-export the file instead of copy-pasting through a clipped window.</td></tr>
                         <tr><td>PORT 25 BLOCKED in the sidebar</td><td>Your host/provider filters outbound SMTP. DIRECT MX mode needs port 25 open — ask the provider to unblock it, or switch engines: SMTP pool, GRAPH, or an HTTP API provider (SendGrid/SES/etc.) doesn't need port 25 at all.</td></tr>
                         <tr><td>Emails land in spam</td><td>Run the spam checker on the draft before queueing — it scores triggers and hands fixes to the AI in one click. Then the deliverability basics: SPF + DKIM + DMARC aligned on the sending domain (DKIM guide lives in SETTINGS), a real unsubscribe link (auto-inserted), warmed-up volume (start low, ramp), and clean lists (SORTER first — kills dead domains and disposables that tank reputation).</td></tr>
                         <tr><td>"LAUNCH" is greyed out</td><td>The setup wizard is gating it — one of the four steps isn't ready: LETTER (subject + body), AUDIENCE (≥1 confirmed contact), ENGINE (creds for the selected send type — the step tells you exactly which field is missing), WINDOW (send window). Fix the amber step, launch unlocks.</td></tr>
@@ -4315,10 +4431,10 @@ client_id:secret:tenant            app creds (no RT)
             <h2 className="intro-title">{INTRO_STEPS[introStep].title}</h2>
             <p className="intro-desc">{INTRO_STEPS[introStep].desc}</p>
             <div className="intro-actions">
-              {introStep > 0 && <button className="btn-sm" onClick={() => setIntroStep(introStep - 1)}>[ BACK ]</button>}
+              {introStep > 0 && <button className="btn-sm" onClick={() => setIntroStep(introStep - 1)}>BACK</button>}
               {introStep < INTRO_STEPS.length - 1
-                ? <button className="btn-primary" onClick={() => setIntroStep(introStep + 1)}>[ NEXT ]</button>
-                : <button className="btn-primary" onClick={() => { setShowIntro(false); localStorage.setItem('rbc_intro_seen', '1'); setTab('dashboard'); }}>[ OPEN DASHBOARD ]</button>}
+                ? <button className="btn-primary" onClick={() => setIntroStep(introStep + 1)}>NEXT</button>
+                : <button className="btn-primary" onClick={() => { setShowIntro(false); localStorage.setItem('rbc_intro_seen', '1'); setTab('dashboard'); }}>OPEN DASHBOARD</button>}
             </div>
             <button className="intro-skip" onClick={() => { setShowIntro(false); localStorage.setItem('rbc_intro_seen', '1'); }}>skip walkthrough</button>
           </div>
@@ -4457,7 +4573,7 @@ client_id:secret:tenant            app creds (no RT)
                     setSubjectVariants(r || []);
                   }}
                 >
-                  [ ADD ]
+                  ADD
                 </button>
               </div>
               {subjectVariants.length > 0 && (
@@ -4480,7 +4596,7 @@ client_id:secret:tenant            app creds (no RT)
                               setSubjectVariants(r || []);
                             }}
                           >
-                            [ SET WINNER ]
+                            SET WINNER
                           </button>
                         )}
                         <button
@@ -4491,7 +4607,7 @@ client_id:secret:tenant            app creds (no RT)
                             setSubjectVariants(r || []);
                           }}
                         >
-                          [ DELETE ]
+                          DELETE
                         </button>
                       </div>
                     </div>
@@ -4519,7 +4635,7 @@ client_id:secret:tenant            app creds (no RT)
                 </select>
               ) : null}
               <button className="btn-sm" onClick={() => { setChatMsgs([]); setChatEditIndex(null); setChatInput(''); }} title="Clear">↺</button>
-              <button className="btn-sm" aria-label="Close Rubicon AI" onClick={() => setChatOpen(false)}>[ × ]</button>
+              <button className="btn-sm" aria-label="Close Rubicon AI" onClick={() => setChatOpen(false)}>×</button>
             </div>
           </div>
           <div className="chat-body">
@@ -4607,8 +4723,8 @@ client_id:secret:tenant            app creds (no RT)
               )}
             </div>
             <div className="dlg-actions">
-              <button className="btn-sm" onClick={() => downloadGenerated(awPreview.attachment)}>[ DOWNLOAD ]</button>
-              <button className="btn-primary" onClick={() => attachGenerated(awPreview.attachment)}>[ ATTACH TO LETTER ]</button>
+              <button className="btn-sm" onClick={() => downloadGenerated(awPreview.attachment)}>DOWNLOAD</button>
+              <button className="btn-primary" onClick={() => attachGenerated(awPreview.attachment)}>ATTACH TO LETTER</button>
               <button className="btn-sm" onClick={closeAwPreview}>CLOSE</button>
             </div>
           </div>
@@ -4651,3 +4767,5 @@ client_id:secret:tenant            app creds (no RT)
     </>
   );
 }
+
+

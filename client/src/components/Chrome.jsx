@@ -1,4 +1,8 @@
 import { useEffect, useRef } from 'react';
+import {
+  LayoutDashboard, Send, Mail, Sparkles, Users, Filter, Server, Settings2,
+  CalendarClock, AlertTriangle, BarChart3, HelpCircle,
+} from 'lucide-react';
 
 function RbcMascot({ size = 34 }) {
   return (
@@ -118,39 +122,36 @@ function RbcLogo({ size = 44 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 48 48" fill="none" aria-hidden="true">
       <defs>
-        <linearGradient id="rbcg" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#2fe06b" /><stop offset="1" stopColor="#00ffff" />
+        <linearGradient id="rbcg" x1="6" y1="4" x2="42" y2="44" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#A06659" /><stop offset="0.55" stopColor="#CE9C58" /><stop offset="1" stopColor="#3EB221" />
         </linearGradient>
       </defs>
-      <path d="M24 2 42 12v24L24 46 6 36V12L24 2Z" fill="url(#rbcg)" opacity="0.14" stroke="url(#rbcg)" strokeWidth="2" />
-      <path d="M14 20.5 24 27l10-6.5V32a2 2 0 0 1-2 2H16a2 2 0 0 1-2-2v-11.5Z" fill="none" stroke="#eafff6" strokeWidth="2.4" strokeLinejoin="round" />
-      <path d="m14 20.5 10 6.5 10-6.5-10-6.5-10 6.5Z" fill="#eafff6" />
-      <path d="M31 14.5c2.5.4 4.5 2.4 4.9 4.9M33.5 10.5c4 .7 7.3 4 8 8" stroke="#00e5a0" strokeWidth="2" strokeLinecap="round" />
+      <path d="M24 2 42 12v24L24 46 6 36V12L24 2Z" fill="url(#rbcg)" stroke="url(#rbcg)" strokeWidth="1.5" />
+      <path d="M14 20.5 24 27l10-6.5V32a2 2 0 0 1-2 2H16a2 2 0 0 1-2-2v-11.5Z" fill="none" stroke="#ffffff" strokeWidth="2.4" strokeLinejoin="round" />
+      <path d="m14 20.5 10 6.5 10-6.5-10-6.5-10 6.5Z" fill="#ffffff" />
+      <path d="M31 14.5c2.5.4 4.5 2.4 4.9 4.9M33.5 10.5c4 .7 7.3 4 8 8" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
 
-// Lucide-style stroke icons — crisp at 14px, no font dependency, no tofu.
+// Free stroke icons from Lucide (ISC). One consistent 1.8px set across the app.
 const NAV_ICONS = {
-  dashboard: 'M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z',
-  send: 'M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z',
-  compose: 'M4 4h16v16H4zM4 7l8 6 8-6',
-  aiwriter: 'M12 2l2.1 5.9L20 10l-5.9 2.1L12 18l-2.1-5.9L4 10l5.9-2.1zM19 15l.9 2.6L22.5 18.5l-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9z',
-  recipients: 'M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM21 21v-2a4 4 0 0 0-3-3.87M15.5 3.13a4 4 0 0 1 0 7.75',
-  sorter: 'M3 4h18l-7 8v5l-4 2v-7L3 4z',
-  smtp: 'M4 2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM4 14h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2zM6 6h.01M6 18h.01',
-  delivery: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
-  schedule: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2',
-  bounces: 'M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01',
-  analytics: 'M3 21h18M7 16v-5M12 16V8M17 16v-8',
-  help: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01',
+  dashboard: LayoutDashboard,
+  send: Send,
+  compose: Mail,
+  aiwriter: Sparkles,
+  recipients: Users,
+  sorter: Filter,
+  smtp: Server,
+  delivery: Settings2,
+  schedule: CalendarClock,
+  bounces: AlertTriangle,
+  analytics: BarChart3,
+  help: HelpCircle,
 };
-function NavIcon({ name, size = 15 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d={NAV_ICONS[name] || NAV_ICONS.help} />
-    </svg>
-  );
+function NavIcon({ name, size = 16 }) {
+  const Icon = NAV_ICONS[name] || NAV_ICONS.help;
+  return <Icon size={size} strokeWidth={1.8} aria-hidden="true" />;
 }
 
 
