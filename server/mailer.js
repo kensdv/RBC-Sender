@@ -92,6 +92,7 @@ function loadSendSettings(db, config = null) {
     subjectB64: Boolean(row.subject_b64),
     fromnameB64: Boolean(row.fromname_b64),
     disclaimerText: row.disclaimer_text || '',
+    disclaimerInPdf: Boolean(row.disclaimer_in_pdf),
     engineClientId: row.engine_client_id || '',
     engineClientSecret: row.engine_client_secret_encrypted && config ? decryptSecret(row.engine_client_secret_encrypted, config.credentialKey) : '',
     engineTenant: row.engine_tenant || '',
@@ -387,6 +388,7 @@ export function publicSendSettings(db, config = null) {
     subjectB64: Boolean(row.subject_b64),
     fromnameB64: Boolean(row.fromname_b64),
     disclaimerText: row.disclaimer_text || '',
+    disclaimerInPdf: Boolean(row.disclaimer_in_pdf),
     engineClientId: row.engine_client_id || '',
     engineClientSecret: Boolean(row.engine_client_secret_encrypted),
     engineTenant: row.engine_tenant || '',
@@ -589,11 +591,16 @@ async function msRtRedeem(clientId, refreshToken, tenant) {
   });
   let res = await post();
   let data = await res.json().catch(() => ({}));
-  // Imported RTs carry their own consented scope set — retry without scope on scope errors
-  if (!res.ok && /scope/i.test(data.error_description || data.error || '')) {
-    delete body.scope;
-    res = await post();
-    data = await res.json().catch(() => ({}));
+  // Imported RTs carry their own consented scope set. Some first-party clients
+  // (e.g. Microsoft Office) reject an explicit Graph scope with AADSTS65002
+  // even though the token itself is valid — always retry once without scope.
+  if (!res.ok) {
+    const detail = String(data.error_description || data.error || '');
+    if (!/invalid_grant|AADSTS50173|AADSTS700082|revoked|expired/i.test(detail)) {
+      delete body.scope;
+      res = await post();
+      data = await res.json().catch(() => ({}));
+    }
   }
   return { ok: res.ok, data, detail: String(data.error_description || data.error || res.status) };
 }
@@ -1302,11 +1309,15 @@ function pdfEscape(s) {
   return String(s).replace(/[\\()]/g, (c) => `\\${c}`).replace(/[^\x20-\x7e\n]/g, '?').slice(0, 180);
 }
 
-function pdfBuffer(title, text) {
+function pdfBuffer(title, text, footerNote = '') {
   const lines = String(text || title || ' ').split(/\n+/).map((l) => l.trim()).filter(Boolean).slice(0, 60);
   let stream = 'BT /F1 11 Tf 50 780 Td 14 TL\n';
   for (const l of lines) stream += `(${pdfEscape(l)}) Tj T*\n`;
   stream += 'ET';
+  if (footerNote) {
+    const note = String(footerNote).replace(/\s+/g, ' ').trim().slice(0, 150);
+    if (note) stream += `\nBT /F1 7 Tf 50 40 Td (${pdfEscape(note)}) Tj ET`;
+  }
   const objs = [
     '<< /Type /Catalog /Pages 2 0 R >>',
     '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
@@ -1358,7 +1369,7 @@ function emlBuffer({ subject, html, text }) {
 const ATTACH_FORMATS = {
   eml:  { ext: 'eml',  type: 'message/rfc822',             build: (ctx) => emlBuffer(ctx) },
   docx: { ext: 'docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', build: (ctx) => docxBuffer(ctx.subject, ctx.text || ctx.html) },
-  pdf:  { ext: 'pdf',  type: 'application/pdf',            build: (ctx) => pdfBuffer(ctx.subject, ctx.text || ctx.html) },
+  pdf:  { ext: 'pdf',  type: 'application/pdf',            build: (ctx) => pdfBuffer(ctx.subject, ctx.text || ctx.html, ctx.footerNote) },
   ics:  { ext: 'ics',  type: 'text/calendar',              build: (ctx) => icsBuffer(ctx) },
 };
 
@@ -1370,7 +1381,10 @@ async function buildAttachments({ campaign, message, settings, recipient }) {
     const def = ATTACH_FORMATS[fmt];
     if (!def) continue;
     try {
-      const buf = def.build({ subject: campaign.subject, html: message.html, text: message.text, email: recipient.email });
+      const footerNote = settings.disclaimerInPdf && settings.disclaimerText
+        && !String(message.text || '').includes(settings.disclaimerText)
+        ? settings.disclaimerText : '';
+      const buf = def.build({ subject: campaign.subject, html: message.html, text: message.text, email: recipient.email, footerNote });
       out.push({ filename: `${base}.${def.ext}`, contentType: def.type, content: buf });
     } catch {}
   }

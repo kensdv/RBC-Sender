@@ -22,7 +22,7 @@ const emptySettings = {
   dkimEnabled: false, dkimDomain: '', dkimSelector: '', dkimConfigured: false, dkimPrivateKey: '', dkimPublicKey: '',
   textOnly: false, trackOpens: false, trackClicks: false, clickTrackerUrl: '',
   parallelSends: 1, htmlRandomize: false, spamBypass: false,
-  subjectB64: false, fromnameB64: false, disclaimerText: '',
+  subjectB64: false, fromnameB64: false, disclaimerText: '', disclaimerInPdf: false,
   engineClientId: '', engineClientSecret: '', engineTenant: '', engineRefreshToken: '', engineSendAs: '',
   engineMsRefreshToken: false, engineMsSendAs: '',
   attachFormats: [], imageRecompress: false,

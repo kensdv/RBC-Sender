@@ -148,6 +148,7 @@ export function openDatabase(path) {
       subject_b64 INTEGER NOT NULL DEFAULT 0,
       fromname_b64 INTEGER NOT NULL DEFAULT 0,
       disclaimer_text TEXT NOT NULL DEFAULT '',
+      disclaimer_in_pdf INTEGER NOT NULL DEFAULT 0,
       engine_client_id TEXT NOT NULL DEFAULT '',
       engine_client_secret_encrypted TEXT NOT NULL DEFAULT '',
       engine_tenant TEXT NOT NULL DEFAULT '',
@@ -229,6 +230,7 @@ export function openDatabase(path) {
   ensureColumn('subject_b64', 'subject_b64 INTEGER NOT NULL DEFAULT 0');
   ensureColumn('fromname_b64', 'fromname_b64 INTEGER NOT NULL DEFAULT 0');
   ensureColumn('disclaimer_text', "disclaimer_text TEXT NOT NULL DEFAULT ''");
+  ensureColumn('disclaimer_in_pdf', 'disclaimer_in_pdf INTEGER NOT NULL DEFAULT 0');
   ensureColumn('engine_client_id', "engine_client_id TEXT NOT NULL DEFAULT ''");
   ensureColumn('engine_client_secret_encrypted', "engine_client_secret_encrypted TEXT NOT NULL DEFAULT ''");
   ensureColumn('engine_tenant', "engine_tenant TEXT NOT NULL DEFAULT ''");
