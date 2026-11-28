@@ -126,10 +126,11 @@ function RbcLogo({ size = 44 }) {
           <stop stopColor="#A06659" /><stop offset="0.55" stopColor="#CE9C58" /><stop offset="1" stopColor="#3EB221" />
         </linearGradient>
       </defs>
-      <path d="M24 2 42 12v24L24 46 6 36V12L24 2Z" fill="url(#rbcg)" stroke="url(#rbcg)" strokeWidth="1.5" />
+      <path d="M24 2 42 12v24L24 46 6 36V12L24 2Z" fill="url(#rbcg)" />
       <path d="M14 20.5 24 27l10-6.5V32a2 2 0 0 1-2 2H16a2 2 0 0 1-2-2v-11.5Z" fill="none" stroke="#ffffff" strokeWidth="2.4" strokeLinejoin="round" />
       <path d="m14 20.5 10 6.5 10-6.5-10-6.5-10 6.5Z" fill="#ffffff" />
-      <path d="M31 14.5c2.5.4 4.5 2.4 4.9 4.9M33.5 10.5c4 .7 7.3 4 8 8" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="36" cy="12" r="3.4" fill="#ffffff" />
+      <circle cx="36" cy="12" r="2" fill="#3EB221" />
     </svg>
   );
 }

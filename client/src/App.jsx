@@ -157,6 +157,7 @@ export default function App() {
   const [newVariantSubject, setNewVariantSubject] = useState('');
   const [engagementTier, setEngagementTier] = useState('all');
   const [recipList, setRecipList] = useState('all');
+  const [recipProvider, setRecipProvider] = useState('all');
   const [importList, setImportList] = useState('');
   const [aiSubjectBusy, setAiSubjectBusy] = useState(false);
   const [aiTaskText, setAiTaskText] = useState('');
@@ -166,6 +167,10 @@ export default function App() {
   const [recipRows, setRecipRows] = useState([]);
   const [recipTotal, setRecipTotal] = useState(0);
   const [recipVersion, setRecipVersion] = useState(0);
+  const [recipEditing, setRecipEditing] = useState(null); // recipient id, 'new', or null
+  const [recipTarget, setRecipTarget] = useState(null);
+  const [recipDraft, setRecipDraft] = useState({ email: '', firstName: '', lastName: '', company: '', list: '' });
+  const [recipSaving, setRecipSaving] = useState(false);
   const [bouncePage, setBouncePage] = useState(1);
   const [histPage, setHistPage] = useState(1);
   const [campFilter, setCampFilter] = useState('all');
@@ -222,10 +227,10 @@ export default function App() {
 
   useEffect(() => {
     if (!token) return;
-    api(token, `/api/recipients?offset=${(recipPage - 1) * pageSize}&limit=${pageSize}&tier=${engagementTier}${recipList !== 'all' ? `&list=${encodeURIComponent(recipList)}` : ''}`)
+    api(token, `/api/recipients?offset=${(recipPage - 1) * pageSize}&limit=${pageSize}&tier=${engagementTier}${recipList !== 'all' ? `&list=${encodeURIComponent(recipList)}` : ''}${recipProvider !== 'all' ? `&provider=${encodeURIComponent(recipProvider)}` : ''}`)
       .then((r) => { setRecipRows(r.recipients || []); setRecipTotal(r.total || 0); })
       .catch(() => {});
-  }, [token, recipPage, pageSize, engagementTier, recipList, recipVersion]);
+  }, [token, recipPage, pageSize, engagementTier, recipList, recipProvider, recipVersion]);
 
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
@@ -995,6 +1000,8 @@ export default function App() {
   const delivFailing = delivEntries.filter(([, check]) => ['fail', 'warn'].includes(check?.status));
   const dashCampaigns = (state?.campaigns || []).slice(0, 6);
   const senderRows = (state?.smtpAccounts || []).slice(0, 5);
+  const bouncedEmails = new Set((state?.bounces || []).map((b) => String(b.email || '').toLowerCase()));
+  const providerBuckets = Object.entries(state?.providerTotals || state?.providerCounts || {}).sort((a, b) => b[1] - a[1]).slice(0, 10);
 
   // Friendly time shortcuts for the schedule screen.
   const quickWhen = (kind) => {
@@ -1054,11 +1061,124 @@ export default function App() {
   const aiReady = Boolean(settings.aiEndpoint && settings.aiKey);
   const pagedRecip = recipRows;
 
+  // Send only what changed; the server keeps every other field as it was.
   function saveRecipField(r, patch) {
     run(async () => {
-      await api(token, `/api/recipients/${r.id}`, { method: 'PUT', body: { firstName: r.firstName, lastName: r.lastName, company: r.company, list: r.list, ...patch } });
-      await refresh();
+      try {
+        await api(token, `/api/recipients/${r.id}`, { method: 'PUT', body: patch });
+        await refresh();
+      } catch (err) {
+        showNotice(err.message, 'err');
+      }
     });
+  }
+
+  function openRecipEditor(r) {
+    setRecipEditing(r ? r.id : 'new');
+    setRecipTarget(r || null);
+    setRecipDraft(r
+      ? { email: r.email, firstName: r.firstName || '', lastName: r.lastName || '', company: r.company || '', list: r.list || '' }
+      : { email: '', firstName: '', lastName: '', company: '', list: recipList !== 'all' && recipList !== '__none__' ? recipList : '' });
+  }
+
+  function closeRecipEditor() {
+    setRecipEditing(null);
+    setRecipTarget(null);
+    setRecipSaving(false);
+  }
+
+  function setRecipField(key, value) {
+    setRecipDraft((d) => ({ ...d, [key]: value }));
+  }
+
+  async function saveRecipEditor() {
+    const body = {
+      email: recipDraft.email.trim(),
+      firstName: recipDraft.firstName.trim(),
+      lastName: recipDraft.lastName.trim(),
+      company: recipDraft.company.trim(),
+      list: recipDraft.list.trim(),
+    };
+    if (!body.email) return showNotice('An email address is required.', 'err');
+    setRecipSaving(true);
+    try {
+      if (recipEditing === 'new') {
+        const r = await api(token, '/api/recipients', { method: 'POST', body });
+        showNotice(r.created ? 'Contact added.' : 'Existing contact updated.');
+      } else {
+        await api(token, `/api/recipients/${recipEditing}`, { method: 'PUT', body });
+        showNotice('Contact updated.');
+      }
+      closeRecipEditor();
+      await refresh();
+    } catch (err) {
+      showNotice(err.message, 'err');
+    } finally {
+      setRecipSaving(false);
+    }
+  }
+
+  // Red rows (no MX) are dropped automatically; only deliverable contacts stay.
+  // Respects the list/provider filters currently on screen.
+  async function cleanUnverified(silent = false) {
+    const body = {};
+    if (recipList !== 'all') body.list = recipList;
+    if (recipProvider !== 'all') body.provider = recipProvider;
+    const r = await api(token, '/api/recipients/remove-unverified', { method: 'POST', body });
+    if (r.removed && !silent) showNotice(`Removed ${r.removed} unverified address${r.removed === 1 ? '' : 'es'}.`);
+    setRecipVersion((v) => v + 1);
+    await refresh();
+    return r.removed || 0;
+  }
+
+  // Editor for one contact — a card above the table, so nothing is clipped.
+  function recipEditor(r) {
+    const tone = !r ? 'ok' : r.suppressed ? 'warn' : (r.custom?.hasMx === 0 || r.custom?.provider === 'No MX' || r.validSyntax === false) ? 'bad' : 'ok';
+    const label = !r ? '' : r.suppressed ? 'Suppressed' : (r.custom?.hasMx === 0 || r.custom?.provider === 'No MX') ? 'No MX' : r.validSyntax === false ? 'Invalid' : 'Deliverable';
+    return (
+      <div className="contact-editor">
+        <div className="contact-editor-head">
+          <span>{r ? 'Edit contact' : 'New contact'}</span>
+          {r && <span className={`contact-status ${tone}`}>{label}</span>}
+          <button type="button" className="contact-editor-close" onClick={closeRecipEditor} aria-label="Close editor">✕</button>
+        </div>
+        <div className="contact-edit-grid">
+          <label className="field-label">Email
+            <input className="w-input" value={recipDraft.email} onChange={(e) => setRecipField('email', e.target.value)} placeholder="name@domain.com" autoFocus />
+          </label>
+          <label className="field-label">First name
+            <input className="w-input" value={recipDraft.firstName} onChange={(e) => setRecipField('firstName', e.target.value)} placeholder="Alex" />
+          </label>
+          <label className="field-label">Last name
+            <input className="w-input" value={recipDraft.lastName} onChange={(e) => setRecipField('lastName', e.target.value)} placeholder="Morgan" />
+          </label>
+          <label className="field-label">Company
+            <input className="w-input" value={recipDraft.company} onChange={(e) => setRecipField('company', e.target.value)} placeholder="Example Ltd" />
+          </label>
+          <label className="field-label">List
+            <input className="w-input" list="rbc-lists" value={recipDraft.list} onChange={(e) => setRecipField('list', e.target.value)} placeholder="Unlisted" />
+          </label>
+        </div>
+        <div className="btn-row">
+          <button type="button" className="btn-primary" disabled={recipSaving || !recipDraft.email.trim()} onClick={saveRecipEditor}>
+            {recipSaving ? 'Saving…' : r ? 'Save changes' : 'Add contact'}
+          </button>
+          <button type="button" className="btn-sm" onClick={closeRecipEditor}>Cancel</button>
+          {r && (
+            <button type="button" className="btn-sm btn-danger" onClick={async () => {
+              if (await uiConfirm(`Remove ${r.email} from this list?`, { title: 'REMOVE CONTACT', danger: true, confirmLabel: 'REMOVE' })) {
+                run(async () => {
+                  await api(token, `/api/recipients/${r.id}`, { method: 'DELETE' });
+                  closeRecipEditor();
+                  await refresh();
+                  showNotice('Contact removed.');
+                });
+              }
+            }}>Remove contact</button>
+          )}
+        </div>
+      </div>
+    );
   }
   const pagedBounces = (state?.bounces || []).slice((bouncePage - 1) * pageSize, bouncePage * pageSize);
   const filteredCampaigns = (state?.campaigns || []).filter((c) => {
@@ -2139,13 +2259,18 @@ export default function App() {
                           const r = await api(token, '/api/recipients/verify', { method: 'POST', body: { all: true } });
                           const bad = r.results.filter((x) => !x.hasMx || x.disposable || x.roleBased);
                           setVerifyResults(r.results);
-                          showNotice(`Verified ${r.results.length} — ${bad.length} flagged (no-MX/disposable/role).`);
+                          const removed = await cleanUnverified(true);
+                          showNotice(`Verified ${r.results.length} — ${bad.length} flagged, ${removed} unverified removed.`);
                         })}>Check addresses</button>
                         <button className="btn-xs" disabled={busy || !state.recipientTotal} onClick={() => run(async () => {
                           const r = await api(token, '/api/recipients/classify', { method: 'POST', body: {} });
-                          showNotice(`Classified ${r.classified}: ${Object.entries(r.counts).map(([k, v]) => `${k}=${v}`).join(', ')}`);
-                          await refresh();
+                          const removed = await cleanUnverified(true);
+                          showNotice(`Grouped ${r.classified} contacts into ${Object.keys(r.counts).length} provider buckets${removed ? ` — removed ${removed} unverified` : ''}.`);
                         })}>Group by provider</button>
+                        <button className="btn-xs" disabled={busy || !state.recipientTotal} onClick={() => run(async () => {
+                          const removed = await cleanUnverified();
+                          if (!removed) showNotice('No unverified addresses found.');
+                        })}>Remove unverified</button>
                         <button className="btn-xs" disabled={busy} onClick={() => run(async () => {
                           const r = await api(token, '/api/hygiene/remove-role-addresses', { method: 'POST' });
                           showNotice(`Removed ${r.removed} role addresses.`);
@@ -2232,19 +2357,24 @@ export default function App() {
                       </div>
                     </div>
                     <div className="filter-row">
-                      <span className="dim">LIST:</span>
+                      <span className="dim">List</span>
                       <select className="w-select" value={recipList} onChange={(e) => { setRecipList(e.target.value); setRecipPage(1); }} aria-label="Filter by contact list">
-                        <option value="all">ALL LISTS ({state.recipientTotal || 0})</option>
+                        <option value="all">All lists ({state.recipientTotal || 0})</option>
                         {(state.lists || []).map((l) => <option key={l.name} value={l.name}>{l.name} ({l.count})</option>)}
-                        <option value="__none__">— UNLISTED —</option>
+                        <option value="__none__">Unlisted</option>
                       </select>
-                      <span className="dim">ENGAGEMENT:</span>
-                      <select className="w-select" value={engagementTier} onChange={(e) => { setEngagementTier(e.target.value); setRecipPage(1); }} aria-label="Filter by engagement tier">
-                        <option value="all">ALL</option>
-                        <option value="hot">HOT (70+)</option>
-                        <option value="warm">WARM (31-69)</option>
-                        <option value="cold">COLD (0-30)</option>
-                      </select>
+                      <span className="dim contact-count">{recipTotal.toLocaleString()} shown</span>
+                      <button className="btn-xs" onClick={() => openRecipEditor(null)}>Add contact</button>
+                    </div>
+                    <div className="bucket-row" aria-label="Filter contacts by provider">
+                      <button type="button" className={`bucket-chip ${recipProvider === 'all' ? 'on' : ''}`} onClick={() => { setRecipProvider('all'); setRecipPage(1); }}>
+                        All <span>{state.recipientTotal || 0}</span>
+                      </button>
+                      {providerBuckets.map(([name, count]) => (
+                        <button key={name} type="button" className={`bucket-chip ${recipProvider === name ? 'on' : ''}`} onClick={() => { setRecipProvider(name); setRecipPage(1); }}>
+                          {name} <span>{count}</span>
+                        </button>
+                      ))}
                     </div>
                     {verifyResults && (
                       <div className="verify-panel">
@@ -2266,32 +2396,44 @@ export default function App() {
                         </div>
                       </div>
                     )}
+                    {recipEditing && recipEditor(recipTarget)}
                     <div className="tbl-wrap">
-                      <table className="w-table">
-                        <thead><tr><th>EMAIL</th><th>NAME</th><th>LIST</th><th>PROVIDER</th><th>ENGAGEMENT</th><th>STATUS</th><th></th></tr></thead>
+                      <table className="w-table contact-table">
+                        <thead><tr><th>Contact</th><th>Name</th><th>List</th><th>Status</th><th></th></tr></thead>
                         <tbody>
                           {pagedRecip.map((r) => {
+                            const bounced = bouncedEmails.has(String(r.email).toLowerCase()) || r.bounceCount > 0;
+                            const noMx = r.custom?.hasMx === 0 || r.custom?.provider === 'No MX';
+                            const invalid = r.validSyntax === false;
+                            const tone = r.suppressed || bounced ? 'warn' : noMx || invalid ? 'bad' : 'ok';
+                            const label = r.suppressed ? 'Suppressed' : bounced ? 'Bounced' : noMx ? 'No MX' : invalid ? 'Invalid' : 'Deliverable';
                             return (
-                              <tr key={r.id}>
-                                <td>{r.email}</td>
-                                <td><input className="cell-edit" defaultValue={[r.firstName, r.lastName].filter(Boolean).join(' ')} placeholder="—" aria-label={`Edit name for ${r.email}`}
-                                  onBlur={(e) => { const v = e.target.value.trim(); const cur = [r.firstName, r.lastName].filter(Boolean).join(' '); if (v !== cur) { const parts = v.split(/\s+/); saveRecipField(r, { firstName: parts.shift() || '', lastName: parts.join(' ') }); } }} /></td>
-                                <td><input className="cell-edit cell-edit-list" list="rbc-lists" defaultValue={r.list || ''} placeholder="—" aria-label={`Edit list for ${r.email}`}
-                                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== (r.list || '')) saveRecipField(r, { list: v }); }} /></td>
-                                <td className="dim">{r.custom?.provider || '—'}</td>
+                              <tr key={r.id} className={`contact-row contact-${tone}`}>
                                 <td>
-                                  <span className={`badge ${r.engagement_score >= 70 ? 'badge-ok' : r.engagement_score >= 31 ? 'badge-def' : 'badge-fail'}`}>
-                                    {r.engagement_score || 0}
+                                  <span className="contact-email">
+                                    <span className="contact-dot" aria-hidden="true" />
+                                    {r.email}
                                   </span>
                                 </td>
-                                <td><span className={`badge ${r.suppressed ? 'badge-fail' : r.validSyntax === false ? 'badge-def' : 'badge-ok'}`}>{r.suppressed ? 'SUPPRESSED' : r.validSyntax === false ? 'INVALID' : 'ACTIVE'}</span></td>
-                                <td><div className="act-row">{r.suppressed
-                                  ? <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Unsuppress ${r.email}? They will receive future campaigns again.`, { title: 'UNSUPPRESS RECIPIENT', confirmLabel: 'UNSUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/unsuppress`, { method: 'POST' }); await refresh(); }); }}>UNSUPPRESS</button>
-                                  : <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Suppress ${r.email}?`, { title: 'SUPPRESS RECIPIENT', danger: true, confirmLabel: 'SUPPRESS' })) run(async () => { await api(token, `/api/recipients/${r.id}/suppress`, { method: 'POST' }); await refresh(); }); }}>SUPPRESS</button>}
-                                  <button className="btn-xs btn-danger" onClick={async () => { if (await uiConfirm(`Delete ${r.email} from the list?`, { title: 'DELETE RECIPIENT', danger: true, confirmLabel: 'DELETE' })) run(async () => { await api(token, `/api/recipients/${r.id}`, { method: 'DELETE' }); await refresh(); }); }}>DEL</button></div></td>
+                                <td>
+                                  <input className="cell-edit" defaultValue={[r.firstName, r.lastName].filter(Boolean).join(' ')} placeholder="—" aria-label={`Edit name for ${r.email}`}
+                                    onBlur={(e) => { const v = e.target.value.trim(); const cur = [r.firstName, r.lastName].filter(Boolean).join(' '); if (v !== cur) { const parts = v.split(/\s+/); saveRecipField(r, { firstName: parts.shift() || '', lastName: parts.join(' ') }); } }} />
+                                  {r.company && <span className="contact-company">{r.company}</span>}
+                                </td>
+                                <td><input className="cell-edit cell-edit-list" list="rbc-lists" defaultValue={r.list || ''} placeholder="—" aria-label={`Edit list for ${r.email}`}
+                                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== (r.list || '')) saveRecipField(r, { list: v }); }} /></td>
+                                <td><span className={`contact-status ${tone}`}>{label}</span></td>
+                                <td><div className="act-row">
+                                  <button className="btn-xs" onClick={() => openRecipEditor(r)}>Edit</button>
+                                  {r.suppressed
+                                    ? <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Restore ${r.email} to future sends?`, { title: 'RESTORE CONTACT', confirmLabel: 'RESTORE' })) run(async () => { await api(token, `/api/recipients/${r.id}/unsuppress`, { method: 'POST' }); await refresh(); }); }}>Restore</button>
+                                    : <button className="btn-xs" onClick={async () => { if (await uiConfirm(`Unsubscribe ${r.email}? They will stop receiving campaigns.`, { title: 'UNSUBSCRIBE', confirmLabel: 'UNSUBSCRIBE' })) run(async () => { await api(token, `/api/recipients/${r.id}/suppress`, { method: 'POST' }); await refresh(); }); }}>Unsubscribe</button>}
+                                  {(tone === 'bad' || tone === 'warn') && <button className="btn-xs btn-danger" onClick={async () => { if (await uiConfirm(`Remove ${r.email} from this list?`, { title: 'REMOVE CONTACT', danger: true, confirmLabel: 'REMOVE' })) run(async () => { await api(token, `/api/recipients/${r.id}`, { method: 'DELETE' }); await refresh(); }); }}>Remove</button>}
+                                </div></td>
                               </tr>
                             );
                           })}
+                          {!pagedRecip.length && <tr><td colSpan={5} className="dim" style={{ textAlign: 'center', padding: 18 }}>No contacts in this bucket yet. Import a list above or pick another provider.</td></tr>}
                         </tbody>
                       </table>
                     </div>
@@ -3760,6 +3902,12 @@ sudo tail -f /var/log/maillog`}</pre>
               {/* ══ DASHBOARD ══ */}
               {tab === 'dashboard' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {!chatOpen && (
+                    <button type="button" className="ai-bot" onClick={() => setChatOpen(true)} aria-label="Ask Rubicon AI">
+                      <span className="ai-bot-bubble">Ask Rubicon</span>
+                      <span className="ai-bot-figure"><RbcMascot size={54} /></span>
+                    </button>
+                  )}
                   <div className="dash-head">
                     <div className="dash-head-left">
                       <div className="dash-title">Overview</div>
@@ -4627,7 +4775,7 @@ client_id:secret:tenant            app creds (no RT)
       {chatOpen && (
         <div className="chat-panel">
           <div className="chat-head">
-            <span>RUBICON AI</span>
+            <span className="chat-brand"><span className="chat-avatar"><RbcMascot size={24} /></span>Rubicon AI</span>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               {chatModels?.length ? (
                 <select className="chat-model-sel" value={chatModel} onChange={(e) => setChatModel(e.target.value)}>

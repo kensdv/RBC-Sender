@@ -575,6 +575,9 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const recipientTotal = db.prepare('SELECT COUNT(*) AS c FROM recipients').get().c;
     const providerCounts = {};
     for (const row of db.prepare(`SELECT COALESCE(NULLIF(TRIM(json_extract(custom_json,'$.provider')),''), 'Unclassified') AS p, COUNT(*) AS c FROM recipients WHERE consent_confirmed = 1 AND suppressed = 0 GROUP BY p`).all()) providerCounts[row.p] = row.c;
+    // Every row, so the contact buckets match the full table (suppressed included).
+    const providerTotals = {};
+    for (const row of db.prepare(`SELECT COALESCE(NULLIF(TRIM(json_extract(custom_json,'$.provider')),''), 'Unclassified') AS p, COUNT(*) AS c FROM recipients GROUP BY p`).all()) providerTotals[row.p] = row.c;
     const lists = db.prepare(`SELECT list_name AS name, COUNT(*) AS count FROM recipients WHERE list_name <> '' GROUP BY list_name ORDER BY list_name COLLATE NOCASE`).all();
     const campaigns = db.prepare(`
       SELECT c.*, COUNT(d.id) AS total,
@@ -603,7 +606,7 @@ export async function createApp({ db, config, mailer, worker, emit: emitFn }) {
     const reputationAlerts = db.prepare('SELECT target, source, listed_at AS listedAt FROM reputation_alerts WHERE resolved_at IS NULL ORDER BY listed_at DESC').all();
     seedPoolFromLegacy();
     const smtpAccounts = db.prepare('SELECT * FROM smtp_accounts ORDER BY id').all().map(accountView);
-    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db, config), recipientTotal, providerCounts, lists, campaigns, bounces, confirmed, rates, aiTasks: db.prepare('SELECT id, text, run_at, repeat, status, last_result FROM ai_tasks ORDER BY run_at').all(), publicBaseUrl: config.publicBaseUrl, events: recentActivity(db, listEvents(120)), telegram: telegramStatus(db, config), reputationAlerts };
+    return { smtp: publicSmtp(db), smtpAccounts, sendSettings: publicSendSettings(db, config), recipientTotal, providerCounts, providerTotals, lists, campaigns, bounces, confirmed, rates, aiTasks: db.prepare('SELECT id, text, run_at, repeat, status, last_result FROM ai_tasks ORDER BY run_at').all(), publicBaseUrl: config.publicBaseUrl, events: recentActivity(db, listEvents(120)), telegram: telegramStatus(db, config), reputationAlerts };
   });
 
   app.put('/api/smtp', async (request) => {
@@ -2743,16 +2746,46 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     return { imported: unique.length, duplicates: parsed.records.length - unique.length, errors: parsed.errors, list: listName };
   });
 
-  // Editable recipient fields — name/company corrections and list moves.
+  // One contact at a time — the editor posts here; an existing email is updated.
+  app.post('/api/recipients', async (request) => {
+    const body = request.body || {};
+    const addr = email(body.email);
+    const existing = db.prepare('SELECT id FROM recipients WHERE LOWER(email) = ?').get(addr);
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO recipients (email, first_name, last_name, company, custom_json, consent_confirmed, list_name, created_at, updated_at)
+      VALUES (?, ?, ?, ?, '{}', 1, ?, ?, ?)
+      ON CONFLICT(email) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name,
+        company = excluded.company, consent_confirmed = 1, list_name = excluded.list_name, updated_at = excluded.updated_at
+    `).run(addr, text(body.firstName || '', 'firstName', 120), text(body.lastName || '', 'lastName', 120),
+      text(body.company || '', 'company', 160), text(body.list || '', 'list', 80), now, now);
+    const row = db.prepare('SELECT * FROM recipients WHERE LOWER(email) = ?').get(addr);
+    return { ok: true, created: !existing, recipient: recipientView(row) };
+  });
+
+  // Editable recipient fields — name/company corrections, list moves and email fixes.
+  // Only the keys sent are written, so two quick inline edits cannot undo each other.
   app.put('/api/recipients/:id', async (request) => {
     const id = Number(request.params.id);
-    const row = db.prepare('SELECT id FROM recipients WHERE id = ?').get(id);
+    const row = db.prepare('SELECT * FROM recipients WHERE id = ?').get(id);
     if (!row) fail('Recipient not found', 404);
     const body = request.body || {};
-    db.prepare(`UPDATE recipients SET first_name = ?, last_name = ?, company = ?, list_name = ?, updated_at = ? WHERE id = ?`)
-      .run(text(body.firstName || '', 'firstName', 120), text(body.lastName || '', 'lastName', 120),
-        text(body.company || '', 'company', 160), text(body.list || '', 'list', 80), new Date().toISOString(), id);
-    return { ok: true };
+    const sets = [];
+    const params = [];
+    if (body.email !== undefined) {
+      const nextEmail = email(body.email);
+      const clash = db.prepare('SELECT id FROM recipients WHERE LOWER(email) = ? AND id <> ?').get(nextEmail, id);
+      if (clash) fail('Another contact already uses that email', 409);
+      sets.push('email = ?'); params.push(nextEmail);
+    }
+    if (body.firstName !== undefined) { sets.push('first_name = ?'); params.push(text(body.firstName, 'firstName', 120)); }
+    if (body.lastName !== undefined) { sets.push('last_name = ?'); params.push(text(body.lastName, 'lastName', 120)); }
+    if (body.company !== undefined) { sets.push('company = ?'); params.push(text(body.company, 'company', 160)); }
+    if (body.list !== undefined) { sets.push('list_name = ?'); params.push(text(body.list, 'list', 80)); }
+    if (!sets.length) return { ok: true, recipient: recipientView(row) };
+    sets.push('updated_at = ?'); params.push(new Date().toISOString(), id);
+    db.prepare(`UPDATE recipients SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+    return { ok: true, recipient: recipientView(db.prepare('SELECT * FROM recipients WHERE id = ?').get(id)) };
   });
 
   // File uploads for campaign attachments (base64 JSON — no multipart dep)
@@ -2871,11 +2904,14 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     const tier = String(request.query.tier || 'all');
     const lookup = String(request.query.email || '').trim().toLowerCase();
     const list = String(request.query.list || '').trim();
+    const provider = String(request.query.provider || '').trim();
     const where = ['1=1'];
     const params = [];
     if (lookup) { where.push('LOWER(email) = ?'); params.push(lookup); }
     if (list === '__none__') where.push("list_name = ''");
     else if (list) { where.push('list_name = ?'); params.push(list); }
+    if (provider === '__none__' || provider === 'Unclassified') where.push("COALESCE(json_extract(custom_json,'$.provider'),'') = ''");
+    else if (provider) { where.push("json_extract(custom_json,'$.provider') = ?"); params.push(provider); }
     if (tier === 'hot') where.push('engagement_score >= 70');
     else if (tier === 'warm') where.push('engagement_score BETWEEN 31 AND 69');
     else if (tier === 'cold') where.push('engagement_score < 31');
@@ -2913,6 +2949,8 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
         roleBased: ROLE_LOCALS.has(local),
       };
     });
+    const persist = db.prepare("UPDATE recipients SET custom_json = json_set(COALESCE(custom_json,'{}'), '$.provider', ?, '$.hasMx', ?, '$.mx', ?) WHERE LOWER(email) = ?");
+    for (const r of results) persist.run(r.provider, r.hasMx ? 1 : 0, r.mx || '', r.email);
     const flagged = results.filter((r) => !r.hasMx || r.disposable || r.roleBased || !r.valid).length;
     emit('sorter', { message: `verify done — ${results.length} checked, ${flagged} flagged` });
     return { results, total: results.length, flagged };
@@ -3003,15 +3041,30 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     for (let i = 0; i < domains.length; i += CONCURRENCY) {
       await Promise.all(domains.slice(i, i + CONCURRENCY).map(async (d) => { mxCache[d] = await mxInfo(d); }));
     }
-    const update = db.prepare("UPDATE recipients SET custom_json = json_set(COALESCE(custom_json,'{}'), '$.provider', ?) WHERE id = ?");
+    const update = db.prepare("UPDATE recipients SET custom_json = json_set(COALESCE(custom_json,'{}'), '$.provider', ?, '$.hasMx', ?, '$.mx', ?) WHERE id = ?");
     const counts = {};
     for (const r of rows) {
       const domain = r.email.split('@')[1]?.toLowerCase() || '';
-      const provider = mxCache[domain]?.provider || 'Unknown';
-      counts[provider] = (counts[provider] || 0) + 1;
-      update.run(provider, r.id);
+      const info = mxCache[domain] || { provider: 'Unknown', hasMx: false, mx: '' };
+      counts[info.provider] = (counts[info.provider] || 0) + 1;
+      update.run(info.provider, info.hasMx ? 1 : 0, info.mx || '', r.id);
     }
     return { classified: rows.length, counts };
+  });
+
+  // Keep only addresses with a live MX. Red rows are removed after verification.
+  // Honours the list/provider filters the operator is looking at.
+  app.post('/api/recipients/remove-unverified', async (request) => {
+    const list = String(request.body?.list || '').trim();
+    const provider = String(request.body?.provider || '').trim();
+    const where = ["(json_extract(custom_json, '$.hasMx') = 0 OR json_extract(custom_json, '$.provider') = 'No MX')"];
+    const params = [];
+    if (list === '__none__') where.push("list_name = ''");
+    else if (list) { where.push('list_name = ?'); params.push(list); }
+    if (provider === '__none__' || provider === 'Unclassified') where.push("COALESCE(json_extract(custom_json,'$.provider'),'') = ''");
+    else if (provider) { where.push("json_extract(custom_json,'$.provider') = ?"); params.push(provider); }
+    const result = db.prepare(`DELETE FROM recipients WHERE ${where.join(' AND ')}`).run(...params);
+    return { removed: result.changes || 0 };
   });
 
   app.post('/api/recipients/:id/suppress', async (request) => {
