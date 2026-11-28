@@ -2490,31 +2490,39 @@ export default function App() {
                   )}
                   <p className="dim-txt">Sends rotate across enabled accounts; failures cool an account down and fail over to the next. VERIFY ALL handshakes every account — dead ones drop out of rotation for 6h. The legacy config above acts as fallback when the pool is empty.</p>
                   {!!(state.smtpAccounts || []).length && (
-                    <div className="audience-block" style={{ marginBottom: 10 }}>
-                      <label className="field-label">ACTIVE SENDERS <span className="dim">— which mailboxes this suite sends from (blank = all enabled)</span></label>
-                      <div className="provider-chips">
+                    <details className="account-picker" style={{ marginBottom: 10 }}>
+                      <summary>
+                        <span>ACTIVE SENDERS</span>
+                        <span className="dim">
+                          {(settings.poolAccountIds || []).length
+                            ? `${(settings.poolAccountIds || []).length} selected`
+                            : 'all enabled'}
+                        </span>
+                      </summary>
+                      <div className="account-picker-body">
+                        <label className="check-row">
+                          <input type="checkbox" checked={!(settings.poolAccountIds || []).length}
+                            onChange={() => setSettings({ ...settings, poolAccountIds: [] })} />
+                          <span>ALL ENABLED SENDERS</span>
+                        </label>
                         {state.smtpAccounts.map((a) => {
                           const cur = settings.poolAccountIds || [];
-                          const on = !cur.length || cur.includes(a.id);
                           return (
-                            <button
-                              key={a.id}
-                              type="button"
-                              className={`prov-chip ${on ? 'prov-chip-on' : ''}`}
-                              title={a.enabled ? `${a.username} — ${a.fromEmail || 'no from set'}` : `${a.username} (disabled)`}
-                              onClick={() => {
+                            <label className="check-row" key={a.id} title={a.enabled ? `${a.username} — ${a.fromEmail || 'no from set'}` : `${a.username} (disabled)`}>
+                              <input type="checkbox" checked={cur.includes(a.id)} onChange={() => {
                                 const next = cur.includes(a.id) ? cur.filter((x) => x !== a.id) : [...cur, a.id];
                                 setSettings({ ...settings, poolAccountIds: next });
-                              }}
-                            >{a.label || a.username} <span className="prov-count">{a.authType === 'ms_rt' ? 'RT' : a.authType === 'ms_cc' ? 'CC' : 'SMTP'}{!a.enabled ? ' · OFF' : ''}</span></button>
+                              }} />
+                              <span>{a.label || a.username} <span className="dim">· {a.authType === 'ms_rt' ? 'RT' : a.authType === 'ms_cc' ? 'CC' : 'SMTP'}{!a.enabled ? ' · OFF' : ''}</span></span>
+                            </label>
                           );
                         })}
-                        {!!(settings.poolAccountIds || []).length && (
-                          <button type="button" className="prov-chip prov-chip-clear" onClick={() => setSettings({ ...settings, poolAccountIds: [] })}>ALL</button>
-                        )}
+                        <div className="btn-row" style={{ marginTop: 6 }}>
+                          <button type="button" className="btn-xs" onClick={() => setSettings({ ...settings, poolAccountIds: [] })}>ALL</button>
+                        </div>
                       </div>
-                      <p className="dim-txt" style={{ fontSize: 10, marginTop: 4 }}>Picks who can send — hit SAVE SETTINGS to persist. Campaigns can narrow it further per-send.</p>
-                    </div>
+                      <p className="dim-txt" style={{ fontSize: 10, margin: '0 10px 8px' }}>Picks who can send — hit SAVE SETTINGS to persist. Campaigns can narrow it further per-send.</p>
+                    </details>
                   )}
                   {!!(state.smtpAccounts || []).length && (
                     <div className="pool-summary">
