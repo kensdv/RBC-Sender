@@ -165,6 +165,7 @@ export default function App() {
   const [campFilter, setCampFilter] = useState('all');
   const [campSearch, setCampSearch] = useState('');
   const [acctPage, setAcctPage] = useState(1);
+  const [selectedAccts, setSelectedAccts] = useState([]);
   const [pageSize, setPageSize] = useState(50);
   const [templates, setTemplates] = useState([]);
   const [templateDropdownOpen, setTemplateDropdownOpen] = useState(false);
@@ -2401,7 +2402,7 @@ export default function App() {
                 {/* SMTP ACCOUNT POOL */}
                 <div className="pane">
                   <div className="pane-head"><span>ACCOUNT POOL — ROTATION & FAILOVER</span>
-                    <div style={{display:'flex',gap:6}}>
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
                       <button className="btn-sm" onClick={() => { setSmtpImportOpen(!smtpImportOpen); setMsRtImportOpen(false); }}>[ IMPORT SMTP ]</button>
                       <button className="btn-sm" onClick={() => { setMsRtImportOpen(!msRtImportOpen); setSmtpImportOpen(false); }}>[ IMPORT MS RT ]</button>
                       <button className="btn-sm" disabled={busy} onClick={() => run(async () => {
@@ -2410,6 +2411,27 @@ export default function App() {
                         showNotice(dead.length ? `${r.live}/${r.total} live — ${dead.length} dead cooled 6h.` : `All ${r.total} accounts verified live.`);
                         await refresh();
                       })}>[ VERIFY ALL ]</button>
+                      <button className="btn-sm btn-danger" disabled={busy || !selectedAccts.length} onClick={async () => {
+                        if (await uiConfirm(`Delete ${selectedAccts.length} selected SMTP account${selectedAccts.length === 1 ? '' : 's'}?`, { title: 'DELETE SELECTED ACCOUNTS', danger: true, confirmLabel: `DELETE ${selectedAccts.length}` })) {
+                          run(async () => {
+                            const r = await api(token, '/api/smtp/accounts/delete', { method: 'POST', body: { ids: selectedAccts } });
+                            setSelectedAccts([]);
+                            showNotice(`${r.deleted} account${r.deleted === 1 ? '' : 's'} deleted.`);
+                            await refresh();
+                          });
+                        }
+                      }}>[ DELETE SELECTED{selectedAccts.length ? ` (${selectedAccts.length})` : ''} ]</button>
+                      <button className="btn-sm btn-danger" disabled={busy || !(state.smtpAccounts || []).length} onClick={async () => {
+                        const total = (state.smtpAccounts || []).length;
+                        if (await uiConfirm(`Delete ALL ${total} SMTP accounts? This removes the whole pool.`, { title: 'DELETE ALL SMTP ACCOUNTS', danger: true, confirmLabel: `DELETE ALL ${total}` })) {
+                          run(async () => {
+                            const r = await api(token, '/api/smtp/accounts/delete', { method: 'POST', body: { all: true } });
+                            setSelectedAccts([]);
+                            showNotice(`All ${r.deleted} SMTP accounts deleted.`);
+                            await refresh();
+                          });
+                        }
+                      }}>[ DELETE ALL ]</button>
                     </div>
                   </div>
                   {smtpImportOpen && (
@@ -2535,10 +2557,27 @@ export default function App() {
                   )}
                   <div className="tbl-wrap" style={{maxHeight:360}}>
                     <table className="w-table pool-table">
-                      <thead><tr><th>ACCOUNT</th><th>USERNAME</th><th>FROM</th><th>QUOTA</th><th>STATE</th><th>ACTIONS</th></tr></thead>
+                      <thead><tr>
+                        <th style={{ width: 34 }}>
+                          <input type="checkbox" aria-label="Select all accounts on this page"
+                            checked={pagedAccounts.length > 0 && pagedAccounts.every((a) => selectedAccts.includes(a.id))}
+                            onChange={() => setSelectedAccts((cur) => {
+                              const set = new Set(cur);
+                              const all = pagedAccounts.length > 0 && pagedAccounts.every((a) => set.has(a.id));
+                              for (const a of pagedAccounts) { if (all) set.delete(a.id); else set.add(a.id); }
+                              return [...set];
+                            })} />
+                        </th>
+                        <th>ACCOUNT</th><th>USERNAME</th><th>FROM</th><th>QUOTA</th><th>STATE</th><th>ACTIONS</th>
+                      </tr></thead>
                       <tbody>
                         {pagedAccounts.map((a) => (
                           <tr key={a.id}>
+                            <td>
+                              <input type="checkbox" aria-label={`Select ${a.label || a.username || `account ${a.id}`}`}
+                                checked={selectedAccts.includes(a.id)}
+                                onChange={() => setSelectedAccts((cur) => cur.includes(a.id) ? cur.filter((x) => x !== a.id) : [...cur, a.id])} />
+                            </td>
                             <td>
                               <div className="pool-account">
                                 <strong>{a.label || a.username || `#${a.id}`}</strong>
@@ -2579,7 +2618,7 @@ export default function App() {
                             </td>
                           </tr>
                         ))}
-                        {!(state.smtpAccounts || []).length && <tr><td colSpan={6} className="dim" style={{textAlign:'center'}}>No pool accounts — import SMTP above or use the legacy config.</td></tr>}
+                        {!(state.smtpAccounts || []).length && <tr><td colSpan={7} className="dim" style={{textAlign:'center'}}>No pool accounts — import SMTP above or use the legacy config.</td></tr>}
                       </tbody>
                     </table>
                   </div>

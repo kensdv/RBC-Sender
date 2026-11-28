@@ -2052,6 +2052,41 @@ ${ctxLines ? `\nOPERATOR CONTEXT:\n${ctxLines}` : ''}${rules ? `\n\nSTANDING RUL
     return { ok: true };
   });
 
+  // Bulk delete: { ids: [...] } for a selection, or { all: true } for the whole pool.
+  app.post('/api/smtp/accounts/delete', async (request) => {
+    const body = request.body || {};
+    let ids = [];
+    if (body.all === true) {
+      ids = db.prepare('SELECT id FROM smtp_accounts').all().map((r) => r.id);
+    } else {
+      ids = (Array.isArray(body.ids) ? body.ids : [])
+        .map((n) => Number(n))
+        .filter((n) => Number.isInteger(n) && n > 0);
+    }
+    if (!ids.length) return { deleted: 0 };
+
+    const remove = db.prepare('DELETE FROM smtp_accounts WHERE id = ?');
+    let deleted = 0;
+    for (const id of ids) deleted += Number(remove.run(id).changes || 0);
+
+    // Drop deleted ids from the saved pool selection so settings stay consistent.
+    try {
+      const row = db.prepare("SELECT value FROM integrations WHERE key = 'pool_account_ids'").get();
+      if (row) {
+        const gone = new Set(ids);
+        let selected = [];
+        try { selected = JSON.parse(row.value || '[]'); } catch { selected = []; }
+        const next = (Array.isArray(selected) ? selected : []).filter((id) => !gone.has(Number(id)));
+        if (next.length !== selected.length) {
+          db.prepare("UPDATE integrations SET value = ? WHERE key = 'pool_account_ids'").run(JSON.stringify(next));
+        }
+      }
+    } catch { /* selection cleanup is best-effort */ }
+
+    emit('info', { message: `SMTP accounts deleted - ${deleted} removed` });
+    return { deleted };
+  });
+
   app.post('/api/smtp/accounts/:id/reset-quota', async (request) => {
     db.prepare("UPDATE smtp_accounts SET sent_today = 0, sent_date = '' WHERE id = ?").run(Number(request.params.id));
     return { ok: true };
