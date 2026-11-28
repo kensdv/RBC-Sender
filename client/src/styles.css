@@ -666,6 +666,38 @@ code {
   box-shadow: 0 0 12px rgba(47,224,107,0.45); text-shadow: none;
 }
 .prov-chip-clear { border-style: dashed; color: var(--faint, var(--txt-dim)); }
+/* Compact sender picker: one dropdown instead of a wall of chips. */
+.account-picker {
+  border: 1px solid rgba(47,224,107,0.18);
+  border-radius: 6px;
+  background: rgba(0, 8, 0, 0.35);
+}
+.account-picker > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 11px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  color: var(--txt);
+}
+.account-picker > summary::-webkit-details-marker { display: none; }
+.account-picker > summary::after { content: '▾'; color: var(--txt-dim); flex: none; }
+.account-picker[open] > summary::after { content: '▴'; }
+.account-picker[open] > summary { border-bottom: 1px solid rgba(47,224,107,0.12); }
+.account-picker-body {
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px 11px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.account-picker-body .check-row { font-size: 12px; }
 .provider-chip {
   font: inherit; font-size: 12px; font-weight: 600; letter-spacing: .08em;
   padding: 4px 10px; cursor: pointer; transition: none;

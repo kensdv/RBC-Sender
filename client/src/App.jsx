@@ -1502,32 +1502,41 @@ export default function App() {
                             const poolRelevant = mode === 'smtp' || mode === 'graph';
                             const sendable = (state.smtpAccounts || []).filter((a) => a.enabled && (mode === 'smtp' || (a.authType || '').startsWith('ms_')));
                             if (!poolRelevant || !sendable.length) return null;
+                            const selected = draft.accounts || [];
+                            const labelFor = (a) => a.label || a.username || `#${a.id}`;
                             return (
-                            <>
-                              <label className="field-label" style={{ marginTop: 10 }}>SEND ACCOUNTS <span className="dim">(blank = all enabled {mode === 'graph' ? 'MS mailboxes' : 'senders'})</span></label>
-                              <div className="provider-chips">
+                            <details className="account-picker" style={{ marginTop: 10 }}>
+                              <summary>
+                                <span>SEND ACCOUNTS</span>
+                                <span className="dim">
+                                  {selected.length
+                                    ? `${selected.length} selected`
+                                    : `all enabled ${mode === 'graph' ? 'MS mailboxes' : 'senders'}`}
+                                </span>
+                              </summary>
+                              <div className="account-picker-body">
+                                <label className="check-row">
+                                  <input type="checkbox" checked={!selected.length} onChange={() => updateDraft('accounts', [])} />
+                                  <span>ALL ENABLED {mode === 'graph' ? 'MS MAILBOXES' : 'SENDERS'}</span>
+                                </label>
                                 {sendable.map((a) => (
-                                  <button
-                                    key={a.id}
-                                    type="button"
-                                    className={`prov-chip ${(draft.accounts || []).includes(a.id) ? 'prov-chip-on' : ''}`}
-                                    onClick={() => {
-                                      const cur = draft.accounts || [];
-                                      updateDraft('accounts', cur.includes(a.id) ? cur.filter((x) => x !== a.id) : [...cur, a.id]);
-                                    }}
-                                  >{a.label || a.username} <span className="prov-count">{a.authType === 'ms_rt' ? 'RT' : a.authType === 'ms_cc' ? 'CC' : 'SMTP'}</span></button>
+                                  <label className="check-row" key={a.id}>
+                                    <input type="checkbox" checked={selected.includes(a.id)} onChange={() => {
+                                      updateDraft('accounts', selected.includes(a.id) ? selected.filter((x) => x !== a.id) : [...selected, a.id]);
+                                    }} />
+                                    <span>{labelFor(a)} <span className="dim">· {a.authType === 'ms_rt' ? 'RT' : a.authType === 'ms_cc' ? 'CC' : 'SMTP'}</span></span>
+                                  </label>
                                 ))}
-                                <button
-                                  type="button"
-                                  className={`prov-chip ${draft.accountsRandom ? 'prov-chip-on' : ''}`}
-                                  title="Shuffle the send order instead of round-robin"
-                                  onClick={() => updateDraft('accountsRandom', !draft.accountsRandom)}
-                                >⚄ RANDOM</button>
-                                {(draft.accounts || []).length > 0 && (
-                                  <button type="button" className="prov-chip prov-chip-clear" onClick={() => updateDraft('accounts', [])}>ALL SENDERS</button>
-                                )}
+                                <label className="check-row" style={{ marginTop: 4 }}>
+                                  <input type="checkbox" checked={draft.accountsRandom === true} onChange={(e) => updateDraft('accountsRandom', e.target.checked)} />
+                                  <span>RANDOM ORDER</span>
+                                </label>
+                                <div className="btn-row" style={{ marginTop: 6 }}>
+                                  <button type="button" className="btn-xs" onClick={() => updateDraft('accounts', sendable.map((a) => a.id))}>SELECT ALL</button>
+                                  <button type="button" className="btn-xs" onClick={() => updateDraft('accounts', [])}>CLEAR</button>
+                                </div>
                               </div>
-                            </>
+                            </details>
                             );
                           })()}
                           <label className="field-label" style={{ marginTop: 10 }}>ENGAGEMENT TIERS <span className="dim">(blank = every tier)</span></label>
